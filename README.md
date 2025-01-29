@@ -1,5 +1,5 @@
-# Camouflage-Cloak
---Why DEFIC?--
+# CamouflageCloak
+**Why Camouflage Cloak**
 
 First step in the cyber kill chain & MITRE&CK
 
