@@ -58,7 +58,7 @@ Prepare **three hosts (or VMs)**:
 
 Ensure the **attacker foothold and protected serve**r communicate **through** the **Camouflage Cloak server**. Connect the protected server and attacker foothold to different NICs on the Camouflage Cloak server, then bridge the NICs.
 
-##**OS Deceiver Test**##
+##**OS Deceiver Test**
 **STEP1: Clone the repository on the Camouflage Cloak server**
 git clone https://github.com/jimskchang/Camouflage-Cloak.git
 
