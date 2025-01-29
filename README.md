@@ -1,11 +1,90 @@
 # CamouflageCloak
 ## **Why Camouflage Cloak**
 
-First step in the cyber kill chain & MITRE&CK
+The growing sophistication of cyberattacks challenges organizations relying on digital infrastructure, often outpacing traditional defenses. Attackers leverage reconnaissance tools to exploit vulnerabilities and craft targeted payloads. 
 
-Network reconnaissance stands the first stage of a cyber kill chain, where adversaries conduct host discovery, port scanning, and operating system detection in order to obtain critical information from remote hosts.
+**Camouflage Cloak** is a deception-based defense that counters active reconnaissance by creating a **“zero-vulnerability surface.”** It misleads attackers with deceptive intelligence and forged operating system responses, effectively hiding real system details.
 
-## **Why do we create Camouflage Cloak?**
+## **Why Did We Create Camouflage Cloak?**
 
-Our primary purpose is to install a defensive deception solution on the target network, transparently sniffing malicious and normal traffic and forging the real host responses. DEFIC can mimic a target system to scrub the real identity of systems behind it.
+From an attacker’s reconnaissance perspective, the **attack surface** consists of three key components:
+	1.	**Method** – Malicious reconnaissance
+	2.	**Channel** – TCP/IP
+	3.	**Data** – Network packets
+
+Minimizing the attack surface is crucial for reducing exploitable entry points and vulnerabilities. **Camouflage Cloak** installs a **defensive deception solution** on the target network, transparently sniffing both malicious and normal traffic while forging host responses.
+
+By mimicking a target system, Camouflage Cloak **obscures the true identity** of systems behind it, making reconnaissance efforts ineffective.
+ 
+
+## **Running Camouflage Cloak**
+**Installation**
+To get the latest version, clone the repository:
+
+git clone https://github.com/jimskchang/Camouflage-Cloak.git
+
+**Usage**
+After installing **NmapDeceiver**, use the following command format:
+
+python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <status>]
+
+**Command Parameters**
+	•	--host <IP> → Specifies the host IP to protect.
+	•	--nic <nic_name> → Specifies the network interface for packet transmission.
+	•	--scan <deceiver> → Selects the deception method:
+	  •	ts → OS Template Synthesis
+	  •	od → OS Deceiver
+	  •	hs → Port Deceiver
+	•	--status <status> → Defines the status (open or close) of ports to deceive (only used with --scan hs).
+
+**Example Usage**
+python3 main.py --host 192.168.1.2 --nic eth0 --scan hs --status open
+python3 main.py --host 192.168.1.2 --scan od --os win7
+
+## **Camouflage Cloak Commands**
+The --scan parameter supports the following deception methods:
+
+	•	pd → Port Deceiver
+	•	od → OS Deceiver
+	•	ts → Synthesize Deceptive OS Template
+
+## **Simple Test Setup**
+**Prerequisites**
+Prepare **three hosts (or VMs)**:
+	1.	**Attacker foothold** (with Nmap installed)
+	2.	**Protected server**
+	3.	**Camouflage Cloak server** (must have at least two NICs)
+
+Ensure the **attacker foothold and protected serve**r communicate **through** the **Camouflage Cloak server**. Connect the protected server and attacker foothold to different NICs on the Camouflage Cloak server, then bridge the NICs.
+
+##**OS Deceiver Test**##
+**STEP1: Clone the repository on the Camouflage Cloak server**
+git clone https://github.com/jimskchang/Camouflage-Cloak.git
+
+**STEP2: Navigate to the Camouflage Cloak folder and execute**
+
+python3 main.py --host <protected server's IP> --scan od --os <OS template e.g. win7/win10/centos>
+
+(Optional: Specify a network interface using --nic)
+
+**STEP3: Run Nmap OS detection from the attacker foothold and observe the result**
+
+nmap -O <protected server's IP>
+
+**STEP4: rerun Nmap OS detection to check the template is deployed properly**
+
+nmap -O <protected server's IP>
+
+##**Port deceiver test**##
+
+**STEP1: Navigate to the Camouflage Cloak folder and execute**
+
+python3 main.py --host <<protected_server_IP> --scan pd --port <deceptive_port_number> --status <open|close>
+
+**STEP2: Run Nmap port scanning from the attacker foothold and observe the result**
+
+nmap -sT <protected_server_IP>
+
+
+
 
