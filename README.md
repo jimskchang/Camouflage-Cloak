@@ -1,5 +1,5 @@
 # CamouflageCloak
-## **Why Camouflage Cloak**
+## **Why Camouflage Cloak?**
 
 The growing sophistication of cyberattacks challenges organizations relying on digital infrastructure, often outpacing traditional defenses. Attackers leverage reconnaissance tools to exploit vulnerabilities and craft targeted payloads. 
 
