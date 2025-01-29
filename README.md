@@ -60,6 +60,7 @@ Ensure the **attacker foothold and protected serve**r communicate **through** th
 
 ## **OS Deceiver Test**
 **STEP1: Clone the repository on the Camouflage Cloak server**
+
 git clone https://github.com/jimskchang/Camouflage-Cloak.git
 
 **STEP2: Navigate to the Camouflage Cloak folder and execute**
