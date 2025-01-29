@@ -46,6 +46,7 @@ python3 main.py --host 192.168.1.2 --nic eth0 --scan hs --status open
 
 python3 main.py --host 192.168.1.2 --scan od --os win7
 
+
 ## **Camouflage Cloak Methods**
 The --scan parameter supports the following deception methods:
 
