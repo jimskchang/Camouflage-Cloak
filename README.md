@@ -79,7 +79,7 @@ nmap -O <protected server's IP>
 
 nmap -O <protected server's IP>
 
-##**Port deceiver test**##
+##**Port Deceiver Test**
 
 **STEP1: Navigate to the Camouflage Cloak folder and execute**
 
