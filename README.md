@@ -48,11 +48,12 @@ python3 main.py --host 192.168.1.2 --scan od --os win7
 
 
 ## **Camouflage Cloak Methods**
-The --scan parameter supports the following deception methods:
+The --scan parameter supports the following deception methods:<br>
 
 •	***pd*** → Port Deceiver
 •	***od*** → OS Deceiver
 •	***ts*** → Synthesize Deceptive OS Template
+
 
 ## **Simple Test Setup**
 **Prerequisites**
