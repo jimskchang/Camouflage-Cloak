@@ -42,9 +42,9 @@ After installing **NmapDeceiver**, use the following command format:
 
 **Example Usage**
 
-python3 main.py --host 192.168.1.2 --nic eth0 --scan hs --status open
+	python3 main.py --host 192.168.1.2 --nic eth0 --scan hs --status open
 
-python3 main.py --host 192.168.1.2 --scan od --os win7
+	python3 main.py --host 192.168.1.2 --scan od --os win7
 
 
 ## **Camouflage Cloak Methods**
@@ -67,26 +67,26 @@ Ensure the **attacker foothold and protected serve**r communicate **through** th
 ## **OS Deceiver Test**
 ***STEP1: Clone the repository on the Camouflage Cloak server***
 
-git clone https://github.com/jimskchang/Camouflage-Cloak.git
+	git clone https://github.com/jimskchang/Camouflage-Cloak.git
 
 ***STEP2: Navigate to the Camouflage Cloak folder and execute***
 
-python3 main.py --host <protected server's IP> --scan od --os <OS template e.g. win7/win10/centos>
+	python3 main.py --host <protected server's IP> --scan od --os <OS template e.g. win7/win10/centos>
 
-(Optional: Specify a network interface using --nic)
+	(Optional: Specify a network interface using --nic)
 
 ***STEP3: Run Nmap OS detection from the attacker foothold and observe the result***
 
-nmap -O <protected server's IP>
+	nmap -O <protected server's IP>
 
 ## **Template Synthesis Test**
 ***STEP1: Navigate the Camouflage-Cloak folder and execute***
 
-python3 main.py --host <protected server's IP> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos>
+	python3 main.py --host <protected server's IP> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos>
 
 ***STEP2: Run Nmap OS detection on attacker foothold and observe the result***
 
-nmap -O <protected server's IP>
+	nmap -O <protected server's IP>
 
 ***STEP3: Move the Template***
 
@@ -97,18 +97,18 @@ This ensures the template is deployed correctly.
 
 ***STEP4: Rerun Nmap OS detection to check the template is deployed properly***
 
-nmap -O <protected server's IP>
+	nmap -O <protected server's IP>
 
 
 ## ***Port Deceiver Test***
 
 ***STEP1: Navigate to the Camouflage Cloak folder and execute***
 
-python3 main.py --host <<protected_server_IP> --scan pd --port <deceptive_port_number> --status <open|close>
+	python3 main.py --host <<protected_server_IP> --scan pd --port <deceptive_port_number> --status <open|close>
 
 ***STEP2: Run Nmap port scanning from the attacker foothold and observe the result***
 
-nmap -sT <protected_server_IP>
+	nmap -sT <protected_server_IP>
 
 
 
