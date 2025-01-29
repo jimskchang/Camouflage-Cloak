@@ -5,12 +5,13 @@ The growing sophistication of cyberattacks challenges organizations relying on d
 
 **Camouflage Cloak** is a deception-based defense that counters active reconnaissance by creating a **“zero-vulnerability surface.”** It misleads attackers with deceptive intelligence and forged operating system responses, effectively hiding real system details.
 
-## **Why Did We Create Camouflage Cloak?**
+## **Why Did We Create Camouflage Cloak?**  
 
-From an attacker’s reconnaissance perspective, the **attack surface** consists of three key components:
-	1.	**Method** – Malicious reconnaissance
-	2.	**Channel** – TCP/IP
-	3.	**Data** – Network packets
+From an attacker's reconnaissance perspective, the **attack surface** consists of three key components:  
+
+1. **Method** – Malicious reconnaissance  
+2. **Channel** – TCP/IP  
+3. **Data** – Network packets  
 
 Minimizing the attack surface is crucial for reducing exploitable entry points and vulnerabilities. **Camouflage Cloak** installs a **defensive deception solution** on the target network, transparently sniffing both malicious and normal traffic while forging host responses.
 
@@ -44,16 +45,16 @@ python3 main.py --host 192.168.1.2 --scan od --os win7
 ## **Camouflage Cloak Commands**
 The --scan parameter supports the following deception methods:
 
-	•	pd → Port Deceiver
-	•	od → OS Deceiver
-	•	ts → Synthesize Deceptive OS Template
+•	pd → Port Deceiver
+•	od → OS Deceiver
+•	ts → Synthesize Deceptive OS Template
 
 ## **Simple Test Setup**
 **Prerequisites**
 Prepare **three hosts (or VMs)**:
-	1.	**Attacker foothold** (with Nmap installed)
-	2.	**Protected server**
-	3.	**Camouflage Cloak server** (must have at least two NICs)
+1.	**Attacker foothold** (with Nmap installed)
+2.	**Protected server**
+3.	**Camouflage Cloak server** (must have at least two NICs)
 
 Ensure the **attacker foothold and protected serve**r communicate **through** the **Camouflage Cloak server**. Connect the protected server and attacker foothold to different NICs on the Camouflage Cloak server, then bridge the NICs.
 
