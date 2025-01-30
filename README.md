@@ -50,9 +50,9 @@ After installing **NmapDeceiver**, use the following command format:
 ## **Camouflage Cloak Methods**
 The --scan parameter supports the following deception methods:<br>
 
-	•	pd → Port Deceiver
-	•	od → OS Deceiver
-	•	ts → Synthesize Deceptive OS Template
+	-	pd → Port Deceiver
+	-	od → OS Deceiver
+	-	ts → Synthesize Deceptive OS Template
 
 
 ## **Simple Test Setup**
