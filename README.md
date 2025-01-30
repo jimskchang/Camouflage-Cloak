@@ -27,7 +27,7 @@ git clone https://github.com/jimskchang/Camouflage-Cloak.git
 **Usage**
 After installing **Camouflage Cloak Server** in the Linux server, use the following command format:
 
-python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <status>]
+	python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <status>]
 
 **Command Parameters**<br>
 
@@ -41,9 +41,9 @@ python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <
 
 **Example Usage**<br>
 
-python3 main.py --host 192.168.1.2 --nic eth0 --scan hs --status open
+	python3 main.py --host 192.168.1.2 --nic eth0 --scan hs --status open
 
-python3 main.py --host 192.168.1.2 --scan od --os win7
+	python3 main.py --host 192.168.1.2 --scan od --os win7
 
 
 ## **Camouflage Cloak Methods**
@@ -66,7 +66,7 @@ Ensure the **attacker foothold and protected serve**r communicate **through** th
 ## **OS Deceiver Test**
 ***STEP1: Clone the repository on the Camouflage Cloak server***
 
-	git clone https://github.com/jimskchang/Camouflage-Cloak.git
+git clone https://github.com/jimskchang/Camouflage-Cloak.git
 
 ***STEP2: Navigate to the Camouflage Cloak folder and execute***
 
