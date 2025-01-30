@@ -62,7 +62,8 @@ Ensure the **attacker foothold and protected server** communicate **through** th
 
 ***Create OS Synthesis Template***<br>
 ***STEP1: Navigate the Camouflage-Cloak folder and execute***<br>
-	python3 main.py --host <protected server's IP> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos>
+	
+ 	python3 main.py --host <protected server's IP> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos>
 
 ***STEP2: Run Nmap OS detection on attacker foothold and observe the result***<br>
 
