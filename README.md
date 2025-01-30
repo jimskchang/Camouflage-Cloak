@@ -78,6 +78,7 @@ Camouflage-Cloak creates the OS template in the current directory. To prevent ov
 
 	nmap -O <protected server's IP>
 
+
 ***OS Deceiver Test***
 ***STEP1: Clone the repository on the Camouflage Cloak server***
 
