@@ -13,7 +13,7 @@ From an attacker's reconnaissance perspective, the **attack surface** consists o
 2. **Channel** – TCP/IP  
 3. **Data** – Network packets  
 
-Minimizing the attack surface is crucial for reducing exploitable entry points and vulnerabilities. **Camouflage Cloak** installs a **defensive deception solution** on the target network, transparently sniffing both malicious and normal traffic while forging host responses.
+Minimizing the attack surface is crucial for reducing exploitable entry points and vulnerabilities. **Camouflage Cloak** implements a **defensive deception solution** on the target network, transparently sniffing both malicious and normal traffic while forging host responses.
 
 By mimicking a target system, Camouflage Cloak **obscures the true identity** of systems behind it, making reconnaissance efforts ineffective.
  
@@ -25,7 +25,7 @@ To get the latest version, clone the repository:
 git clone https://github.com/jimskchang/Camouflage-Cloak.git
 
 **Usage**
-After installing **Camouflage Cloak Server**, use the following command format:
+After installing **Camouflage Cloak Server** in the Linux server, use the following command format:
 
 python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <status>]
 
