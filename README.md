@@ -30,15 +30,15 @@ After installing **NmapDeceiver**, use the following command format:
 	python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <status>]
 
 **Command Parameters**<br>
- (- --host <IP> → Specifies the host IP to protect.<br>
- (- --nic <nic_name> → Specifies the network interface for packet transmission.<br>
- (- --scan <deceiver> → Selects the deception method:
+ - --host <IP> → Specifies the host IP to protect.<br>
+ - --nic <nic_name> → Specifies the network interface for packet transmission.<br>
+ - --scan <deceiver> → Selects the deception method:
 
 	  •	ts → OS Template Synthesis
 	  •	od → OS Deceiver
 	  •	hs → Port Deceiver
    
- (- --status <status> → Defines the status (open or close) of ports to deceive (only used with --scan hs).<br>
+ - --status <status> → Defines the status (open or close) of ports to deceive (only used with --scan hs).<br>
 
 **Example Usage**
 
