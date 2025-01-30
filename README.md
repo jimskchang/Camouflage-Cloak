@@ -35,8 +35,8 @@ After installing **Camouflage Cloak Server** in the Linux server, use the follow
 - --scan <deceiver>    	 Selects the deception method:<br>
 			 ts → OS Template Synthesis<br>
 			 od → OS Deceiver<br>
-  			 hs → Port Deceiver<br>
-- --status <status>    	 → Defines the status (open or close) of ports to deceive (only used with --scan hs).
+  			 pd → Port Deceiver<br>
+- --status <status>    	 → Defines the status (open or close) of ports to deceive (only used with --scan ts).
 
 **Example Usage**<br>
 
@@ -47,10 +47,9 @@ After installing **Camouflage Cloak Server** in the Linux server, use the follow
 
 ## **Methods**
 About --scan command, you can use ***pd***, ***od***, ***ts*** three key words after  --scan command to perform different camouflage methods.<br>
-
-	-	pd → Port Deceiver
-	-	od → OS Deceiver
-	-	ts → Synthesize Deceptive OS Template
+- **pd** : Port Deceiver
+- **od** : OS Deceiver
+- **ts** : Synthesize Deceptive OS Template
 
 
 ## **Test Environment Setup**
@@ -61,7 +60,7 @@ Prepare **three types of host (or VMs)**:
 
 Ensure the **attacker foothold and protected server** communicate **through** the **Camouflage Cloak server**. Connect the protected server and attacker foothold to different NICs on the Camouflage Cloak server, then bridge the NICs.
 
-***Create OS Synthesis Template***
+***Create OS Synthesis Template***<br>
 ***STEP1: Navigate the Camouflage-Cloak folder and execute***
 
 	python3 main.py --host <protected server's IP> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos>
