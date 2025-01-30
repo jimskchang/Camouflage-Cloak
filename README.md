@@ -25,7 +25,7 @@ To get the latest version, clone the repository:
 git clone https://github.com/jimskchang/Camouflage-Cloak.git
 
 **Usage**
-After installing **NmapDeceiver**, use the following command format:
+After installing **Camouflage Cloak Server**, use the following command format:
 
 python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <status>]
 
