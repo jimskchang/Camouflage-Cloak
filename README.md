@@ -33,9 +33,9 @@ python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <
 - --host <IP>          	 Specifies the host IP to protect.
 - --nic <nic_name>     	 Specifies the network interface for packet transmission.
 - --scan <deceiver>    	 Selects the deception method:<br>
-			- ts → OS Template Synthesis<br>
-			- od → OS Deceiver<br>
-  			- hs → Port Deceiver<br>
+			 ts → OS Template Synthesis<br>
+			 od → OS Deceiver<br>
+  			 hs → Port Deceiver<br>
 - --status <status>    	 Defines the status (open or close) of ports to deceive (only used with --scan hs).
 
 **Example Usage**
