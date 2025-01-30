@@ -34,9 +34,9 @@ After installing **NmapDeceiver**, use the following command format:
  - --nic <nic_name> → Specifies the network interface for packet transmission.<br>
  - --scan <deceiver> → Selects the deception method:
 
-	  •	ts → OS Template Synthesis
-	  •	od → OS Deceiver
-	  •	hs → Port Deceiver
+	  -	ts → OS Template Synthesis
+	  -	od → OS Deceiver
+	  -	hs → Port Deceiver
    
  - --status <status> → Defines the status (open or close) of ports to deceive (only used with --scan hs).<br>
 
