@@ -61,18 +61,18 @@ Prepare **three types of host (or VMs)**:
 Ensure the **attacker foothold and protected server** communicate **through** the **Camouflage Cloak server**. Connect the protected server and attacker foothold to different NICs on the Camouflage Cloak server, then bridge the NICs.
 
 ***Create OS Synthesis Template***<br>
-***STEP1: Navigate the Camouflage-Cloak folder and execute***
+***STEP1: Navigate the Camouflage-Cloak folder and execute***<br>
 	python3 main.py --host <protected server's IP> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos>
 
-***STEP2: Run Nmap OS detection on attacker foothold and observe the result***
+***STEP2: Run Nmap OS detection on attacker foothold and observe the result***<br>
 
 	nmap -O <protected server's IP>
 
-***STEP3: Move to the OS template***
+***STEP3: Move to the OS template***<br>
 
 Camouflage-Cloak creates the OS template in the current directory. To prevent overwriting and ensure proper deployment, move it to /os_record/<OS_template_name>.
 
-***STEP4: Rerun Nmap OS detection to check the template is deployed properly***
+***STEP4: Rerun Nmap OS detection to check the template is deployed properly***<br>
 
 	nmap -O <protected server's IP>
 
