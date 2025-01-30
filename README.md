@@ -39,8 +39,10 @@ python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <
   			 hs → Port Deceiver<br>
 - --status <status>    	 → Defines the status (open or close) of ports to deceive (only used with --scan hs).
 
-**Example Usage**
+**Example Usage**<br>
+
 python3 main.py --host 192.168.1.2 --nic eth0 --scan hs --status open
+
 python3 main.py --host 192.168.1.2 --scan od --os win7
 
 
