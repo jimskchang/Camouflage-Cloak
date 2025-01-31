@@ -25,42 +25,49 @@ def main():
     
     # Assign settings
     settings.host = args.host
-    if args.nic:
-        settings.NIC = args.nic
+    settings.NIC = args.nic if args.nic else "eth0"  # Default to eth0 if not specified
 
     # Validate Required Arguments
     if not args.scan:
-        logging.error("Error: No scan technique is designated. Use --scan <technique>.")
-        parser.print_help()
-        return
+        logging.error("Error: No scan technique designated. Use --scan <technique>.")
+        scan_input = input("Enter scan technique (ts, od, rr, pd): ").strip()
+        if scan_input in ["ts", "od", "rr", "pd"]:
+            args.scan = scan_input
+        else:
+            logging.error("Invalid input. Exiting.")
+            return
 
     logging.info(f"Starting deception with technique: {args.scan}")
 
-    # Handle OS Deception Techniques
-    if args.scan in ["ts", "od", "rr"]:
-        if not args.os:
-            logging.error("Error: OS deception requires --os argument.")
-            return
+    try:
+        # Handle OS Deception Techniques
+        if args.scan in ["ts", "od", "rr"]:
+            if not args.os:
+                logging.error("Error: OS deception requires --os argument.")
+                return
 
-        deceiver = OsDeceiver(args.host, args.os)
+            deceiver = OsDeceiver(args.host, args.os)
 
-        if args.scan == "ts":
-            deceiver.os_record()
-        elif args.scan == "od":
-            deceiver.os_deceive()
-        elif args.scan == "rr":
-            deceiver.store_rsp()
+            if args.scan == "ts":
+                deceiver.os_record()
+            elif args.scan == "od":
+                deceiver.os_deceive()
+            elif args.scan == "rr":
+                deceiver.store_rsp()
 
-    # Handle Port Deception
-    elif args.scan == "pd":
-        if not args.status:
-            logging.error("Error: Port deception requires --status (open/close).")
-            return
+        # Handle Port Deception
+        elif args.scan == "pd":
+            if not args.status:
+                logging.error("Error: Port deception requires --status (open/close).")
+                return
 
-        deceiver = PortDeceiver(args.host)
-        deceiver.deceive_ps_hs(args.status)
+            deceiver = PortDeceiver(args.host)
+            deceiver.deceive_ps_hs(args.status)
 
-    logging.info("Deception process completed successfully.")
+        logging.info("Deception process completed successfully.")
+
+    except Exception as e:
+        logging.error(f"Error during execution: {e}")
 
 if __name__ == "__main__":
     main()
