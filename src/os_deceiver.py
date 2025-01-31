@@ -49,6 +49,23 @@ class OsDeceiver:
             except Exception as e:
                 logging.error(f"Error recording packet: {e}")
 
+    def extract_headers(self, packet):
+        """Extracts Ethernet and IP headers."""
+        try:
+            eth_header = packet[:settings.ETH_HEADER_LEN]
+            eth = struct.unpack("!6s6sH", eth_header)
+            eth_protocol = socket.ntohs(eth[2])
+
+            if eth_protocol == ETH_TYPE_IP:
+                ip_header = packet[settings.ETH_HEADER_LEN:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+                unpacked = struct.unpack("!BBHHHBBH4s4s", ip_header)
+                return eth_protocol, unpacked[8], unpacked[9], unpacked[6]
+
+            return eth_protocol, None, None, None
+        except struct.error as e:
+            logging.error(f"Failed to extract headers: {e}")
+            return None, None, None, None
+
     def save_packet_records(self, records):
         """Saves recorded packets to a predefined folder."""
         record_dir = os.path.join(settings.RECORDS_FOLDER, self.os_type)
@@ -63,33 +80,6 @@ class OsDeceiver:
                     logging.info(f"Saved {pkt_type} records to {filename}.")
                 except Exception as e:
                     logging.error(f"Failed to save {pkt_type} records: {e}")
-
-    def gen_tcp_key(self, packet):
-        """Generates a TCP key for identification."""
-        tcp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                            settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN]
-        src_port, dest_port = struct.unpack("!HH", tcp_header[:4])
-        return f"{src_port}-{dest_port}", packet
-
-    def gen_icmp_key(self, packet):
-        """Generates an ICMP key for identification."""
-        icmp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                             settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + 4]
-        icmp_type, code = struct.unpack("!BB", icmp_header[:2])
-        return f"{icmp_type}-{code}", packet
-
-    def gen_udp_key(self, packet):
-        """Generates a UDP key for identification."""
-        udp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                            settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + 8]
-        src_port, dest_port = struct.unpack("!HH", udp_header[:4])
-        return f"{src_port}-{dest_port}", packet
-
-    def gen_arp_key(self, packet):
-        """Generates an ARP key for identification."""
-        arp_header = packet[settings.ETH_HEADER_LEN:settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
-        sender_ip, target_ip = struct.unpack("!4s4s", arp_header[14:22])
-        return f"{socket.inet_ntoa(sender_ip)}-{socket.inet_ntoa(target_ip)}", packet
 
     def os_deceive(self):
         """Deceives OS fingerprinting attempts."""
