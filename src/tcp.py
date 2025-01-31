@@ -4,6 +4,7 @@ import struct
 import array
 import time
 import src.settings as settings
+from src.utils import calculate_checksum  # Import calculate_checksum once
 
 
 class TcpConnect:
@@ -48,6 +49,15 @@ class TcpConnect:
         return tcp_header[:16] + struct.pack('H', checksum) + tcp_header[18:]
 
 
+def getTCPChecksum(src_ip, dest_ip, tcp_header):
+    """
+    Computes the TCP checksum.
+    """
+    pseudo_header = struct.pack('!4s4sBBH', src_ip, dest_ip, 0, socket.IPPROTO_TCP, len(tcp_header))
+    checksum = calculate_checksum(pseudo_header + tcp_header)
+    return struct.pack('H', checksum)
+
+
 def build_tcp_header_with_options(tcp_len, seq, ack_num, src_port, dest_port, src_IP, dest_IP, flags, window, options):
     """
     Builds a TCP header with optional TCP options.
@@ -61,20 +71,6 @@ def build_tcp_header_with_options(tcp_len, seq, ack_num, src_port, dest_port, sr
     checksum = calculate_checksum(pseudo_hdr + tcp_header_with_options)
 
     return tcp_header_with_options[:16] + struct.pack('H', checksum) + tcp_header_with_options[18:]
-
-
-def calculate_checksum(data):
-    """
-    Computes the checksum of a given data packet (IP or TCP).
-    """
-    if len(data) % 2 != 0:
-        data += b'\0'
-
-    res = sum(array.array("H", data))
-    res = (res >> 16) + (res & 0xffff)
-    res += res >> 16
-
-    return (~res) & 0xffff
 
 
 def unpack_tcp_option(tcp_option):
