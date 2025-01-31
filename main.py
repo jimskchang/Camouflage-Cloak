@@ -25,7 +25,7 @@ def main():
     
     # Assign settings
     settings.host = args.host
-    settings.NIC = args.nic if args.nic else "eth0"  # Default to eth0 if not specified
+    settings.NIC = args.nic if args.nic else "vmxnet"  # Default to eth0 if not specified
 
     # Validate Required Arguments
     if not args.scan:
