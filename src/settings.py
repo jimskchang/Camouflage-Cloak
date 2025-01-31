@@ -23,10 +23,10 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 # =============================================
 # 📌 Network Interface & Host Configuration
 # =============================================
-HOST = '10.1.100.233'  # Target Host IP
+HOST = '192.168.23.201'  # Target Host IP
 
 # Network Interface (Change based on your setup)
-NIC = 'enp3s0'
+NIC = 'ens192'
 NIC_ADDR_PATH = f'/sys/class/net/{NIC}/address'  # Path to retrieve MAC address
 
 # Packet Recording
