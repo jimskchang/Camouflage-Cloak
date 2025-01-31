@@ -3,8 +3,8 @@ import binascii
 import struct
 import array
 import time
-import src.settings as settings
-from src.utils import calculate_checksum  # Import calculate_checksum once
+import src.settings as settings  # Ensure src/settings.py exists
+from src.utils import calculate_checksum  # Ensure src/utils.py exists
 
 
 class TcpConnect:
@@ -43,7 +43,7 @@ class TcpConnect:
 
         # Calculate TCP checksum
         pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(tcp_header))
-        checksum = calculate_checksum(pseudo_hdr + tcp_header)
+        checksum = calculate_checksum(pseudo_hdr + tcp_header) & 0xFFFF  # Ensure 16-bit value
 
         # Insert checksum into TCP header
         return tcp_header[:16] + struct.pack('H', checksum) + tcp_header[18:]
@@ -54,7 +54,15 @@ def getTCPChecksum(src_ip, dest_ip, tcp_header):
     Computes the TCP checksum.
     """
     pseudo_header = struct.pack('!4s4sBBH', src_ip, dest_ip, 0, socket.IPPROTO_TCP, len(tcp_header))
-    checksum = calculate_checksum(pseudo_header + tcp_header)
+    checksum = calculate_checksum(pseudo_header + tcp_header) & 0xFFFF  # Ensure 16-bit value
+    return struct.pack('H', checksum)
+
+
+def getIPChecksum(ip_header):
+    """
+    Computes the checksum for an IP header.
+    """
+    checksum = calculate_checksum(ip_header) & 0xFFFF  # Ensure 16-bit value
     return struct.pack('H', checksum)
 
 
@@ -68,71 +76,9 @@ def build_tcp_header_with_options(tcp_len, seq, ack_num, src_port, dest_port, sr
 
     # Calculate checksum
     pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(tcp_header_with_options))
-    checksum = calculate_checksum(pseudo_hdr + tcp_header_with_options)
+    checksum = calculate_checksum(pseudo_hdr + tcp_header_with_options) & 0xFFFF  # Ensure 16-bit value
 
     return tcp_header_with_options[:16] + struct.pack('H', checksum) + tcp_header_with_options[18:]
-
-
-def unpack_tcp_option(tcp_option):
-    """
-    Unpacks TCP options from a given TCP packet.
-    """
-    start_ptr = 0
-    kind_seq = []
-    option_val = {
-        'padding': [],
-        'mss': None,
-        'shift_count': None,
-        'sack_permitted': None,
-        'ts_val': None,
-        'ts_echo_reply': None
-    }
-
-    while start_ptr < len(tcp_option):
-        kind, = struct.unpack('!B', tcp_option[start_ptr:start_ptr + 1])
-        start_ptr += 1
-
-        if kind == 1:  # No-Operation (NOP)
-            option_val['padding'].append(kind)
-            kind_seq.append(kind)
-        elif kind in {2, 3, 4, 8}:  # Options requiring additional data
-            length, = struct.unpack('!B', tcp_option[start_ptr:start_ptr + 1])
-            start_ptr += 1
-            if kind == 2:
-                option_val['mss'], = struct.unpack('!H', tcp_option[start_ptr:start_ptr + length - 2])
-            elif kind == 3:
-                option_val['shift_count'], = struct.unpack('!B', tcp_option[start_ptr:start_ptr + length - 2])
-            elif kind == 4:
-                option_val['sack_permitted'] = True
-            elif kind == 8:
-                option_val['ts_val'], option_val['ts_echo_reply'] = struct.unpack('!LL', tcp_option[
-                                                                                     start_ptr:start_ptr + length - 2])
-            start_ptr += length - 2
-            kind_seq.append(kind)
-
-    return option_val, kind_seq
-
-
-def pack_tcp_option(option_val, kind_seq):
-    """
-    Packs TCP options into a byte string.
-    """
-    reply_tcp_option = b''
-
-    for kind in kind_seq:
-        if kind == 2:  # MSS
-            reply_tcp_option += struct.pack('!BBH', 2, 4, option_val['mss'])
-        elif kind == 3:  # Window Scale
-            reply_tcp_option += struct.pack('!BBB', 3, 3, option_val['shift_count'])
-        elif kind == 4:  # SACK Permitted
-            reply_tcp_option += struct.pack('!BB', 4, 2)
-        elif kind == 8:  # Timestamps
-            ts_val = int(time.time())
-            reply_tcp_option += struct.pack('!BBLL', 8, 10, ts_val, option_val['ts_echo_reply'])
-        elif kind == 1:  # No-Operation (NOP)
-            reply_tcp_option += struct.pack('!B', 1)
-
-    return reply_tcp_option
 
 
 def mac_to_str(mac_byte):
