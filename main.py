@@ -27,8 +27,8 @@ def main():
     parser.add_argument("--nic", help="Specify network interface for packet capture")
     parser.add_argument("--scan", choices=["ts", "od", "rr", "pd"], help="Specify deception technique")
     parser.add_argument("--status", choices=["open", "close"], help="Set port status (only for pd)")
-    parser.add_argument("--os", required=True, help="Specify OS to deceive")  # Now it's required
-    parser.add_argument("--output-dir", default="/os_record", help="Base directory to save OS records")
+    parser.add_argument("--os", required=True, help="Specify OS to deceive")  # Required OS argument
+    parser.add_argument("--output-dir", default=settings.RECORDS_FOLDER, help="Base directory to save OS records")
     
     args, unknown = parser.parse_known_args()
     print(f"Parsed arguments: {args}")  # Debugging line
@@ -38,10 +38,10 @@ def main():
     settings.host = args.host
     settings.NIC = args.nic if args.nic else "ens192"  # Default to ens192 if not specified
 
-    # Create the base output directory if it does not exist
-    if not os.path.exists(args.output_dir):
-        os.makedirs(args.output_dir)
-        logging.info(f"Created base output directory: {args.output_dir}")
+    # Ensure the OS recording directory exists
+    if not os.path.exists(settings.RECORDS_FOLDER):
+        os.makedirs(settings.RECORDS_FOLDER)
+        logging.info(f"Verified OS recording directory: {settings.RECORDS_FOLDER}")
 
     # Validate Required Arguments
     if not args.scan:
@@ -58,7 +58,7 @@ def main():
     try:
         # Handle OS Deception Techniques
         if args.scan in ["ts", "od", "rr"]:
-            deceiver = OsDeceiver(args.host, args.os)  # Fixed argument count
+            deceiver = OsDeceiver(args.host, args.os, settings.RECORDS_FOLDER)  # Use fixed path
 
             if args.scan == "ts":
                 deceiver.os_record()
