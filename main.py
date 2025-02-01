@@ -1,13 +1,21 @@
 import logging
 import argparse
+import os  # Importing the os module
 import src.settings as settings
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
 
 # Configure Logging
+log_dir = "logs"
+if not os.path.exists(log_dir):
+    os.makedirs(log_dir)
+    logging.info(f"Created log directory: {log_dir}")
+
+log_file_path = os.path.join(log_dir, 'deception.log')
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s]: %(message)s",
     datefmt="%y-%m-%d %H:%M",
+    filename=log_file_path,
     level=logging.INFO,
 )
 
@@ -19,13 +27,25 @@ def main():
     parser.add_argument("--nic", help="Specify network interface for packet capture")
     parser.add_argument("--scan", choices=["ts", "od", "rr", "pd"], help="Specify deception technique")
     parser.add_argument("--status", choices=["open", "close"], help="Set port status (only for pd)")
-    parser.add_argument("--os", help="Specify OS to deceive")
+    parser.add_argument("--os", required=True, help="Specify OS to deceive")  # Now it's required
+    parser.add_argument("--output-dir", default="/os_record", help="Base directory to save OS records")
 
     args = parser.parse_args()
-    
+
     # Assign settings
     settings.host = args.host
-    settings.NIC = args.nic if args.nic else "vmxnet"  # Default to eth0 if not specified
+    settings.NIC = args.nic if args.nic else "vmxnet"  # Default to vmxnet if not specified
+
+    # Create the base output directory if it does not exist
+    if not os.path.exists(args.output_dir):
+        os.makedirs(args.output_dir)
+        logging.info(f"Created base output directory: {args.output_dir}")
+
+    # Create the OS-specific output directory
+    os_output_dir = os.path.join(args.output_dir, args.os)
+    if not os.path.exists(os_output_dir):
+        os.makedirs(os_output_dir)
+        logging.info(f"Created OS-specific output directory: {os_output_dir}")
 
     # Validate Required Arguments
     if not args.scan:
@@ -42,14 +62,10 @@ def main():
     try:
         # Handle OS Deception Techniques
         if args.scan in ["ts", "od", "rr"]:
-            if not args.os:
-                logging.error("Error: OS deception requires --os argument.")
-                return
-
-            deceiver = OsDeceiver(args.host, args.os)
+            deceiver = OsDeceiver(args.host, args.os, os_output_dir)  # Use the OS-specific output dir
 
             if args.scan == "ts":
-                deceiver.os_record()
+                deceiver.os_record()  # This will now save results in the specified OS-specific output directory
             elif args.scan == "od":
                 deceiver.os_deceive()
             elif args.scan == "rr":
