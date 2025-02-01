@@ -23,7 +23,7 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 # =============================================
 # 📌 Network Interface & Host Configuration
 # =============================================
-HOST = '192.168.23.201'  # Target Host IP
+HOST = '192.168.23.200'  # Target Host IP
 
 # Network Interface (Change based on your setup)
 NIC = 'ens192'
@@ -32,7 +32,10 @@ NIC_ADDR_PATH = f'/sys/class/net/{NIC}/address'  # Path to retrieve MAC address
 # =============================================
 # 📌 Packet Recording Configuration
 # =============================================
-RECORDS_FOLDER = Path("/os_record/win10")  # Define a folder for packet recordings
+# Define the base directory for recording packet logs
+RECORDS_FOLDER = Path("/os_record/win10")
+RECORDS_FOLDER.mkdir(parents=True, exist_ok=True)  # Ensure the folder exists
+
 
 # Ensure the directory exists
 RECORDS_FOLDER.mkdir(parents=True, exist_ok=True)
