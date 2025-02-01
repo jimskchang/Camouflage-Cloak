@@ -34,18 +34,12 @@ def main():
 
     # Assign settings
     settings.host = args.host
-    settings.NIC = args.nic if args.nic else "ens192"  # Default to vmxnet if not specified
+    settings.NIC = args.nic if args.nic else "ens192"  # Default to ens192 if not specified
 
     # Create the base output directory if it does not exist
     if not os.path.exists(args.output_dir):
         os.makedirs(args.output_dir)
         logging.info(f"Created base output directory: {args.output_dir}")
-
-    # Create the OS-specific output directory
-    os_output_dir = os.path.join(args.output_dir, args.os)
-    if not os.path.exists(os_output_dir):
-        os.makedirs(os_output_dir)
-        logging.info(f"Created OS-specific output directory: {os_output_dir}")
 
     # Validate Required Arguments
     if not args.scan:
@@ -62,10 +56,10 @@ def main():
     try:
         # Handle OS Deception Techniques
         if args.scan in ["ts", "od", "rr"]:
-            deceiver = OsDeceiver(args.host, args.os, os_output_dir)  # Use the OS-specific output dir
+            deceiver = OsDeceiver(args.host, args.os)  # Fixed argument count
 
             if args.scan == "ts":
-                deceiver.os_record()  # This will now save results in the specified OS-specific output directory
+                deceiver.os_record()
             elif args.scan == "od":
                 deceiver.os_deceive()
             elif args.scan == "rr":
