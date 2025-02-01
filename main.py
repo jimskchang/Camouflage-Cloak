@@ -21,7 +21,7 @@ logging.basicConfig(
 
 def main():
     # Argument Parser
-    parser = argparse.ArgumentParser(description="Camouflage Cloak - Deceiver Module")
+    parser = argparse.ArgumentParser(description="CamouflageCloak - Deceiver Module")
     parser.add_argument("--host", required=True, help="Specify destination IP (required)")
     parser.add_argument("--port", type=int, help="Specify destination port")
     parser.add_argument("--nic", help="Specify network interface for packet capture")
@@ -58,7 +58,7 @@ def main():
     try:
         # Handle OS Deception Techniques
         if args.scan in ["ts", "od", "rr"]:
-            deceiver = OsDeceiver(args.host, args.os, settings.RECORDS_FOLDER)  # Use fixed path
+            deceiver = OsDeceiver(args.host, args.os)  # Fixed argument count
 
             if args.scan == "ts":
                 deceiver.os_record()
