@@ -29,8 +29,11 @@ def main():
     parser.add_argument("--status", choices=["open", "close"], help="Set port status (only for pd)")
     parser.add_argument("--os", required=True, help="Specify OS to deceive")  # Now it's required
     parser.add_argument("--output-dir", default="/os_record", help="Base directory to save OS records")
+    
 
     args = parser.parse_args()
+    print(f"Parsed arguments: {args}")  # Debugging line
+    print(f"Unknown arguments: {unknown}")  # Shows unrecognized inputs
 
     # Assign settings
     settings.host = args.host
