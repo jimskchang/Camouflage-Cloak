@@ -32,7 +32,7 @@ NIC_ADDR_PATH = f'/sys/class/net/{NIC}/address'  # Path to retrieve MAC address
 # =============================================
 # 📌 Packet Recording Configuration
 # =============================================
-RECORDS_FOLDER = Path("/os_record")  # Define a folder for packet recordings
+RECORDS_FOLDER = Path("/os_record/win10")  # Define a folder for packet recordings
 
 # Ensure the directory exists
 RECORDS_FOLDER.mkdir(parents=True, exist_ok=True)
