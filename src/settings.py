@@ -29,8 +29,16 @@ HOST = '192.168.23.201'  # Target Host IP
 NIC = 'ens192'
 NIC_ADDR_PATH = f'/sys/class/net/{NIC}/address'  # Path to retrieve MAC address
 
-# Packet Recording
-RECORD_PATH = Path("pkt_record.txt")  # Use Pathlib for better file handling
+# =============================================
+# 📌 Packet Recording Configuration
+# =============================================
+RECORDS_FOLDER = Path("os_record")  # Define a folder for packet recordings
+
+# Ensure the directory exists
+RECORDS_FOLDER.mkdir(parents=True, exist_ok=True)
+
+# Packet Record File
+RECORD_PATH = RECORDS_FOLDER / "pkt_record.txt"
 
 # MAC Address (Use dynamic retrieval instead of hardcoded value)
 try:
@@ -40,3 +48,4 @@ except FileNotFoundError:
     MAC_ADDRESS = b'\x00\x50\x56\xb0\x10\xe9'  # Default MAC Address (Fallback)
 except ValueError:
     MAC_ADDRESS = b'\x00\x00\x00\x00\x00\x00'  # Invalid MAC, use null
+
