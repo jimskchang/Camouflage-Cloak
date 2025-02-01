@@ -34,7 +34,7 @@ def main():
 
     # Assign settings
     settings.host = args.host
-    settings.NIC = args.nic if args.nic else "vmxnet"  # Default to vmxnet if not specified
+    settings.NIC = args.nic if args.nic else "ens192"  # Default to vmxnet if not specified
 
     # Create the base output directory if it does not exist
     if not os.path.exists(args.output_dir):
