@@ -61,7 +61,7 @@ Prepare **three types of host (or VMs)**:
 Ensure the **attacker foothold and protected server** communicate **through** the **Camouflage Cloak server**. Connect the protected server and attacker foothold to different NICs on the Camouflage Cloak server, then bridge the NICs.
 
 ***Create OS Synthesis Template***<br>
-***STEP1: Navigate the setting.py and input the Host = 'Protected Host IP Address', and NIC='Protected Host NIC Card Name'
+***STEP1: Navigate the setting.py and input the Host = 'Protected Host IP Address', and NIC='Protected Host NIC Card Name', add the OS folder under /os_record/'win10, or win 7 or Linux'
 
 Navigate the Camouflage-Cloak folder and execute***<br>
 	
