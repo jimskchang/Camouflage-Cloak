@@ -16,7 +16,6 @@ Set the correct **IP addresses, NICs, and MACs** based on your environment.
 
 Example:
 
-```python
 # REQUIRED: Cloak Host NIC (To be modified)
 CLOAK_NIC = "ens192"
 
