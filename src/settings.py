@@ -37,10 +37,10 @@ This script contains configurations for the Camouflage Cloak system, including:
    TS_SERVER_OS = "win10"
 
    # REQUIRED: Cloak Host MAC (To be modified)
-   CLOAK_MAC = "00:50:56:b0:10:e9"
+   CLOAK_MAC = "00:50:56:8E:35:6F"
 
    # REQUIRED: TS Server MAC (To be modified)
-   TS_SERVER_MAC = "00:AA:BB:CC:DD:EE"
+   TS_SERVER_MAC = "00:50:56:8E:4B:2B"
 
    # REQUIRED: Target Host MAC (To be modified)
-   TARGET_MAC = "00:11:22:33:44:55"
+   TARGET_MAC = "00:50:56:8E:4D:0F"
