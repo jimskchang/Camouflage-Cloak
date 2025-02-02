@@ -25,8 +25,8 @@ class OsDeceiver:
         """Records OS-specific network responses for deception"""
         if not output_path:
             output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os}_record.txt")
-        
-        logging.info(f"📄 Recording OS packets to {output_path}")
+
+        logging.info(f"Recording OS packets to {output_path}")
 
         pkt_dict = {}
         port_pair_seq = []
@@ -64,7 +64,7 @@ class OsDeceiver:
                         pkt_index = port_pair_seq.index((dest_port, src_port))
                         key = key_seq[pkt_index]
                         if pkt_dict[key] is None:
-                            logging.info(f"Adding response packet to record.")
+                            logging.info("Adding response packet to record.")
                             pkt_dict[key] = packet
 
                     # Save to file
@@ -76,7 +76,7 @@ class OsDeceiver:
         if not output_path:
             output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, "rsp_record.txt")
 
-        logging.info(f"📄 Storing responses to {output_path}")
+        logging.info(f"Storing responses to {output_path}")
 
         rsp = {}
         while True:
@@ -105,7 +105,7 @@ class OsDeceiver:
         if not output_path:
             output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os}_deception_log.txt")
 
-        logging.info(f"⚠️ Starting OS deception for {self.os}")
+        logging.info(f"Starting OS deception for {self.os}")
 
         dec_count = 0
         template_dict = {
@@ -114,7 +114,7 @@ class OsDeceiver:
             'udp': self.load_file('udp'),
             'icmp': self.load_file('icmp')
         }
-        logging.info(f"✅ {self.os} template loaded.")
+        logging.info(f"{self.os} template loaded.")
 
         while True:
             raw_pkt, _ = self.conn.sock.recvfrom(65565)
@@ -136,7 +136,7 @@ class OsDeceiver:
     def load_file(self, pkt_type: str):
         """Loads stored OS record files"""
         output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os}_{pkt_type}_record.txt")
-        logging.info(f"📂 Loading {output_path}")
+        logging.info(f"Loading {output_path}")
 
         try:
             with open(output_path, 'r') as file:
