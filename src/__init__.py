@@ -16,7 +16,13 @@ logging.basicConfig(
 )
 
 # Import key modules for global access
-from . import settings
+try:
+    from . import settings  # Ensure settings.py exists in the same package
+except ImportError as e:
+    logging.error(f"Failed to import settings: {e}")
+    raise
+
+# Import other key modules
 from .Packet import Packet
 from .tcp import TcpConnect
 from .os_deceiver import OsDeceiver
