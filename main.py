@@ -5,11 +5,13 @@ import src.settings as settings
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
 
+
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
     datefmt='%y-%m-%d %H:%M',
     level=logging.INFO
 )
+
 
 def main():
     parser = argparse.ArgumentParser(description='Deceiver Demo')
@@ -19,65 +21,61 @@ def main():
     parser.add_argument('--scan', action="store", help="Attacker's port scanning technique")
     parser.add_argument('--status', action="store", help='Designate port status')
     parser.add_argument('--os', action="store", help='Designate OS we want to deceive')
-    parser.add_argument('--output-dir', action="store", help='Directory where we store the record')
-    parser.add_argument('--dest', action="store", help='Filename to store the record')
+    parser.add_argument('--output-dir', action="store", help='Specify output directory for storing records')
 
     args = parser.parse_args()
 
     # Ensure a host is provided
-    settings.TARGET_HOST = args.host or settings.TARGET_HOST
+    if not args.host:
+        logging.error("ERROR: --host is required for --scan ts")
+        return
 
-    # Ensure NIC is provided
+    # Ensure an output directory is provided for --scan ts
+    if args.scan == "ts" and not args.output_dir:
+        logging.error("ERROR: --output-dir is required for --scan ts")
+        return
+
+    # Assign settings values
+    settings.TARGET_HOST = args.host
     if args.nic:
         settings.CLOAK_NIC = args.nic
 
     # Default to settings.TS_SERVER_OS if --os is not provided
     args.os = args.os or settings.TS_SERVER_OS
 
-    # Ensure --output-dir is set, otherwise default to settings.TS_OS_OUTPUT_DIR
+    # Ensure output directory exists
     if args.output_dir:
-        output_dir = args.output_dir
-    else:
-        logging.warning("No --output-dir provided, using default: %s", settings.TS_OS_OUTPUT_DIR)
-        output_dir = settings.TS_OS_OUTPUT_DIR
+        os.makedirs(args.output_dir, exist_ok=True)
 
-    # Ensure the output directory exists
-    os.makedirs(output_dir, exist_ok=True)
-
-    # Ensure a valid filename is provided
-    if args.dest:
-        output_path = os.path.join(output_dir, args.dest)
-    else:
-        logging.warning("No --dest provided, data will not be saved.")
-        output_path = None
-
-    # Ensure a scan type is specified
+    # Execute based on the selected scanning technique
     if args.scan:
         port_scan_tech = args.scan.lower()
 
         if port_scan_tech == 'ts':
-            if not args.os:
-                raise ValueError("ERROR: OS must be specified for TS scan")
+            logging.info(f"Executing TS scan on {args.host}, storing results in {args.output_dir}")
             deceiver = OsDeceiver(args.host, args.os)
-            deceiver.os_record(output_path)
+            deceiver.os_record(output_path=args.output_dir)
 
         elif port_scan_tech == 'od':
             if not args.os:
                 logging.error("No OS specified for OS deception.")
                 return
+            logging.info(f"Executing OS deception for {args.host} using {args.os}")
             deceiver = OsDeceiver(args.host, args.os)
-            deceiver.os_deceive(output_path)
+            deceiver.os_deceive(output_path=args.output_dir)
 
         elif port_scan_tech == 'rr':
+            logging.info(f"Recording responses from {args.host}")
             deceiver = OsDeceiver(args.host, args.os)
-            deceiver.store_rsp(output_path)
+            deceiver.store_rsp(output_path=args.output_dir)
 
         elif port_scan_tech == 'pd':
             if not args.status:
                 logging.error("Port status must be specified for 'pd' scan")
                 return
+            logging.info(f"Executing Port Deception for {args.host} with status {args.status}")
             deceiver = PortDeceiver(args.host)
-            deceiver.deceive_ps_hs(args.status, output_path)
+            deceiver.deceive_ps_hs(args.status, output_path=args.output_dir)
 
         else:
             logging.error("Invalid port scan technique specified.")
