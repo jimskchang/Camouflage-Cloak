@@ -32,7 +32,7 @@ TARGET_HOST = "192.168.23.202"
 CLOAK_HOST = "192.168.23.206"
 
 # REQUIRED: TS Server IP (To be modified)
-TS_SERVER = "192.168.23.201"
+TS_SERVER = "192.168.23.200"
 
 # REQUIRED: TS Server OS (To be modified: win10, win7, linux, etc.)
 TS_SERVER_OS = "win10"
@@ -41,7 +41,7 @@ TS_SERVER_OS = "win10"
 CLOAK_MAC = "00:50:56:8E:35:6F"
 
 # REQUIRED: TS Server MAC (To be modified)
-TS_SERVER_MAC = "00:50:56:8E:4B:2B"
+TS_SERVER_MAC = "00:0C:29:1E:77:FD"
 
 # REQUIRED: Target Host MAC (To be modified)
 TARGET_MAC = "00:50:56:8E:4D:0F"
