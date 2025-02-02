@@ -21,12 +21,6 @@
 ```
 CamouflageCloak/
 ├── main.py                  # Main execution script
-├── setting.py               # Configuration file
-├── utils.py                 # Utility functions (checksum, IP/MAC conversions)
-├── Packet.py                # Packet processing logic
-├── os_deceiver.py           # OS deception logic
-├── port_deceiver.py         # Port deception logic
-├── tcp.py                   # TCP connection handling
 ├── README.md                # Documentation
 ├── src/
 │   ├── __init__.py          # Package initialization
