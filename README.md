@@ -180,7 +180,7 @@ This tool is **for educational and security research purposes only**.
 
 ## Contributors
 
-- **Your Name** (Maintainer) - [GitHub Profile](https://github.com/yourusername)
+- **Your Name** (Maintainer) - [GitHub Profile](https://github.com/jimskchang)
 - **Other Contributors** - Add names here
 
 ---
@@ -189,16 +189,11 @@ This tool is **for educational and security research purposes only**.
 
 For issues, feature requests, or contributions:
 
-- **Open a GitHub Issue**: [Camouflage Cloak Issues](https://github.com/yourusername/CamouflageCloak/issues)
-- **Email**: your.email@example.com
+- **Open a GitHub Issue**: [Camouflage Cloak Issues](https://github.com/jimskchang/CamouflageCloak/issues)
+- **Email**: 108356507@nccu.edu.tw@example.com
 
 ---
 
-## License
-
-This project is licensed under the **MIT License**. See **LICENSE** for details.
-
----
 
 ## References
 
