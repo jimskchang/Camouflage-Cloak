@@ -16,22 +16,22 @@ This script contains configurations for the Camouflage Cloak system, including:
 
    ```python
    # REQUIRED: Cloak Host NIC (To be modified)
-   CLOAK_NIC = "eth0"
+   CLOAK_NIC = "ens192"
 
    # REQUIRED: TS Server NIC (To be modified)
-   TS_SERVER_NIC = "eth1"
+   TS_SERVER_NIC = "ens192"
 
    # REQUIRED: Target Host NIC (To be modified)
-   TARGET_NIC = "eth2"
+   TARGET_NIC = "ens192"
 
    # REQUIRED: Target Host IP (To be modified)
-   TARGET_HOST = "192.168.1.150"
+   TARGET_HOST = "192.168.23.202"
 
    # REQUIRED: Cloak Host IP (To be modified)
-   CLOAK_HOST = "192.168.1.1"
+   CLOAK_HOST = "192.168.23.206"
 
    # REQUIRED: TS Server IP (To be modified)
-   TS_SERVER = "192.168.1.200"
+   TS_SERVER = "192.168.23.201"
 
    # REQUIRED: TS Server OS (To be modified: win10, win7, linux, etc.)
    TS_SERVER_OS = "win10"
