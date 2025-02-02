@@ -1,110 +1,208 @@
 # Camouflage Cloak
-## **Why Camouflage Cloak?**
 
-The growing sophistication of cyberattacks challenges organizations relying on digital infrastructure, often outpacing traditional defenses. Attackers leverage reconnaissance tools to exploit vulnerabilities and craft targeted payloads. 
+## Network Deception & OS Camouflage System
 
-**Camouflage Cloak** is a deception-based defense that counters active reconnaissance by creating a **“zero-vulnerability surface.”** It misleads attackers with deceptive intelligence and forged operating system responses, effectively hiding real system details.
+**Camouflage Cloak** is a network deception system designed to mislead adversaries by mimicking different OS fingerprinting responses and manipulating network traffic. This tool helps security researchers and defenders detect, analyze, and counter reconnaissance techniques used by attackers.
 
-## **Why Did We Create Camouflage Cloak?**  
+---
 
-From an attacker's reconnaissance perspective, the **attack surface** consists of three key components:  
+## Features
 
-1. **Method** – Malicious reconnaissance  
-2. **Channel** – TCP/IP  
-3. **Data** – Network packets  
+- **Deceive OS Fingerprinting** - Mimic responses of various OS types
+- **Port Deception** - Simulate open, closed, or filtered port states
+- **Network Packet Recording** - Capture and store TCP, ICMP, ARP, and UDP responses
+- **Customizable Configuration** - Easily configure IP, MAC, NIC, and OS settings
+- **Supports Template Synthesis (TS) Server** - Create and store OS fingerprint templates
 
-Minimizing the attack surface is crucial for reducing exploitable entry points and vulnerabilities. **Camouflage Cloak** implements a **defensive deception solution** on the target network, transparently sniffing both malicious and normal traffic while forging host responses.
+---
 
-By mimicking a target system, Camouflage Cloak **obscures the true identity** of systems behind it, making reconnaissance efforts ineffective.
- 
+## Project Structure
 
-## **Running Camouflage Cloak**
+```
+CamouflageCloak/
+├── main.py                  # Main execution script
+├── setting.py               # Configuration file
+├── utils.py                 # Utility functions (checksum, IP/MAC conversions)
+├── Packet.py                # Packet processing logic
+├── os_deceiver.py           # OS deception logic
+├── port_deceiver.py         # Port deception logic
+├── tcp.py                   # TCP connection handling
+├── README.md                # Documentation
+├── src/
+│   ├── __init__.py          # Package initialization
+│   ├── settings.py          # Config settings for hosts, NICs, etc.
+│   ├── Packet.py            # Packet processing logic (modularized)
+│   ├── tcp.py               # TCP helper functions
+│   ├── os_deceiver.py       # OS deception logic (modularized)
+│   ├── port_deceiver.py     # Port deception logic (modularized)
+│   ├── utils.py             # Additional helper functions
+```
 
-To get the latest version, clone the repository:
+---
 
-git clone https://github.com/jimskchang/Camouflage-Cloak.git
+## Installation
 
-After installing **Camouflage Cloak Server** in the Linux server, use the following command format:
+### Prerequisites
 
-	python3 main.py [--host <IP>] [--nic <nic_name>] [--scan <deceiver>] [--status <status>]
+- **Python 3.6+**
+- **Linux-based OS** (Tested on Ubuntu, Kali Linux)
+- **Root/Sudo Privileges** (Required for raw socket manipulation)
 
-**Command Parameters**<br>
+### Clone the Repository
 
-- --host <IP>          	 → Specifies the host IP to protect.
-- --nic <nic_name>     	 → Specifies the network interface for packet transmission.
-- --scan <deceiver>    	 Selects the deception method:<br>
-			 ts → OS Template Synthesis<br>
-			 od → OS Deceiver<br>
-  			 pd → Port Deceiver<br>
-- --status <status>    	 → Defines the status (open or close) of ports to deceive (only used with --scan ts).
+```bash
+git clone https://github.com/yourusername/CamouflageCloak.git
+cd CamouflageCloak
+```
 
-**Example Usage**<br>
+### Install Dependencies
 
-	python3 main.py --host 192.168.1.2 --nic eth0 --scan hs --status open
+```bash
+pip install -r requirements.txt
+```
 
-	python3 main.py --host 192.168.1.2 --scan od --os win7
+> Ensure Python3 is installed and correctly configured.
 
+---
 
-## **Methods**
-About --scan command, you can use ***pd***, ***od***, ***ts*** three key words after  --scan command to perform different camouflage methods.<br>
-- **pd** : Port Deceiver
-- **od** : OS Deceiver
-- **ts** : Synthesize Deceptive OS Template
+## Configuration
 
+Edit **`settings.py`** to match your environment:
 
-## **Test Environment Setup**
-Prepare **three types of host (or VMs)**:
-1.	**Attacker foothold** (with Nmap installed)
-2.	**Protected servers** (with different OSs)
-3.	**Camouflage Cloak server** (must have at least two NICs)
+```python
+# Required: Network Settings (Modify as needed)
+CLOAK_NIC = "eth0"
+TS_SERVER_NIC = "eth1"
+TARGET_NIC = "eth2"
 
-Ensure the **attacker foothold and protected server** communicate **through** the **Camouflage Cloak server**. Connect the protected server and attacker foothold to different NICs on the Camouflage Cloak server, then bridge the NICs.
+CLOAK_HOST = "192.168.1.1"
+TS_SERVER = "192.168.1.200"
+TARGET_HOST = "192.168.1.150"
 
-***Create OS Synthesis Template***<br>
-***STEP1: Navigate the setting.py and input the Host = 'Protected Host IP Address', and NIC='Protected Host NIC Card Name', add the OS folder under /os_record/'win10, or win 7 or Linux'
+CLOAK_MAC = "00:50:56:b0:10:e9"
+TS_SERVER_MAC = "00:AA:BB:CC:DD:EE"
+TARGET_MAC = "00:11:22:33:44:55"
 
-Navigate the Camouflage-Cloak folder and execute***<br>
-	
- 	python3 main.py --host <protected server's IP> --nic <protected server's NIC> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos>
+TS_SERVER_OS = "win10"  # Modify based on the OS you want to deceive
+```
 
-***STEP2: Run Nmap OS detection on attacker foothold and observe the result***<br>
+> Ensure these values are set correctly before running the tool.
 
-	nmap -O <protected server's IP>
+---
 
-***STEP3: Move to the OS template***<br>
+## Usage
 
-Camouflage-Cloak creates the OS template in the current directory. To prevent overwriting and ensure proper deployment, move it to /os_record/<OS_template_name>.
+### Run the Main Script
 
-***STEP4: Rerun Nmap OS detection to check the template is deployed properly***<br>
+```bash
+sudo python3 main.py --scan ts --host 192.168.1.200 --output-dir /os_record/win10
+```
 
-	nmap -O <protected server's IP>
+### Available Arguments
 
+| Argument        | Description |
+|----------------|-------------|
+| `--scan ts`   | Run Template Synthesis (TS) scan to record OS fingerprints |
+| `--scan od`   | Perform OS deception using pre-recorded fingerprints |
+| `--scan rr`   | Record response packets |
+| `--scan pd`   | Perform port deception |
+| `--host IP`   | Specify the target IP |
+| `--output-dir PATH` | Directory to store OS record files |
 
-***OS Deceiver Test***
-***STEP1: Clone the repository on the Camouflage Cloak server***
+#### Example Commands
 
-git clone https://github.com/jimskchang/Camouflage-Cloak.git
+**Record OS Fingerprint for Windows 10**
+```bash
+sudo python3 main.py --scan ts --host 192.168.1.200 --output-dir /os_record/win10
+```
 
-***STEP2: Navigate to the Camouflage Cloak folder and execute***
+**Deceive an OS Fingerprint Scan**
+```bash
+sudo python3 main.py --scan od --host 192.168.1.150 --os win10
+```
 
-	python3 main.py --host <protected server's IP> --scan od --os <OS template e.g. win7/win10/centos>
+**Deceive Port Scan (Simulating Open/Closed Ports)**
+```bash
+sudo python3 main.py --scan pd --host 192.168.1.150 --status open
+```
 
-	(Optional: Specify a network interface using --nic)
+---
 
-***STEP3: Run Nmap OS detection from the attacker foothold and observe the result***
+## Logging & Output
 
-	nmap -O <protected server's IP>
+- **Logs are stored in `/var/log/camouflage_cloak/cloak.log`**
+- **OS scan records are saved in `/os_record/{OS_TYPE}/`**
+- **Packet captures are stored in `pkt_record.txt`**
 
-***Port Deceiver Test***
+---
 
-***STEP1: Navigate to the Camouflage Cloak folder and execute***
+## Troubleshooting
 
-	python3 main.py --host <<protected_server_IP> --scan pd --port <deceptive_port_number> --status <open|close>
+### Permission Errors
 
-***STEP2: Run Nmap port scanning from the attacker foothold and observe the result***
+If you get `Operation not permitted` errors, ensure:
 
-	nmap -sT <protected_server_IP>
+- You are running the script **as root**:
+  ```bash
+  sudo python3 main.py ...
+  ```
+- Your network interface **supports packet injection** (check using `ifconfig` or `ip a`).
 
+### Missing Dependencies
 
+Run:
+```bash
+pip install -r requirements.txt
+```
 
+or manually install missing packages:
+```bash
+pip install scapy
+```
+
+### Check Logging for Errors
+
+```bash
+cat /var/log/camouflage_cloak/cloak.log
+```
+
+---
+
+## Security & Legal Disclaimer
+
+This tool is **for educational and security research purposes only**.
+
+- **Do NOT use this tool on unauthorized networks.**
+- **Ensure you have permission before deploying deception techniques.**
+- The authors are **not responsible for misuse**.
+
+---
+
+## Contributors
+
+- **Your Name** (Maintainer) - [GitHub Profile](https://github.com/yourusername)
+- **Other Contributors** - Add names here
+
+---
+
+## Contact & Support
+
+For issues, feature requests, or contributions:
+
+- **Open a GitHub Issue**: [Camouflage Cloak Issues](https://github.com/yourusername/CamouflageCloak/issues)
+- **Email**: your.email@example.com
+
+---
+
+## License
+
+This project is licensed under the **MIT License**. See **LICENSE** for details.
+
+---
+
+## References
+
+- **TCP/IP Stack Fingerprinting**: [Read More](https://en.wikipedia.org/wiki/TCP/IP_stack_fingerprinting)
+- **Network Deception Techniques**: [Security Journal](https://www.cybersecurity-insights.com)
+- **Raw Sockets in Python**: [Python Docs](https://docs.python.org/3/library/socket.html)
 
