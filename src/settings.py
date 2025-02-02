@@ -11,7 +11,7 @@ This script contains configurations for the Camouflage Cloak system, including:
 
 ## Installation & Setup Instructions:
 
-### 1️⃣ Manually Edit `settings.py`:
+###  Manually Edit `settings.py`
    Set the correct **IP addresses, NICs, and MACs** based on your environment.
 
    ```python
