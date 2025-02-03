@@ -4,6 +4,7 @@ import socket
 import struct
 import os
 import json
+import base64
 
 import src.settings as settings
 from src.Packet import Packet
@@ -41,18 +42,22 @@ class OsDeceiver:
             pkt = Packet(packet)
             pkt.unpack()
 
-            if pkt.l3_field['dest_IP'] == self.host:  # Already a string due to `convert_bytes_to_ip`
+            if pkt.l3_field['dest_IP'] == self.host:
                 key, packet_val = self.gen_tcp_key(pkt)
 
                 if packet_val['flags'] == 4:  # Ignore RST packets
                     continue
 
                 if key not in pkt_dict:
-                    pkt_dict[key] = packet
+                    pkt_dict[key] = {
+                        "l3_field": pkt.l3_field,
+                        "l4_field": pkt.l4_field,
+                        "data": base64.b64encode(pkt.packet).decode()
+                    }
 
                 # Save to file
                 with open(output_path, 'w') as f:
-                    json.dump(pkt_dict, f)
+                    json.dump(pkt_dict, f, indent=4)
 
     def store_rsp(self, output_path=None):
         """Stores response packets."""
@@ -62,19 +67,26 @@ class OsDeceiver:
         logging.info(f"Storing responses to {output_path}")
 
         rsp = {}
+
         while True:
             packet, _ = self.conn.sock.recvfrom(65565)
             pkt = Packet(packet)
             pkt.unpack()
 
             if pkt.l3_field['src_IP'] == self.host:
-                src_port = pkt.l4_field['src_port']
+                src_port = pkt.l4_field.get('src_port', 0)
+
                 if src_port not in rsp:
                     rsp[src_port] = []
-                rsp[src_port].append(packet)
+
+                rsp[src_port].append({
+                    "l3_field": pkt.l3_field,
+                    "l4_field": pkt.l4_field,
+                    "data": base64.b64encode(pkt.packet).decode()
+                })
 
                 with open(output_path, 'w') as f:
-                    json.dump(rsp, f)
+                    json.dump(rsp, f, indent=4)
 
     def os_deceive(self, output_path=None):
         """Performs OS deception."""
@@ -121,8 +133,8 @@ class OsDeceiver:
         """Generate a unique key for TCP packets."""
         src_IP = pkt.l3_field['src_IP']
         dest_IP = pkt.l3_field['dest_IP']
-        src_port = pkt.l4_field['src_port']
-        dest_port = pkt.l4_field['dest_port']
+        src_port = pkt.l4_field.get('src_port', 0)
+        dest_port = pkt.l4_field.get('dest_port', 0)
         flags = pkt.l4_field.get('flags', 0)
 
         key = f"{src_IP}-{dest_IP}-{src_port}-{dest_port}-{flags}"
