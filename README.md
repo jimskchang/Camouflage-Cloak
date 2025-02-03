@@ -49,16 +49,6 @@ git clone https://github.com/yourusername/CamouflageCloak.git
 cd CamouflageCloak
 ```
 
-### Install Dependencies
-
-```bash
-pip install -r requirements.txt
-```
-
-> Ensure Python3 is installed and correctly configured.
-
----
-
 ## Configuration
 
 Edit **`settings.py`** to match your environment:
@@ -174,9 +164,8 @@ This tool is **for educational and security research purposes only**.
 
 ## Contributors
 
-- **Your Name** (Maintainer) - [GitHub Profile](https://github.com/jimskchang)
-- **Other Contributors** - Add names here
-
+- **Your Name** (Maintainer) - Shangkai Chang
+- **Other Contributors** -  Zih-Siang Lin, Fany Yu
 ---
 
 ## Contact & Support
@@ -184,7 +173,7 @@ This tool is **for educational and security research purposes only**.
 For issues, feature requests, or contributions:
 
 - **Open a GitHub Issue**: [Camouflage Cloak Issues](https://github.com/jimskchang/CamouflageCloak/issues)
-- **Email**: 108356507@nccu.edu.tw@example.com
+- **Email**: 108356507@nccu.edu.tw
 
 ---
 
