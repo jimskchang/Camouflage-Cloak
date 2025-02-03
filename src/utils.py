@@ -1,87 +1,76 @@
-import struct
-import random
-import socket
-import array
+import logging
+import argparse
+import os
+import src.settings as settings
+from src.port_deceiver import PortDeceiver
+from src.os_deceiver import OsDeceiver
+from src.utils import (  # Import utility functions
+    calculate_checksum,
+    generate_random_mac,
+    generate_random_ip,
+    convert_mac_to_bytes,
+    convert_ip_to_bytes,
+    convert_bytes_to_ip,
+    convert_bytes_to_mac
+)
 
+logging.basicConfig(
+    format="%(asctime)s [%(levelname)s]: %(message)s",
+    datefmt="%Y-%m-%d %H:%M",
+    level=logging.INFO
+)
 
-def calculate_checksum(data):
-    """
-    Computes checksum for a given data packet (IP, TCP, UDP).
-    Ensures correct padding for odd-length data.
-    """
-    if not isinstance(data, (bytes, bytearray)):
-        raise ValueError("Input data must be bytes or bytearray")
+def main():
+    parser = argparse.ArgumentParser(description="Camouflage Cloak - Main Execution")
+    parser.add_argument("--host", action="store", required=True, help="Specify destination IP")
+    parser.add_argument("--port", action="store", help="Specify destination port")
+    parser.add_argument("--nic", action="store", help="NIC where we capture the packets")
+    parser.add_argument("--scan", action="store", required=True, help="Attacker's port scanning technique")
+    parser.add_argument("--status", action="store", help="Designate port status")
+    parser.add_argument("--os", action="store", help="Designate OS we want to deceive")
+    parser.add_argument("--output-dir", action="store", help="Specify output directory for storing records")
 
-    if len(data) % 2 != 0:
-        data += b'\0'  # Padding for odd length
+    args = parser.parse_args()
 
-    res = sum(array.array("H", data))
-    res = (res >> 16) + (res & 0xffff)
-    res += res >> 16
+    # Assign local variables
+    target_host = args.host
+    output_dir = args.output_dir if args.output_dir else settings.TS_OS_OUTPUT_DIR
+    os_type = args.os if args.os else settings.TS_SERVER_OS
+    scan_type = args.scan.lower()
 
-    return (~res) & 0xffff
+    # Ensure output directory exists
+    os.makedirs(output_dir, exist_ok=True)
 
+    # Log configuration
+    logging.info(f"Configuration: Target Host={target_host}, OS={os_type}, Output Dir={output_dir}")
 
-def generate_random_mac():
-    """
-    Generates a random MAC address.
-    """
-    return ':'.join(f'{random.randint(0, 255):02x}' for _ in range(6)).upper()
+    # Execute based on the selected scanning technique
+    if scan_type == "ts":
+        logging.info(f"Executing TS scan on {target_host}, storing results in {output_dir}")
+        deceiver = OsDeceiver(target_host, os_type)
+        deceiver.os_record(output_path=output_dir)
 
+    elif scan_type == "od":
+        logging.info(f"Executing OS deception for {target_host} using {os_type}")
+        deceiver = OsDeceiver(target_host, os_type)
+        deceiver.os_deceive(output_path=output_dir)
 
-def generate_random_ip(private_only=True):
-    """
-    Generates a random IP address.
-    By default, it generates private IPs unless private_only=False.
-    """
-    if private_only:
-        ranges = [
-            (10, random.randint(0, 255), random.randint(0, 255), random.randint(1, 254)),  # 10.x.x.x
-            (192, 168, random.randint(0, 255), random.randint(1, 254)),  # 192.168.x.x
-            (172, random.randint(16, 31), random.randint(0, 255), random.randint(1, 254))  # 172.16.x.x - 172.31.x.x
-        ]
-        return ".".join(map(str, random.choice(ranges)))
+    elif scan_type == "rr":
+        logging.info(f"Recording responses from {target_host}")
+        deceiver = OsDeceiver(target_host, os_type)
+        deceiver.store_rsp(output_path=output_dir)
+
+    elif scan_type == "pd":
+        if not args.status:
+            logging.error("Port status must be specified for 'pd' scan")
+            return
+        logging.info(f"Executing Port Deception for {target_host} with status {args.status}")
+        deceiver = PortDeceiver(target_host)
+        deceiver.deceive_ps_hs(args.status, output_path=output_dir)
+
     else:
-        return ".".join(str(random.randint(1, 255)) for _ in range(4))
+        logging.error("Invalid port scan technique specified.")
+        return
 
-
-def convert_mac_to_bytes(mac_str):
-    """
-    Converts a MAC address from string format to bytes.
-    Example: "00:1A:2B:3C:4D:5E" -> b'\x00\x1A\x2B\x3C\x4D\x5E'
-    """
-    try:
-        return struct.pack('!6B', *[int(x, 16) for x in mac_str.split(':')])
-    except ValueError:
-        raise ValueError("Invalid MAC address format")
-
-
-def convert_ip_to_bytes(ip_str):
-    """
-    Converts an IPv4 address from string to bytes.
-    Example: "192.168.1.1" -> b'\xC0\xA8\x01\x01'
-    """
-    try:
-        return socket.inet_aton(ip_str)
-    except socket.error:
-        raise ValueError("Invalid IP address format")
-
-
-def convert_bytes_to_ip(ip_bytes):
-    """
-    Converts an IP address from bytes to string format.
-    Example: b'\xC0\xA8\x01\x01' -> "192.168.1.1"
-    """
-    if not isinstance(ip_bytes, bytes) or len(ip_bytes) != 4:
-        raise ValueError("Input must be a 4-byte string")
-    return socket.inet_ntoa(ip_bytes)
-
-
-def convert_bytes_to_mac(mac_bytes):
-    """
-    Converts a MAC address from bytes to human-readable format.
-    Example: b'\x00\x1A\x2B\x3C\x4D\x5E' -> "00:1A:2B:3C:4D:5E"
-    """
-    if not isinstance(mac_bytes, bytes) or len(mac_bytes) != 6:
-        raise ValueError("Input must be a 6-byte string")
-    return ':'.join(f'{b:02x}'.upper() for b in mac_bytes)
+if __name__ == "__main__":
+    main()
