@@ -133,16 +133,24 @@ class Packet:
 
     def pack_ip_header(self):
         ip_field = self.l3_field
+
+        # Convert IP addresses to bytes before packing
+        src_IP_bytes = convert_ip_to_bytes(ip_field['src_IP'])
+        dest_IP_bytes = convert_ip_to_bytes(ip_field['dest_IP'])
+
+        # Pack pseudo IP header
         pseudo_ip_header = struct.pack(
             '!BBHHHBBH4s4s',
             ip_field['IHL_VERSION'], 0, ip_field['total_len'], 0, 0,
-            64, ip_field['PROTOCOL'], 0, convert_ip_to_bytes(ip_field['src_IP']), convert_ip_to_bytes(ip_field['dest_IP'])
+            64, ip_field['PROTOCOL'], 0, src_IP_bytes, dest_IP_bytes
         )
         ip_field['checksum'] = calculate_checksum(pseudo_ip_header)  # Use `calculate_checksum` from utils.py
+
+        # Pack final IP header with checksum
         self.l3_header = struct.pack(
             '!BBHHHBBH4s4s',
             ip_field['IHL_VERSION'], 0, ip_field['total_len'], 0, 0,
-            64, ip_field['PROTOCOL'], ip_field['checksum'], convert_ip_to_bytes(ip_field['src_IP']), convert_ip_to_bytes(ip_field['dest_IP'])
+            64, ip_field['PROTOCOL'], ip_field['checksum'], src_IP_bytes, dest_IP_bytes
         )
 
     def get_proc(self):
