@@ -1,6 +1,11 @@
 import logging
 import argparse
 import os
+import sys
+
+# Ensure `src` is in Python's module search path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
+
 import src.settings as settings
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
