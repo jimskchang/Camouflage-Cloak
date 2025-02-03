@@ -29,7 +29,16 @@ class PortDeceiver:
         while True:
             packet, _ = self.conn.sock.recvfrom(65565)
             pkt = Packet(packet)
-            pkt.unpack()
+
+            try:
+                pkt.unpack()
+            except Exception as e:
+                logging.error(f"Failed to unpack packet: {e}")
+                continue  # Skip processing this packet
+
+            if not pkt.l3_field or 'dest_IP' not in pkt.l3_field:
+                logging.warning("Packet missing L3 fields, skipping.")
+                continue
 
             if pkt.l3_field['dest_IP'] != settings.TARGET_HOST:
                 continue
@@ -37,10 +46,14 @@ class PortDeceiver:
             if pkt.l4 != "tcp":
                 continue  # Only handle TCP packets
 
-            flags = pkt.l4_field['flags']
+            flags = pkt.l4_field.get('flags', 0)
             if flags in recv_flags:
                 logging.info(f"Received TCP flag={flags}, preparing response.")
             else:
+                continue
+
+            if 'ack_num' not in pkt.l4_field or 'seq' not in pkt.l4_field:
+                logging.warning("Missing TCP fields (seq/ack_num), skipping packet.")
                 continue
 
             reply_seq = pkt.l4_field['ack_num']
@@ -57,13 +70,13 @@ class PortDeceiver:
                         5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port,
                         pkt.l3_field['dest_IP'], pkt.l3_field['src_IP'], reply_flags[i]
                     )
-                    packet = self.build_eth_ip_header(pkt.l3_field['dest_IP'], pkt.l3_field['src_IP']) + reply_tcp_header
-                    self.conn.sock.send(packet)
+                    response_packet = self.build_eth_ip_header(pkt.l3_field['dest_IP'], pkt.l3_field['src_IP']) + reply_tcp_header
+                    self.conn.sock.send(response_packet)
                     logging.info(f"Sent TCP response with flag={reply_flags[i]}")
 
             # Save to file
             with open(output_path, 'a') as f:
-                f.write(packet.hex() + '\n')
+                f.write(response_packet.hex() + '\n')
 
     def deceive_ps_hs(self, port_status, output_path=None):
         """Deceives port scanning techniques."""
@@ -83,7 +96,16 @@ class PortDeceiver:
         while True:
             packet, _ = self.conn.sock.recvfrom(65565)
             pkt = Packet(packet)
-            pkt.unpack()
+
+            try:
+                pkt.unpack()
+            except Exception as e:
+                logging.error(f"Failed to unpack packet: {e}")
+                continue  # Skip processing this packet
+
+            if not pkt.l3_field or 'dest_IP' not in pkt.l3_field:
+                logging.warning("Packet missing L3 fields, skipping.")
+                continue
 
             if pkt.l3_field['dest_IP'] != settings.TARGET_HOST:
                 continue
@@ -91,7 +113,11 @@ class PortDeceiver:
             if pkt.l4 != "tcp":
                 continue  # Ignore non-TCP packets
 
-            flags = pkt.l4_field['flags']
+            flags = pkt.l4_field.get('flags', 0)
+            if 'ack_num' not in pkt.l4_field or 'seq' not in pkt.l4_field:
+                logging.warning("Missing TCP fields (seq/ack_num), skipping packet.")
+                continue
+
             reply_seq = pkt.l4_field['ack_num']
             reply_ack_num = pkt.l4_field['seq'] + 1
             reply_src_port = pkt.l4_field['dest_port']
@@ -112,12 +138,12 @@ class PortDeceiver:
             else:
                 continue
 
-            packet = self.build_eth_ip_header(pkt.l3_field['dest_IP'], pkt.l3_field['src_IP']) + reply_tcp_header
-            self.conn.sock.send(packet)
+            response_packet = self.build_eth_ip_header(pkt.l3_field['dest_IP'], pkt.l3_field['src_IP']) + reply_tcp_header
+            self.conn.sock.send(response_packet)
 
             # Save to log
             with open(output_path, 'a') as f:
-                f.write(packet.hex() + '\n')
+                f.write(response_packet.hex() + '\n')
 
     def build_eth_ip_header(self, src_ip, dest_ip):
         """Builds Ethernet and IP headers for deceptive responses."""
