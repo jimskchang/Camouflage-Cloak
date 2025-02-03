@@ -1,4 +1,4 @@
-
+"""
 =============================================
 Camouflage Cloak Configuration - settings.py
 =============================================
@@ -13,35 +13,51 @@ This script contains configurations for the Camouflage Cloak system, including:
 
 ### Manually Edit `settings.py`
 Set the correct **IP addresses, NICs, and MACs** based on your environment.
+"""
 
-Example:
+import os
 
-# REQUIRED: Cloak Host NIC (To be modified)
-CLOAK_NIC = "ens192"
+# ========================
+# ✅ REQUIRED NETWORK SETTINGS
+# ========================
 
-# REQUIRED: TS Server NIC (To be modified)
-TS_SERVER_NIC = "ens192"
-
-# REQUIRED: Target Host NIC (To be modified)
-TARGET_NIC = "ens192"
-
-# REQUIRED: Target Host IP (To be modified)
-TARGET_HOST = "192.168.23.202"
-
-# REQUIRED: Cloak Host IP (To be modified)
+# Cloak Host (This machine)
+CLOAK_NIC = "ens192"   # Network Interface Card
 CLOAK_HOST = "192.168.23.206"
-
-# REQUIRED: TS Server IP (To be modified)
-TS_SERVER = "192.168.23.200"
-
-# REQUIRED: TS Server OS (To be modified: win10, win7, linux, etc.)
-TS_SERVER_OS = "win10"
-
-# REQUIRED: Cloak Host MAC (To be modified)
 CLOAK_MAC = "00:50:56:8E:35:6F"
 
-# REQUIRED: TS Server MAC (To be modified)
+# Target Host (Attacker or Scanner)
+TARGET_NIC = "ens192"
+TARGET_HOST = "192.168.23.202"
+TARGET_MAC = "00:50:56:8E:4D:0F"
+
+# TS Server (Deception Target)
+TS_SERVER_NIC = "ens192"
+TS_SERVER = "192.168.23.200"
 TS_SERVER_MAC = "00:0C:29:1E:77:FD"
 
-# REQUIRED: Target Host MAC (To be modified)
-TARGET_MAC = "00:50:56:8E:4D:0F"
+# OS Type for TS Server (Modify accordingly: "win10", "win7", "linux", etc.)
+TS_SERVER_OS = "win10"
+
+# ========================
+# ✅ OUTPUT DIRECTORY SETTINGS
+# ========================
+
+# Default output directory for storing deception logs
+TS_OS_OUTPUT_DIR = os.path.join(os.getcwd(), "output")
+
+# Ensure the directory exists
+os.makedirs(TS_OS_OUTPUT_DIR, exist_ok=True)
+
+# ========================
+# ✅ PACKET SETTINGS
+# ========================
+
+# Ethernet header length
+ETH_HEADER_LEN = 14
+
+# IP header length (without options)
+IP_HEADER_LEN = 20
+
+# TCP header length (without options)
+TCP_HEADER_LEN = 20
