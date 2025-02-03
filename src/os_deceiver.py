@@ -8,6 +8,11 @@ import json
 import src.settings as settings
 from src.Packet import Packet
 from src.tcp import TcpConnect
+from src.utils import (
+    convert_bytes_to_ip,
+    convert_ip_to_bytes,
+    calculate_checksum
+)
 
 
 class OsDeceiver:
@@ -36,8 +41,8 @@ class OsDeceiver:
             pkt = Packet(packet)
             pkt.unpack()
 
-            if pkt.l3_field['dest_IP'] == socket.inet_aton(self.host):
-                key, packet_val = gen_tcp_key(packet)
+            if pkt.l3_field['dest_IP'] == self.host:  # Already a string due to `convert_bytes_to_ip`
+                key, packet_val = self.gen_tcp_key(pkt)
 
                 if packet_val['flags'] == 4:  # Ignore RST packets
                     continue
@@ -62,7 +67,7 @@ class OsDeceiver:
             pkt = Packet(packet)
             pkt.unpack()
 
-            if pkt.l3_field['src_IP'] == socket.inet_aton(self.host):
+            if pkt.l3_field['src_IP'] == self.host:
                 src_port = pkt.l4_field['src_port']
                 if src_port not in rsp:
                     rsp[src_port] = []
@@ -86,11 +91,11 @@ class OsDeceiver:
             pkt.unpack()
             proc = pkt.get_proc()
 
-            if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == socket.inet_aton(settings.TARGET_HOST)) or \
-                    (pkt.l3 == 'arp' and pkt.l3_field['recv_ip'] == socket.inet_aton(settings.TARGET_HOST)):
+            if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == settings.TARGET_HOST) or \
+                    (pkt.l3 == 'arp' and pkt.l3_field.get('recv_ip') == settings.TARGET_HOST):
 
                 req = pkt
-                rsp = deceived_pkt_synthesis(proc, req, self.template_dict)
+                rsp = self.deceived_pkt_synthesis(proc, req)
                 if rsp:
                     dec_count += 1
                     logging.info(f"Sending deceptive packet {dec_count} for {proc}")
@@ -111,40 +116,38 @@ class OsDeceiver:
             logging.error(f"Error parsing {output_path}, file might be corrupted.")
             return {}
 
+    @staticmethod
+    def gen_tcp_key(pkt: Packet):
+        """Generate a unique key for TCP packets."""
+        src_IP = pkt.l3_field['src_IP']
+        dest_IP = pkt.l3_field['dest_IP']
+        src_port = pkt.l4_field['src_port']
+        dest_port = pkt.l4_field['dest_port']
+        flags = pkt.l4_field.get('flags', 0)
 
-def gen_tcp_key(packet):
-    """Generate a unique key for TCP packets."""
-    ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-    tcp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                        settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN]
+        key = f"{src_IP}-{dest_IP}-{src_port}-{dest_port}-{flags}"
+        return key, {'flags': flags}
 
-    src_IP, dest_IP = struct.unpack('!4s4s', ip_header[12:20])
-    src_port, dest_port, flags = struct.unpack('!HHxBB', tcp_header[:6] + tcp_header[13:14])
+    def deceived_pkt_synthesis(self, proc, req):
+        """Generates a deceptive packet based on template data."""
+        key, _ = self.gen_tcp_key(req)
 
-    key = f"{src_IP}-{dest_IP}-{src_port}-{dest_port}-{flags}"
-    return key, {'flags': flags}
+        if proc in self.template_dict and key in self.template_dict[proc]:
+            raw_template = self.template_dict[proc][key]
+            template_pkt = Packet(raw_template)
+            template_pkt.unpack()
 
+            # Modify fields to create a deceptive response
+            template_pkt.l3_field['src_IP'] = req.l3_field['dest_IP']
+            template_pkt.l3_field['dest_IP'] = req.l3_field['src_IP']
+            template_pkt.l4_field['src_port'] = req.l4_field['dest_port']
+            template_pkt.l4_field['dest_port'] = req.l4_field['src_port']
+            template_pkt.l4_field['seq'] = req.l4_field['ack_num']
+            template_pkt.l4_field['ack_num'] = req.l4_field['seq'] + 1
 
-def deceived_pkt_synthesis(proc, req, template):
-    """Generates a deceptive packet based on template data."""
-    key, _ = gen_tcp_key(req.packet)
+            # Pack and send the response
+            template_pkt.pack()
+            return template_pkt.packet
 
-    if proc in template and key in template[proc]:
-        raw_template = template[proc][key]
-        template_pkt = Packet(raw_template)
-        template_pkt.unpack()
-
-        # Modify fields to create a deceptive response
-        template_pkt.l3_field['src_IP'] = req.l3_field['dest_IP']
-        template_pkt.l3_field['dest_IP'] = req.l3_field['src_IP']
-        template_pkt.l4_field['src_port'] = req.l4_field['dest_port']
-        template_pkt.l4_field['dest_port'] = req.l4_field['src_port']
-        template_pkt.l4_field['seq'] = req.l4_field['ack_num']
-        template_pkt.l4_field['ack_num'] = req.l4_field['seq'] + 1
-
-        # Pack and send the response
-        template_pkt.pack()
-        return template_pkt.packet
-
-    logging.warning(f"No template found for {proc} key={key}.")
-    return None
+        logging.warning(f"No template found for {proc} key={key}.")
+        return None
