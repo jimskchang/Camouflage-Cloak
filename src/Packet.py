@@ -10,6 +10,15 @@ except ImportError:
     logging.warning("Failed to import settings.py. Using default values.")
     settings = None
 
+# Import utility functions
+from src.utils import (
+    calculate_checksum,
+    convert_ip_to_bytes,
+    convert_mac_to_bytes,
+    convert_bytes_to_ip,
+    convert_bytes_to_mac
+)
+
 # Default protocol processing lists (if missing from settings.py)
 L3_PROC = getattr(settings, "L3_PROC", ['ip', 'arp'])
 L4_PROC = getattr(settings, "L4_PROC", ['tcp', 'udp', 'icmp'])
@@ -46,8 +55,8 @@ class Packet:
             self.l3 = 'others'
 
         self.l2_field = {
-            'dMAC': eth_dMAC,
-            'sMAC': eth_sMAC,
+            'dMAC': convert_bytes_to_mac(eth_dMAC),
+            'sMAC': convert_bytes_to_mac(eth_sMAC),
             'protocol': eth_protocol
         }
 
@@ -83,8 +92,8 @@ class Packet:
             'IHL_VERSION': IHL_VERSION,
             'total_len': total_len,
             'PROTOCOL': PROTOCOL,
-            'src_IP': src_IP,
-            'dest_IP': dest_IP
+            'src_IP': convert_bytes_to_ip(src_IP),
+            'dest_IP': convert_bytes_to_ip(dest_IP)
         }
 
     def unpack_tcp_header(self) -> None:
@@ -127,41 +136,14 @@ class Packet:
         pseudo_ip_header = struct.pack(
             '!BBHHHBBH4s4s',
             ip_field['IHL_VERSION'], 0, ip_field['total_len'], 0, 0,
-            64, ip_field['PROTOCOL'], 0, ip_field['src_IP'], ip_field['dest_IP']
+            64, ip_field['PROTOCOL'], 0, convert_ip_to_bytes(ip_field['src_IP']), convert_ip_to_bytes(ip_field['dest_IP'])
         )
-        ip_field['checksum'] = self.getIPChecksum(pseudo_ip_header)
+        ip_field['checksum'] = calculate_checksum(pseudo_ip_header)  # Use `calculate_checksum` from utils.py
         self.l3_header = struct.pack(
             '!BBHHHBBH4s4s',
             ip_field['IHL_VERSION'], 0, ip_field['total_len'], 0, 0,
-            64, ip_field['PROTOCOL'], ip_field['checksum'], ip_field['src_IP'], ip_field['dest_IP']
+            64, ip_field['PROTOCOL'], ip_field['checksum'], convert_ip_to_bytes(ip_field['src_IP']), convert_ip_to_bytes(ip_field['dest_IP'])
         )
 
     def get_proc(self):
         return self.l3 if not self.l4 else self.l4
-
-    @staticmethod
-    def getIPChecksum(data):
-        packet_sum = sum((data[i] << 8) + data[i+1] for i in range(0, len(data), 2))
-        packet_sum = (packet_sum >> 16) + (packet_sum & 0xffff)
-        return (~packet_sum) & 0xffff
-
-    @staticmethod
-    def getTCPChecksum(packet):
-        import array
-        if len(packet) % 2 != 0:
-            packet += b'\0'
-        res = sum(array.array("H", packet))
-        res = (res >> 16) + (res & 0xffff)
-        return (~res) & 0xffff
-
-    @staticmethod
-    def ip_str2byte(ip_str: str):
-        return struct.pack('!4B', *[int(x) for x in ip_str.split('.')])
-
-    @staticmethod
-    def mac_str2byte(mac_str: str):
-        return bytes.fromhex(mac_str.replace(":", ""))
-
-    @staticmethod
-    def mac_byte2str(mac_byte):
-        return ":".join(f"{b:02x}" for b in mac_byte)
