@@ -4,8 +4,14 @@ import struct
 import os
 
 import src.settings as settings
-from src.tcp import TcpConnect, getIPChecksum, getTCPChecksum
+from src.tcp import TcpConnect
 from src.Packet import Packet
+from src.utils import (
+    calculate_checksum,
+    convert_mac_to_bytes,
+    convert_ip_to_bytes,
+    convert_bytes_to_ip
+)
 
 
 class PortDeceiver:
@@ -25,7 +31,7 @@ class PortDeceiver:
             pkt = Packet(packet)
             pkt.unpack()
 
-            if pkt.l3_field['dest_IP'] != socket.inet_aton(settings.TARGET_HOST):
+            if pkt.l3_field['dest_IP'] != settings.TARGET_HOST:
                 continue
 
             if pkt.l4 != "tcp":
@@ -79,7 +85,7 @@ class PortDeceiver:
             pkt = Packet(packet)
             pkt.unpack()
 
-            if pkt.l3_field['dest_IP'] != socket.inet_aton(settings.TARGET_HOST):
+            if pkt.l3_field['dest_IP'] != settings.TARGET_HOST:
                 continue
 
             if pkt.l4 != "tcp":
@@ -116,18 +122,18 @@ class PortDeceiver:
     def build_eth_ip_header(self, src_ip, dest_ip):
         """Builds Ethernet and IP headers for deceptive responses."""
         eth_header = struct.pack('!6s6sH', 
-                                 Packet.mac_str2byte(settings.CLOAK_MAC), 
-                                 Packet.mac_str2byte(settings.TARGET_MAC), 
+                                 convert_mac_to_bytes(settings.CLOAK_MAC), 
+                                 convert_mac_to_bytes(settings.TARGET_MAC), 
                                  0x0800)  # IP Protocol
 
-        src_ip_bytes = Packet.ip_str2byte(src_ip)
-        dest_ip_bytes = Packet.ip_str2byte(dest_ip)
+        src_ip_bytes = convert_ip_to_bytes(src_ip)
+        dest_ip_bytes = convert_ip_to_bytes(dest_ip)
 
         ip_header = struct.pack('!BBHHHBBH4s4s', 
                                 69, 0, 40, 456, 0, 64, 6, 0, 
                                 src_ip_bytes, dest_ip_bytes)  # Default IP Header
 
-        check_sum_of_hdr = getIPChecksum(ip_header)
+        check_sum_of_hdr = calculate_checksum(ip_header)
         ip_header = struct.pack('!BBHHHBBH4s4s', 
                                 69, 0, 40, 456, 0, 64, 6, check_sum_of_hdr, 
                                 src_ip_bytes, dest_ip_bytes)
