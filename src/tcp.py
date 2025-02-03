@@ -1,6 +1,5 @@
 import socket
 import struct
-import array
 import time
 import os
 
@@ -34,16 +33,25 @@ class TcpConnect:
 
     def build_tcp_header_from_reply(self, tcp_len, seq, ack_num, src_port, dest_port, src_IP, dest_IP, flags, options=None):
         """Constructs a TCP reply header with optional TCP options."""
-        offset = (tcp_len // 4) << 4
+        offset = ((tcp_len + (len(options) if options else 0)) // 4) << 4
         reply_tcp_header = struct.pack('!HHIIBBHHH', 
                                        src_port, dest_port, seq, ack_num, offset, flags, 0, 0, 0)
 
         if options:
             reply_tcp_header += options
 
-        pseudo_hdr = struct.pack('!4s4sBBH', convert_ip_to_bytes(src_IP), convert_ip_to_bytes(dest_IP), 
-                                 0, socket.IPPROTO_TCP, len(reply_tcp_header))
+        tcp_total_length = len(reply_tcp_header)  # Dynamically compute total TCP header length
+
+        # Pseudo header for checksum calculation
+        pseudo_hdr = struct.pack('!4s4sBBH', 
+                                 convert_ip_to_bytes(src_IP), 
+                                 convert_ip_to_bytes(dest_IP), 
+                                 0, socket.IPPROTO_TCP, 
+                                 tcp_total_length)
+
         checksum = calculate_checksum(pseudo_hdr + reply_tcp_header)
+        
+        # Rebuild TCP header with calculated checksum
         reply_tcp_header = reply_tcp_header[:16] + struct.pack('H', checksum) + reply_tcp_header[18:]
 
         return reply_tcp_header
@@ -51,14 +59,22 @@ class TcpConnect:
 
 def os_build_tcp_header_from_reply(tcp_len, seq, ack_num, src_port, dest_port, src_IP, dest_IP, flags, window, reply_tcp_option):
     """Builds a full TCP header with OS-level deception options."""
-    offset = (tcp_len // 4) << 4
+    offset = ((tcp_len + len(reply_tcp_option)) // 4) << 4
     reply_tcp_header = struct.pack('!HHIIBBHHH', 
                                    src_port, dest_port, seq, ack_num, offset, flags, window, 0, 0)
     reply_tcp_header += reply_tcp_option
 
-    pseudo_hdr = struct.pack('!4s4sBBH', convert_ip_to_bytes(src_IP), convert_ip_to_bytes(dest_IP), 
-                             0, socket.IPPROTO_TCP, len(reply_tcp_header))
+    tcp_total_length = len(reply_tcp_header)  # Ensure the total TCP header length is used
+
+    pseudo_hdr = struct.pack('!4s4sBBH', 
+                             convert_ip_to_bytes(src_IP), 
+                             convert_ip_to_bytes(dest_IP), 
+                             0, socket.IPPROTO_TCP, 
+                             tcp_total_length)
+
     checksum = calculate_checksum(pseudo_hdr + reply_tcp_header)
+    
+    # Rebuild TCP header with correct checksum
     reply_tcp_header = reply_tcp_header[:16] + struct.pack('H', checksum) + reply_tcp_header[18:]
 
     return reply_tcp_header
@@ -86,28 +102,24 @@ def unpack_tcp_option(tcp_option):
             kind_seq.append(kind)
 
         elif kind == 2:  # Maximum Segment Size (MSS)
-            length = tcp_option[start_ptr]
-            start_ptr += 1
+            start_ptr += 1  # Skip length field
             option_val['mss'] = struct.unpack('!H', tcp_option[start_ptr:start_ptr + 2])[0]
             start_ptr += 2
             kind_seq.append(kind)
 
         elif kind == 3:  # Window Scale
-            length = tcp_option[start_ptr]
-            start_ptr += 1
+            start_ptr += 1  # Skip length field
             option_val['shift_count'] = tcp_option[start_ptr]
             start_ptr += 1
             kind_seq.append(kind)
 
         elif kind == 4:  # SACK Permitted
-            length = tcp_option[start_ptr]
-            start_ptr += 1
+            start_ptr += 1  # Skip length field
             option_val['sack_permitted'] = True
             kind_seq.append(kind)
 
         elif kind == 8:  # Timestamps
-            length = tcp_option[start_ptr]
-            start_ptr += 1
+            start_ptr += 1  # Skip length field
             option_val['ts_val'], option_val['ts_echo_reply'] = struct.unpack('!LL', tcp_option[start_ptr:start_ptr + 8])
             start_ptr += 8
             kind_seq.append(kind)
