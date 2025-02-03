@@ -6,6 +6,13 @@ import os
 
 import src.settings as settings
 from src.Packet import Packet
+from src.utils import (
+    calculate_checksum,
+    convert_mac_to_bytes,
+    convert_ip_to_bytes,
+    convert_bytes_to_ip,
+    convert_bytes_to_mac
+)
 
 
 class TcpConnect:
@@ -21,7 +28,7 @@ class TcpConnect:
         try:
             with open(f'/sys/class/net/{nic}/address', 'r') as f:
                 mac = f.readline().strip()
-                return Packet.mac_str2byte(mac)
+                return convert_mac_to_bytes(mac)
         except FileNotFoundError:
             raise ValueError(f"ERROR: NIC '{nic}' not found. Please update settings.py.")
 
@@ -34,8 +41,9 @@ class TcpConnect:
         if options:
             reply_tcp_header += options
 
-        pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(reply_tcp_header))
-        checksum = getTCPChecksum(pseudo_hdr + reply_tcp_header)
+        pseudo_hdr = struct.pack('!4s4sBBH', convert_ip_to_bytes(src_IP), convert_ip_to_bytes(dest_IP), 
+                                 0, socket.IPPROTO_TCP, len(reply_tcp_header))
+        checksum = calculate_checksum(pseudo_hdr + reply_tcp_header)
         reply_tcp_header = reply_tcp_header[:16] + struct.pack('H', checksum) + reply_tcp_header[18:]
 
         return reply_tcp_header
@@ -48,31 +56,12 @@ def os_build_tcp_header_from_reply(tcp_len, seq, ack_num, src_port, dest_port, s
                                    src_port, dest_port, seq, ack_num, offset, flags, window, 0, 0)
     reply_tcp_header += reply_tcp_option
 
-    pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(reply_tcp_header))
-    checksum = getTCPChecksum(pseudo_hdr + reply_tcp_header)
+    pseudo_hdr = struct.pack('!4s4sBBH', convert_ip_to_bytes(src_IP), convert_ip_to_bytes(dest_IP), 
+                             0, socket.IPPROTO_TCP, len(reply_tcp_header))
+    checksum = calculate_checksum(pseudo_hdr + reply_tcp_header)
     reply_tcp_header = reply_tcp_header[:16] + struct.pack('H', checksum) + reply_tcp_header[18:]
 
     return reply_tcp_header
-
-
-def getIPChecksum(data):
-    """Computes IP header checksum."""
-    packet_sum = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
-    packet_sum = (packet_sum >> 16) + (packet_sum & 0xffff)
-    packet_sum = ~packet_sum & 0xffff
-    return packet_sum
-
-
-def getTCPChecksum(packet):
-    """Computes TCP checksum."""
-    if len(packet) % 2 != 0:
-        packet += b'\0'
-
-    res = sum(array.array("H", packet))
-    res = (res >> 16) + (res & 0xffff)
-    res += res >> 16
-
-    return (~res) & 0xffff
 
 
 def unpack_tcp_option(tcp_option):
@@ -148,13 +137,3 @@ def pack_tcp_option(option_val, kind_seq):
             reply_tcp_option += struct.pack('!B', 1)
 
     return reply_tcp_option
-
-
-def byte2mac(mac_byte):
-    """Converts MAC byte format to human-readable string."""
-    return "%02x:%02x:%02x:%02x:%02x:%02x" % struct.unpack("BBBBBB", mac_byte)
-
-
-def byte2ip(ip_byte):
-    """Converts IP byte format to human-readable string."""
-    return socket.inet_ntoa(ip_byte)
