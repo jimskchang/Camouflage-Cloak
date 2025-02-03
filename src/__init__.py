@@ -15,26 +15,22 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Import key modules for global access
+# Ensure settings module is available
 try:
-    from . import settings  # Ensure settings.py exists in the same package
+    from . import settings
 except ImportError as e:
     logging.error(f"Failed to import settings: {e}")
     raise
 
-# Import other key modules
-from .Packet import Packet
-from .tcp import TcpConnect
-from .os_deceiver import OsDeceiver
-from .port_deceiver import PortDeceiver
-from .utils import (
-    calculate_checksum,
-    generate_random_mac,
-    generate_random_ip,
-    convert_mac_to_bytes,
-    convert_ip_to_bytes,
-    convert_bytes_to_mac,
-    convert_bytes_to_ip
-)
+# Import core modules safely
+try:
+    from .Packet import Packet
+    from .tcp import TcpConnect
+    from .os_deceiver import OsDeceiver
+    from .port_deceiver import PortDeceiver
+    from . import utils  # Import entire utils module instead of specific functions
+except ImportError as e:
+    logging.error(f"Error importing core modules: {e}")
+    raise
 
 logging.info("Camouflage Cloak Package Initialized")
