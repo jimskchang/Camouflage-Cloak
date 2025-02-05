@@ -20,7 +20,7 @@ def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - Main Execution")
     parser.add_argument("--host", action="store", required=True, help="Specify destination IP")
     parser.add_argument("--port", action="store", help="Specify destination port")
-    parser.add_argument("--nic", action="store", help="NIC where we capture the packets")
+    parser.add_argument("--nic", action="store", required=True, help="NIC where we capture the packets")
     parser.add_argument("--scan", action="store", required=True, help="Attacker's port scanning technique")
     parser.add_argument("--status", action="store", help="Designate port status")
     parser.add_argument("--os", action="store", help="Designate OS we want to deceive")
@@ -30,15 +30,15 @@ def main():
 
     # Assign local variables
     target_host = args.host
-    output_dir = args.output_dir if args.output_dir else settings.TS_OS_OUTPUT_DIR
-    os_type = args.os if args.os else settings.TS_SERVER_OS
+    output_dir = args.output_dir if args.output_dir else settings.TARGET_OS_OUTPUT_DIR
+    os_type = args.os if args.os else settings.TARGET_SERVER_OS
     scan_type = args.scan.lower()
 
     # Ensure output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
     # Log configuration
-    logging.info(f"Configuration: Target Host={target_host}, OS={os_type}, Output Dir={output_dir}")
+    logging.info(f"Configuration: Target Host={target_host}, OS={os_type}, Output Dir={output_dir}, NIC={args.nic}")
 
     # Execute based on the selected scanning technique
     if scan_type == "ts":
