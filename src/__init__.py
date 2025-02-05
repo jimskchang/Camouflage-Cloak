@@ -27,9 +27,8 @@ try:
     # Validate essential settings to prevent runtime errors
     REQUIRED_SETTINGS = [
         "CLOAK_NIC", "CLOAK_HOST", "CLOAK_MAC",
-        "TARGET_NIC", "TARGET_HOST", "TARGET_MAC",
-        "TS_SERVER_NIC", "TS_SERVER", "TS_SERVER_MAC",
-        "TS_SERVER_OS", "TS_OS_OUTPUT_DIR"
+        "TARGET_SERVER_NIC", "TARGET_SERVER", "TARGET_SERVER_MAC",
+        "TARGET_SERVER_OS", "TARGET_OS_OUTPUT_DIR"
     ]
     
     for var in REQUIRED_SETTINGS:
