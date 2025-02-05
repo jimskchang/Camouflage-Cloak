@@ -31,7 +31,7 @@ class OsDeceiver:
     def os_record(self, output_path=None):
         """Records OS-specific network responses for deception."""
         if not output_path:
-            output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os_type}_record.json")
+            output_path = os.path.join(settings.TARGET_OS_OUTPUT_DIR, f"{self.os_type}_record.json")
 
         # ✅ Ensure the directory exists before writing files
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -75,7 +75,7 @@ class OsDeceiver:
     def store_rsp(self, output_path=None):
         """Stores response packets."""
         if not output_path:
-            output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, "rsp_record.json")
+            output_path = os.path.join(settings.TARGET_OS_OUTPUT_DIR, "rsp_record.json")
 
         # ✅ Ensure directory exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -118,7 +118,7 @@ class OsDeceiver:
     def os_deceive(self, output_path=None):
         """Performs OS deception."""
         if not output_path:
-            output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os_type}_deception_log.json")
+            output_path = os.path.join(settings.TARGET_OS_OUTPUT_DIR, f"{self.os_type}_deception_log.json")
 
         # ✅ Ensure directory exists
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -150,7 +150,7 @@ class OsDeceiver:
 
     def load_file(self, pkt_type: str):
         """Loads stored OS record files."""
-        output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os_type}_{pkt_type}_record.json")
+        output_path = os.path.join(settings.TARGET_OS_OUTPUT_DIR, f"{self.os_type}_{pkt_type}_record.json")
 
         if not os.path.exists(output_path):
             logging.warning(f"File {output_path} not found. Creating an empty record.")
