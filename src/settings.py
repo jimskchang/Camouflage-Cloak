@@ -26,28 +26,23 @@ CLOAK_NIC = "ens192"   # Network Interface Card
 CLOAK_HOST = "192.168.23.206"
 CLOAK_MAC = "00:50:56:8E:35:6F"
 
-# Target Host (Attacker or Scanner)
-TARGET_NIC = "ens192"
-TARGET_HOST = "192.168.23.202"
-TARGET_MAC = "00:50:56:8E:4D:0F"
+# Target Server (Target Host)
+TARGET_SERVER_NIC = "ens192"
+TARGET_SERVER = "192.168.23.200"
+TARGET_SERVER_MAC = "00:50:56:8E:4B:2B"
 
-# TS Server (Deception Target)
-TS_SERVER_NIC = "ens192"
-TS_SERVER = "192.168.23.200"
-TS_SERVER_MAC = "00:0C:29:1E:77:FD"
-
-# OS Type for TS Server (Modify accordingly: "win10", "win7", "linux", etc.)
-TS_SERVER_OS = "win10"
+# OS Type for Target Server (Modify accordingly: "win10", "win7", "linux", etc.)
+TARGET_SERVER_OS = "win10"  # ✅ Fixed Typo (was TASRGET_SERVER_OS)
 
 # ========================
 # ✅ OUTPUT DIRECTORY SETTINGS
 # ========================
 
 # Default output directory for storing deception logs
-TS_OS_OUTPUT_DIR = os.path.join(os.getcwd(), "output")
+TARGET_OS_OUTPUT_DIR = os.path.join(os.getcwd(), "output")
 
 # Ensure the directory exists
-os.makedirs(TS_OS_OUTPUT_DIR, exist_ok=True)
+os.makedirs(TARGET_OS_OUTPUT_DIR, exist_ok=True)
 
 # ========================
 # ✅ PACKET SETTINGS
@@ -61,3 +56,12 @@ IP_HEADER_LEN = 20
 
 # TCP header length (without options)
 TCP_HEADER_LEN = 20
+
+# Other Protocol Headers
+ARP_HEADER_LEN = 28
+UDP_HEADER_LEN = 8
+ICMP_HEADER_LEN = 8
+
+# Layer 3 & Layer 4 Processing Protocols
+L3_PROC = ['ip', 'arp']
+L4_PROC = ['tcp', 'udp', 'icmp']
