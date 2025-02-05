@@ -22,15 +22,17 @@ class PortDeceiver:
     def send_packet(self, recv_flags, reply_flags, output_path=None):
         """Handles packet replies for deceptive port responses."""
         if not output_path:
-            output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, "pkt_record.log")
+            output_path = os.path.join(settings.TARGET_OS_OUTPUT_DIR, "pkt_record.log")
+
+        # ✅ Ensure directory exists
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         logging.info(f"Recording deceptive packets in {output_path}")
 
         while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            pkt = Packet(packet)
-
             try:
+                packet, _ = self.conn.sock.recvfrom(65565)
+                pkt = Packet(packet)
                 pkt.unpack()
             except Exception as e:
                 logging.error(f"Failed to unpack packet: {e}")
@@ -40,7 +42,7 @@ class PortDeceiver:
                 logging.warning("Packet missing L3 fields, skipping.")
                 continue
 
-            if pkt.l3_field['dest_IP'] != settings.TARGET_HOST:
+            if pkt.l3_field['dest_IP'] != settings.TARGET_SERVER:
                 continue
 
             if pkt.l4 != "tcp":
@@ -81,7 +83,10 @@ class PortDeceiver:
     def deceive_ps_hs(self, port_status, output_path=None):
         """Deceives port scanning techniques."""
         if not output_path:
-            output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, "deception_log.log")
+            output_path = os.path.join(settings.TARGET_OS_OUTPUT_DIR, "deception_log.log")
+
+        # ✅ Ensure directory exists
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         logging.info(f"Deceiving port scan as {port_status}, logging responses to {output_path}")
 
@@ -94,10 +99,9 @@ class PortDeceiver:
             return
 
         while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            pkt = Packet(packet)
-
             try:
+                packet, _ = self.conn.sock.recvfrom(65565)
+                pkt = Packet(packet)
                 pkt.unpack()
             except Exception as e:
                 logging.error(f"Failed to unpack packet: {e}")
@@ -107,7 +111,7 @@ class PortDeceiver:
                 logging.warning("Packet missing L3 fields, skipping.")
                 continue
 
-            if pkt.l3_field['dest_IP'] != settings.TARGET_HOST:
+            if pkt.l3_field['dest_IP'] != settings.TARGET_SERVER:
                 continue
 
             if pkt.l4 != "tcp":
@@ -149,7 +153,7 @@ class PortDeceiver:
         """Builds Ethernet and IP headers for deceptive responses."""
         eth_header = struct.pack('!6s6sH', 
                                  convert_mac_to_bytes(settings.CLOAK_MAC), 
-                                 convert_mac_to_bytes(settings.TARGET_MAC), 
+                                 convert_mac_to_bytes(settings.TARGET_SERVER_MAC), 
                                  0x0800)  # IP Protocol
 
         src_ip_bytes = convert_ip_to_bytes(src_ip)
