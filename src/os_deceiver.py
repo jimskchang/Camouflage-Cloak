@@ -33,111 +33,120 @@ class OsDeceiver:
         if not output_path:
             output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os_type}_record.json")
 
+        # ✅ Ensure the directory exists before writing files
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
         logging.info(f"Recording OS packets to {output_path}")
 
         pkt_dict = {}
 
         while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            pkt = Packet(packet)
-
-            # Check if it's an ARP packet before unpacking
-            if pkt.l3 == "arp":
-                logging.warning("ARP Packet detected, skipping processing.")
-                continue
-
             try:
-                pkt.unpack()
-            except AttributeError as e:
-                logging.error(f"Packet processing error: {e}")
-                continue
+                packet, _ = self.conn.sock.recvfrom(65565)
+                pkt = Packet(packet)
 
-            if pkt.l3_field and 'dest_IP' in pkt.l3_field and pkt.l3_field['dest_IP'] == self.host:
-                key, packet_val = self.gen_tcp_key(pkt)
-
-                if packet_val['flags'] == 4:  # Ignore RST packets
+                if pkt.l3 == "arp":
+                    logging.warning("ARP Packet detected, skipping processing.")
                     continue
 
-                if key not in pkt_dict:
-                    pkt_dict[key] = {
-                        "l3_field": pkt.l3_field,
-                        "l4_field": pkt.l4_field,
-                        "data": base64.b64encode(pkt.packet).decode()
-                    }
+                pkt.unpack()
 
-                # Save to file
-                with open(output_path, 'w') as f:
-                    json.dump(pkt_dict, f, indent=4)
+                if pkt.l3_field and 'dest_IP' in pkt.l3_field and pkt.l3_field['dest_IP'] == self.host:
+                    key, packet_val = self.gen_tcp_key(pkt)
+
+                    if packet_val['flags'] == 4:  # Ignore RST packets
+                        continue
+
+                    if key not in pkt_dict:
+                        pkt_dict[key] = {
+                            "l3_field": pkt.l3_field,
+                            "l4_field": pkt.l4_field,
+                            "data": base64.b64encode(pkt.packet).decode()
+                        }
+
+                    logging.info(f"Saving packet data to {output_path}")
+
+                    with open(output_path, 'w') as f:
+                        json.dump(pkt_dict, f, indent=4)
+
+            except Exception as e:
+                logging.error(f"Error in os_record(): {e}")
 
     def store_rsp(self, output_path=None):
         """Stores response packets."""
         if not output_path:
             output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, "rsp_record.json")
 
+        # ✅ Ensure directory exists
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
         logging.info(f"Storing responses to {output_path}")
 
         rsp = {}
 
         while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            pkt = Packet(packet)
-
-            # Check if it's an ARP packet before unpacking
-            if pkt.l3 == "arp":
-                logging.warning("ARP Packet detected, skipping processing.")
-                continue
-
             try:
+                packet, _ = self.conn.sock.recvfrom(65565)
+                pkt = Packet(packet)
+
+                if pkt.l3 == "arp":
+                    logging.warning("ARP Packet detected, skipping processing.")
+                    continue
+
                 pkt.unpack()
-            except AttributeError as e:
-                logging.error(f"Packet processing error: {e}")
-                continue
 
-            if pkt.l3_field and 'src_IP' in pkt.l3_field and pkt.l3_field['src_IP'] == self.host:
-                src_port = pkt.l4_field.get('src_port', 0)
+                if pkt.l3_field and 'src_IP' in pkt.l3_field and pkt.l3_field['src_IP'] == self.host:
+                    src_port = pkt.l4_field.get('src_port', 0)
 
-                if src_port not in rsp:
-                    rsp[src_port] = []
+                    if src_port not in rsp:
+                        rsp[src_port] = []
 
-                rsp[src_port].append({
-                    "l3_field": pkt.l3_field,
-                    "l4_field": pkt.l4_field,
-                    "data": base64.b64encode(pkt.packet).decode()
-                })
+                    rsp[src_port].append({
+                        "l3_field": pkt.l3_field,
+                        "l4_field": pkt.l4_field,
+                        "data": base64.b64encode(pkt.packet).decode()
+                    })
 
-                with open(output_path, 'w') as f:
-                    json.dump(rsp, f, indent=4)
+                    logging.info(f"Saving response packet data to {output_path}")
+
+                    with open(output_path, 'w') as f:
+                        json.dump(rsp, f, indent=4)
+
+            except Exception as e:
+                logging.error(f"Error in store_rsp(): {e}")
 
     def os_deceive(self, output_path=None):
         """Performs OS deception."""
         if not output_path:
             output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os_type}_deception_log.json")
 
+        # ✅ Ensure directory exists
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
         logging.info(f"Starting OS deception for {self.os_type}")
 
         dec_count = 0
 
         while True:
-            raw_pkt, _ = self.conn.sock.recvfrom(65565)
-            pkt = Packet(packet=raw_pkt)
-
             try:
+                raw_pkt, _ = self.conn.sock.recvfrom(65565)
+                pkt = Packet(packet=raw_pkt)
                 pkt.unpack()
-            except AttributeError as e:
-                logging.error(f"Packet processing error: {e}")
-                continue
 
-            proc = pkt.get_proc()
+                proc = pkt.get_proc()
 
-            if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == self.host) or \
-                    (pkt.l3 == 'arp' and pkt.l3_field.get('recv_ip') == self.host):
+                if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == self.host) or \
+                        (pkt.l3 == 'arp' and pkt.l3_field.get('recv_ip') == self.host):
 
-                req = pkt
-                rsp = self.deceived_pkt_synthesis(proc, req)
-                if rsp:
-                    dec_count += 1
-                    logging.info(f"Sending deceptive packet {dec_count} for {proc}")
-                    self.conn.sock.send(rsp)
+                    req = pkt
+                    rsp = self.deceived_pkt_synthesis(proc, req)
+                    if rsp:
+                        dec_count += 1
+                        logging.info(f"Sending deceptive packet {dec_count} for {proc}")
+                        self.conn.sock.send(rsp)
+
+            except Exception as e:
+                logging.error(f"Error in os_deceive(): {e}")
 
     def load_file(self, pkt_type: str):
         """Loads stored OS record files."""
@@ -160,23 +169,30 @@ class OsDeceiver:
 
     def gen_tcp_key(self, pkt: Packet):
         """Generate a unique key for TCP packets."""
-        src_IP = pkt.l3_field['src_IP']
-        dest_IP = pkt.l3_field['dest_IP']
-        src_port = pkt.l4_field.get('src_port', 0)
-        dest_port = pkt.l4_field.get('dest_port', 0)
-        flags = pkt.l4_field.get('flags', 0)
+        try:
+            src_IP = pkt.l3_field['src_IP']
+            dest_IP = pkt.l3_field['dest_IP']
+            src_port = pkt.l4_field.get('src_port', 0)
+            dest_port = pkt.l4_field.get('dest_port', 0)
+            flags = pkt.l4_field.get('flags', 0)
 
-        key = f"{src_IP}-{dest_IP}-{src_port}-{dest_port}-{flags}"
-        return key, {'flags': flags}
+            key = f"{src_IP}-{dest_IP}-{src_port}-{dest_port}-{flags}"
+            return key, {'flags': flags}
+        except KeyError as e:
+            logging.error(f"Missing expected packet fields: {e}")
+            return None, {}
 
     def deceived_pkt_synthesis(self, proc, req):
         """Generates a deceptive packet based on template data."""
         key, _ = self.gen_tcp_key(req)
 
-        if proc in self.template_dict and key in self.template_dict.get(proc, {}):
+        if key and proc in self.template_dict and key in self.template_dict.get(proc, {}):
             raw_template = self.template_dict[proc][key]
             template_pkt = Packet(raw_template)
             template_pkt.unpack()
+
+            logging.info(f"Generating deceptive response for {proc}")
+
             return template_pkt.packet
 
         logging.warning(f"No template found for {proc} key={key}.")
