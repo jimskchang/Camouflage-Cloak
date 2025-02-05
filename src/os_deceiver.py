@@ -70,33 +70,43 @@ class OsDeceiver:
                 json.dump(pkt_dict, f, indent=4)
 
     def store_rsp(self, output_path=None):
-        """Stores response packets."""
-        if not output_path:
-            output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, "rsp_record.json")
+    """Stores response packets."""
+    if not output_path:
+        output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, "rsp_record.json")
 
-        logging.info(f"Storing responses to {output_path}")
+    logging.info(f"Storing responses to {output_path}")
 
-        rsp = {}
+    rsp = {}
 
-        while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            pkt = Packet(packet)
+    while True:
+        packet, _ = self.conn.sock.recvfrom(65565)
+        pkt = Packet(packet)
+
+        # Check if it's an ARP packet before unpacking
+        if pkt.l3 == "arp":
+            logging.warning("ARP Packet detected, skipping processing.")
+            continue
+
+        try:
             pkt.unpack()
+        except AttributeError as e:
+            logging.error(f"Packet processing error: {e}")
+            continue
 
-            if pkt.l3_field['src_IP'] == self.host:
-                src_port = pkt.l4_field.get('src_port', 0)
+        if pkt.l3_field['src_IP'] == self.host:
+            src_port = pkt.l4_field.get('src_port', 0)
 
-                if src_port not in rsp:
-                    rsp[src_port] = []
+            if src_port not in rsp:
+                rsp[src_port] = []
 
-                rsp[src_port].append({
-                    "l3_field": pkt.l3_field,
-                    "l4_field": pkt.l4_field,
-                    "data": base64.b64encode(pkt.packet).decode()
-                })
+            rsp[src_port].append({
+                "l3_field": pkt.l3_field,
+                "l4_field": pkt.l4_field,
+                "data": base64.b64encode(pkt.packet).decode()
+            })
 
-                with open(output_path, 'w') as f:
-                    json.dump(rsp, f, indent=4)
+            with open(output_path, 'w') as f:
+                json.dump(rsp, f, indent=4)
 
     def os_deceive(self, output_path=None):
         """Performs OS deception."""
