@@ -49,7 +49,7 @@ class Packet:
 
     def unpack_l2_header(self) -> None:
         """ Unpacks Ethernet (L2) header. """
-        self.l2_header = self.packet[:14]
+        self.l2_header = self.packet[:settings.ETH_HEADER_LEN]
         eth = struct.unpack('!6s6sH', self.l2_header)
         eth_dMAC, eth_sMAC, eth_protocol = eth
 
@@ -84,7 +84,10 @@ class Packet:
 
     def unpack_ip_header(self) -> None:
         """ Unpacks IP header and determines Layer 4 protocol. """
-        self.l3_header = self.packet[14:34]
+        ip_start = settings.ETH_HEADER_LEN
+        ip_end = ip_start + settings.IP_HEADER_LEN
+        self.l3_header = self.packet[ip_start:ip_end]
+
         fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header)
         IHL_VERSION, _, total_len, _, _, _, PROTOCOL, _, src_IP, dest_IP = fields
 
@@ -107,7 +110,10 @@ class Packet:
 
     def unpack_arp_packet(self) -> None:
         """ Unpacks ARP header and stores relevant fields. """
-        self.l3_header = self.packet[14:42]
+        arp_start = settings.ETH_HEADER_LEN
+        arp_end = arp_start + settings.ARP_HEADER_LEN
+        self.l3_header = self.packet[arp_start:arp_end]
+
         fields = struct.unpack('!HHBBH6s4s6s4s', self.l3_header)
         hw_type, proto_type, hw_size, proto_size, opcode, sender_mac, sender_ip, target_mac, target_ip = fields
 
@@ -127,7 +133,10 @@ class Packet:
 
     def unpack_tcp_header(self) -> None:
         """ Unpacks TCP header. """
-        self.l4_header = self.packet[34:54]
+        tcp_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
+        tcp_end = tcp_start + settings.TCP_HEADER_LEN
+        self.l4_header = self.packet[tcp_start:tcp_end]
+
         fields = struct.unpack('!HHLLBBHHH', self.l4_header)
         src_port, dest_port, seq, ack_num, offset_flags, flags, _, checksum, _ = fields
 
@@ -144,7 +153,10 @@ class Packet:
 
     def unpack_udp_header(self) -> None:
         """ Unpacks UDP header. """
-        self.l4_header = self.packet[34:42]
+        udp_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
+        udp_end = udp_start + settings.UDP_HEADER_LEN
+        self.l4_header = self.packet[udp_start:udp_end]
+
         fields = struct.unpack('!4H', self.l4_header)
         src_port, dest_port, udp_len, checksum = fields
 
