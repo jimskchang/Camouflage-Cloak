@@ -58,20 +58,11 @@ def convert_mac_to_bytes(mac_str):
     Converts a MAC address from string format to bytes.
     Example: "00:1A:2B:3C:4D:5E" -> b'\x00\x1A\x2B\x3C\x4D\x5E'
     """
-    if not isinstance(mac_str, str):
-        logging.error("Invalid input: MAC address must be a string.")
-        raise ValueError("MAC address must be a string")
+    if not is_valid_mac(mac_str):
+        logging.error(f"Invalid MAC address format: {mac_str}")
+        raise ValueError("Invalid MAC address format")
 
-    parts = mac_str.split(":")
-    if len(parts) != 6:
-        logging.error("Invalid MAC address format: Incorrect number of segments.")
-        raise ValueError("MAC address must have exactly 6 segments separated by ':'")
-
-    try:
-        return struct.pack('!6B', *[int(x, 16) for x in parts])
-    except ValueError:
-        logging.error("Invalid MAC address: Contains non-hexadecimal characters.")
-        raise ValueError("MAC address contains invalid characters")
+    return struct.pack('!6B', *[int(x, 16) for x in mac_str.split(":")])
 
 
 def convert_ip_to_bytes(ip_str):
@@ -79,15 +70,11 @@ def convert_ip_to_bytes(ip_str):
     Converts an IPv4 address from string to bytes.
     Example: "192.168.1.1" -> b'\xC0\xA8\x01\x01'
     """
-    if not isinstance(ip_str, str):
-        logging.error("Invalid input: IP address must be a string.")
-        raise ValueError("IP address must be a string")
-
-    try:
-        return socket.inet_aton(ip_str)
-    except socket.error:
-        logging.error("Invalid IP address format.")
+    if not is_valid_ip(ip_str):
+        logging.error(f"Invalid IP address format: {ip_str}")
         raise ValueError("Invalid IP address format")
+
+    return socket.inet_aton(ip_str)
 
 
 def convert_bytes_to_ip(ip_bytes):
@@ -96,7 +83,7 @@ def convert_bytes_to_ip(ip_bytes):
     Example: b'\xC0\xA8\x01\x01' -> "192.168.1.1"
     """
     if not isinstance(ip_bytes, bytes) or len(ip_bytes) != 4:
-        logging.error("Invalid input: IP bytes must be a 4-byte string.")
+        logging.error("Invalid input: IP bytes must be exactly 4 bytes long.")
         raise ValueError("IP bytes must be exactly 4 bytes long")
 
     return socket.inet_ntoa(ip_bytes)
@@ -108,7 +95,53 @@ def convert_bytes_to_mac(mac_bytes):
     Example: b'\x00\x1A\x2B\x3C\x4D\x5E' -> "00:1A:2B:3C:4D:5E"
     """
     if not isinstance(mac_bytes, bytes) or len(mac_bytes) != 6:
-        logging.error("Invalid input: MAC bytes must be a 6-byte string.")
+        logging.error("Invalid input: MAC bytes must be exactly 6 bytes long.")
         raise ValueError("MAC bytes must be exactly 6 bytes long")
 
     return ':'.join(f'{b:02x}'.upper() for b in mac_bytes)
+
+
+def convert_bytes_to_int(byte_data):
+    """
+    Converts a byte sequence to an integer.
+    Example: b'\x00\x01' -> 1
+    """
+    return int.from_bytes(byte_data, byteorder='big')
+
+
+def convert_int_to_bytes(value, length):
+    """
+    Converts an integer to a byte sequence of specified length.
+    Example: 1 -> b'\x00\x01' (for length=2)
+    """
+    return value.to_bytes(length, byteorder='big')
+
+
+def is_valid_mac(mac_str):
+    """
+    Validates a MAC address.
+    Example: "00:1A:2B:3C:4D:5E" -> True
+    """
+    if not isinstance(mac_str, str):
+        return False
+
+    parts = mac_str.split(":")
+    if len(parts) != 6:
+        return False
+
+    try:
+        return all(0 <= int(x, 16) <= 255 for x in parts)
+    except ValueError:
+        return False
+
+
+def is_valid_ip(ip_str):
+    """
+    Validates an IPv4 address.
+    Example: "192.168.1.1" -> True
+    """
+    try:
+        socket.inet_aton(ip_str)
+        return True
+    except socket.error:
+        return False
