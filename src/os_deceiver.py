@@ -29,35 +29,45 @@ class OsDeceiver:
         }
 
     def os_record(self, output_path=None):
-        """Records OS-specific network responses for deception."""
-        if not output_path:
-            output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os_type}_record.json")
+    """Records OS-specific network responses for deception."""
+    if not output_path:
+        output_path = os.path.join(settings.TS_OS_OUTPUT_DIR, f"{self.os_type}_record.json")
 
-        logging.info(f"Recording OS packets to {output_path}")
+    logging.info(f"Recording OS packets to {output_path}")
 
-        pkt_dict = {}
+    pkt_dict = {}
 
-        while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            pkt = Packet(packet)
+    while True:
+        packet, _ = self.conn.sock.recvfrom(65565)
+        pkt = Packet(packet)
+
+        # Check if it's an ARP packet before unpacking
+        if pkt.l3 == "arp":
+            logging.warning("ARP Packet detected, skipping processing.")
+            continue
+
+        try:
             pkt.unpack()
+        except AttributeError as e:
+            logging.error(f"Packet processing error: {e}")
+            continue
 
-            if pkt.l3_field['dest_IP'] == self.host:
-                key, packet_val = self.gen_tcp_key(pkt)
+        if pkt.l3_field['dest_IP'] == self.host:
+            key, packet_val = self.gen_tcp_key(pkt)
 
-                if packet_val['flags'] == 4:  # Ignore RST packets
-                    continue
+            if packet_val['flags'] == 4:  # Ignore RST packets
+                continue
 
-                if key not in pkt_dict:
-                    pkt_dict[key] = {
-                        "l3_field": pkt.l3_field,
-                        "l4_field": pkt.l4_field,
-                        "data": base64.b64encode(pkt.packet).decode()
-                    }
+            if key not in pkt_dict:
+                pkt_dict[key] = {
+                    "l3_field": pkt.l3_field,
+                    "l4_field": pkt.l4_field,
+                    "data": base64.b64encode(pkt.packet).decode()
+                }
 
-                # Save to file
-                with open(output_path, 'w') as f:
-                    json.dump(pkt_dict, f, indent=4)
+            # Save to file
+            with open(output_path, 'w') as f:
+                json.dump(pkt_dict, f, indent=4)
 
     def store_rsp(self, output_path=None):
         """Stores response packets."""
