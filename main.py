@@ -3,8 +3,8 @@ import argparse
 import os
 import sys
 
-# Ensure correct module path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Ensure the `src` directory is in the Python module path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
 
 # Import settings and dependencies
 try:
@@ -13,8 +13,8 @@ except ImportError:
     logging.warning("Failed to import settings.py. Using default values.")
     settings = None
 
-from port_deceiver import PortDeceiver
-from os_deceiver import OsDeceiver
+from src.port_deceiver import PortDeceiver
+from src.os_deceiver import OsDeceiver
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s]: %(message)s",
