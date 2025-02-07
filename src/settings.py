@@ -30,7 +30,7 @@ def get_mac_address(nic):
     except Exception:
         return "Unknown"
 
-NICAddr = get_mac_address(NIC)
+NICAddr = get_mac_address(NIC)  # This line should come AFTER the function definition
 
 # Default OS record output path
 TARGET_OS_OUTPUT_DIR = os.path.join(os.getcwd(), "os_records")
