@@ -26,10 +26,7 @@ def main():
     settings.host = args.host
     settings.NIC = args.nic
 
-    if args.dest:
-        os_record_dir = settings.get_os_record_dir(args.dest)
-    else:
-        os_record_dir = settings.TARGET_OS_OUTPUT_DIR
+    os_record_dir = settings.get_os_record_dir(args.dest) if args.dest else settings.TARGET_OS_OUTPUT_DIR
     
     if not os.path.exists(os_record_dir):
         logging.info(f"Creating output directory: {os_record_dir}")
