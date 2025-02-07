@@ -30,7 +30,7 @@ def main():
     parser.add_argument("--nic", required=True, help="NIC where we capture the packets")
     parser.add_argument("--scan", required=True, help="Attacker's port scanning technique")
     parser.add_argument("--status", help="Designate port status")
-    parser.add_argument("--os", help="Designate OS we want to deceive", default="unknown")
+    parser.add_argument("--os", required=True, help="Designate OS we want to deceive")  # Make OS required
     parser.add_argument("--dest", help="Specify file storage location")
 
     args = parser.parse_args()
@@ -44,8 +44,8 @@ def main():
         logging.info(f"Creating output directory: {os_record_dir}")
         os.makedirs(os_record_dir, exist_ok=True)
 
-    # Fix: Ensure OS name is passed properly
-    os_name = args.os if args.os else "unknown"
+    # Fix: Ensure OS name is properly handled
+    os_name = args.os.strip().lower() if args.os else "unknown"
 
     port_scan_tech = args.scan
 
