@@ -26,7 +26,17 @@ class TcpConnect:
         offset = tcp_len << 4
         reply_tcp_header = struct.pack('!HHIIBBHHH', src_port, dest_port, seq, ack_num, offset, flags, 0, 0, 0)
         pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(reply_tcp_header))
-        checksum = getTCPChecksum(pseudo_hdr + reply_tcp_header)
+        checksum = get_tcp_checksum(pseudo_hdr + reply_tcp_header)
         reply_tcp_header = reply_tcp_header[:16] + struct.pack('H', checksum) + reply_tcp_header[18:]
 
         return reply_tcp_header
+
+def get_tcp_checksum(packet):
+    if len(packet) % 2 != 0:
+        packet += b'\0'
+
+    res = sum(array.array("H", packet))
+    res = (res >> 16) + (res & 0xffff)
+    res += res >> 16
+
+    return (~res) & 0xffff
