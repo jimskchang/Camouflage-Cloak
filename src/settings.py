@@ -21,8 +21,10 @@ import os
 # ✅ REQUIRED NETWORK SETTINGS
 # ========================
 
+# Default NIC (Can be overridden by CLI argument)
+CLOAK_NIC = "ens192"  # Change dynamically in `main.py` if needed
+
 # Cloak Host (This machine)
-CLOAK_NIC = "ens192"   # Network Interface Card
 CLOAK_HOST = "192.168.23.206"
 CLOAK_MAC = "00:50:56:8E:35:6F"
 
@@ -32,17 +34,20 @@ TARGET_SERVER = "192.168.23.200"
 TARGET_SERVER_MAC = "00:50:56:8E:4B:2B"
 
 # OS Type for Target Server (Modify accordingly: "win10", "win7", "linux", etc.)
-TARGET_SERVER_OS = "win10"  # ✅ Fixed Typo (was TASRGET_SERVER_OS)
+TARGET_SERVER_OS = "win10"
 
 # ========================
 # ✅ OUTPUT DIRECTORY SETTINGS
 # ========================
 
-# Default output directory for storing OS deception logs
-OS_RECORD_DIR = os.path.join(os.getcwd(), "os_records")
+# Default base directory for OS record storage (Overridden by CLI argument)
+BASE_OS_RECORD_DIR = os.path.join(os.getcwd(), "os_records")
 
-# Ensure the directory exists
-os.makedirs(OS_RECORD_DIR, exist_ok=True)
+# Function to ensure directory exists dynamically
+def get_os_record_dir(custom_path=None):
+    os_record_dir = custom_path if custom_path else BASE_OS_RECORD_DIR
+    os.makedirs(os_record_dir, exist_ok=True)
+    return os_record_dir
 
 # ========================
 # ✅ PACKET SETTINGS
