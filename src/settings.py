@@ -1,10 +1,3 @@
-
-=============================================
-Camouflage Cloak Configuration - settings.py
-=============================================
-
-# NOTE: Global Constants
-
 import os
 import subprocess
 import datetime
