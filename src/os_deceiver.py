@@ -21,9 +21,10 @@ from tcp import TcpConnect
 
 
 class OsDeceiver:
-    def __init__(self, host, os_name):
+    def __init__(self, host, os_name="unknown"):
+        """Initialize OS Deceiver with a valid OS name (prevents None issues)."""
         self.host = host
-        self.os = os_name
+        self.os = os_name if os_name else "unknown"  # Prevents None values
         self.conn = TcpConnect(host)
         self.knocking_history = {}
         self.white_list = {}
@@ -32,7 +33,7 @@ class OsDeceiver:
     def os_record(self, output_path=None):
         """Records incoming OS fingerprinting packets and saves them."""
         if output_path is None:
-            output_path = settings.TARGET_OS_OUTPUT_DIR
+            output_path = settings.get_os_record_dir()
 
         os.makedirs(output_path, exist_ok=True)
         record_file = os.path.join(output_path, f"{self.os}_record.txt")
@@ -80,7 +81,7 @@ class OsDeceiver:
     def store_rsp(self, output_path=None):
         """Stores response packets for OS deception."""
         if output_path is None:
-            output_path = settings.TARGET_OS_OUTPUT_DIR
+            output_path = settings.get_os_record_dir()
 
         os.makedirs(output_path, exist_ok=True)
         rsp_record_file = os.path.join(output_path, f"{self.os}_rsp_record.txt")
@@ -114,7 +115,7 @@ class OsDeceiver:
     def os_deceive(self, output_path=None):
         """Deceives OS fingerprinting scans."""
         if output_path is None:
-            output_path = settings.TARGET_OS_OUTPUT_DIR
+            output_path = settings.get_os_record_dir()
 
         os.makedirs(output_path, exist_ok=True)
 
