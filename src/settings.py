@@ -2,6 +2,9 @@ import os
 import subprocess
 import logging
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
+
 # Global Constants
 ETH_HEADER_LEN = 14
 IP_HEADER_LEN = 20
@@ -17,40 +20,47 @@ host = '192.168.23.200'
 NIC = 'ens192'  # Change this if your NIC is different
 
 def get_mac_address(nic):
-    """Fetch MAC address dynamically, supporting multiple methods."""
+    """Fetch MAC address dynamically, supporting multiple methods for VM compatibility."""
     
-    possible_paths = [
-        f"/sys/class/net/{nic}/address",  # Standard Linux path
-        f"/proc/net/dev_mcast",           # Alternative path (rare)
-    ]
+    # Standard Linux method
+    mac_path = f"/sys/class/net/{nic}/address"
+    if os.path.exists(mac_path):
+        try:
+            with open(mac_path, "r") as f:
+                mac_address = f.read().strip()
+            if mac_address:
+                logging.info(f"Successfully read MAC address for {nic}: {mac_address}")
+                return mac_address
+        except Exception as e:
+            logging.warning(f"Error reading {mac_path}: {e}")
 
-    # Try to read from known paths
-    for path in possible_paths:
-        if os.path.exists(path):
-            try:
-                with open(path, "r") as f:
-                    mac_address = f.read().strip()
-                if mac_address:
-                    logging.info(f"Successfully read MAC address for {nic}: {mac_address}")
-                    return mac_address
-            except Exception as e:
-                logging.warning(f"Error reading {path}: {e}")
-
-    # Fallback: Use `ip link` command
+    # Fallback 1: Use `ip link show`
     try:
         output = subprocess.check_output(["ip", "link", "show", nic], text=True)
         for line in output.split("\n"):
             if "link/ether" in line:
                 mac_address = line.split()[1].strip()
-                logging.info(f"Successfully retrieved MAC from ip command: {mac_address}")
+                logging.info(f"Successfully retrieved MAC from `ip link show`: {mac_address}")
                 return mac_address
     except subprocess.CalledProcessError as e:
         logging.error(f"Failed to retrieve MAC from `ip link show {nic}`: {e}")
 
-    # Final fallback: Default placeholder
+    # Fallback 2: Use `ifconfig` (for older Linux versions)
+    try:
+        output = subprocess.check_output(["ifconfig", nic], text=True)
+        for line in output.split("\n"):
+            if "ether" in line or "HWaddr" in line:  # Different formats
+                mac_address = line.split()[1].strip()
+                logging.info(f"Successfully retrieved MAC from ifconfig: {mac_address}")
+                return mac_address
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to retrieve MAC from `ifconfig {nic}`: {e}")
+
+    # Final fallback: Default MAC (VM Compatibility)
     logging.error(f"Failed to determine MAC address for {nic}. Returning placeholder MAC.")
     return "00:00:00:00:00:00"
 
+# Get MAC address
 NICAddr = get_mac_address(NIC)
 
 # Default OS record output path
