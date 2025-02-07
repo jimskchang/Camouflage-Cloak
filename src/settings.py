@@ -14,17 +14,25 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 
 # Network Configuration
 host = '192.168.23.200'
-NIC = 'ens192'  # Change this to match your actual network interface
+NIC = 'ens192'  # Change this if your NIC is different
 
 def get_mac_address(nic):
-    """Fetches MAC address dynamically."""
+    """Fetches MAC address dynamically and handles errors properly."""
+    mac_path = f"/sys/class/net/{nic}/address"
+
+    if not os.path.exists(mac_path):
+        logging.error(f"NIC path does not exist: {mac_path}")
+        return "00:00:00:00:00:00"
+
     try:
-        mac_address = subprocess.check_output(["cat", f"/sys/class/net/{nic}/address"]).decode().strip()
+        with open(mac_path, "r") as f:
+            mac_address = f.read().strip()
         if mac_address:
             logging.info(f"Successfully read MAC address for {nic}: {mac_address}")
             return mac_address
         else:
-            raise ValueError(f"MAC address is empty for {nic}")
+            logging.warning(f"MAC address is empty for {nic}")
+            return "00:00:00:00:00:00"
     except Exception as e:
         logging.warning(f"Unable to read NIC address from {nic}: {e}")
         return "00:00:00:00:00:00"  # Default placeholder MAC
