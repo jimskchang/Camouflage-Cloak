@@ -1,6 +1,6 @@
 import logging
 import argparse
-import src.settings as settings
+from src import settings as settings
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
 
