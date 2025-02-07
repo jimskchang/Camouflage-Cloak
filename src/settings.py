@@ -38,11 +38,11 @@ TARGET_SERVER_OS = "win10"  # ✅ Fixed Typo (was TASRGET_SERVER_OS)
 # ✅ OUTPUT DIRECTORY SETTINGS
 # ========================
 
-# Default output directory for storing deception logs
-TARGET_OS_OUTPUT_DIR = os.path.join(os.getcwd(), "output")
+# Default output directory for storing OS deception logs
+OS_RECORD_DIR = os.path.join(os.getcwd(), "os_records")
 
 # Ensure the directory exists
-os.makedirs(TARGET_OS_OUTPUT_DIR, exist_ok=True)
+os.makedirs(OS_RECORD_DIR, exist_ok=True)
 
 # ========================
 # ✅ PACKET SETTINGS
