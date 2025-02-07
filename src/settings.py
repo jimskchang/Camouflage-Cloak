@@ -21,10 +21,8 @@ import os
 # ✅ REQUIRED NETWORK SETTINGS
 # ========================
 
-# Default NIC (Can be overridden by CLI argument)
-CLOAK_NIC = "ens192"  # Change dynamically in `main.py` if needed
-
 # Cloak Host (This machine)
+CLOAK_NIC = "ens192"   # Network Interface Card
 CLOAK_HOST = "192.168.23.206"
 CLOAK_MAC = "00:50:56:8E:35:6F"
 
@@ -34,20 +32,21 @@ TARGET_SERVER = "192.168.23.200"
 TARGET_SERVER_MAC = "00:50:56:8E:4B:2B"
 
 # OS Type for Target Server (Modify accordingly: "win10", "win7", "linux", etc.)
-TARGET_SERVER_OS = "win10"
+TARGET_SERVER_OS = "win10"  # ✅ Fixed Typo (was TASRGET_SERVER_OS)
 
 # ========================
 # ✅ OUTPUT DIRECTORY SETTINGS
 # ========================
 
-# Default base directory for OS record storage (Overridden by CLI argument)
-BASE_OS_RECORD_DIR = os.path.join(os.getcwd(), "os_records")
+# Default output directory for storing OS template synthesis (ts) logs
+TARGET_OS_OUTPUT_DIR = os.path.join(os.getcwd(), "os_records")
 
-# Function to ensure directory exists dynamically
-def get_os_record_dir(custom_path=None):
-    os_record_dir = custom_path if custom_path else BASE_OS_RECORD_DIR
-    os.makedirs(os_record_dir, exist_ok=True)
-    return os_record_dir
+# Ensure the directory exists
+os.makedirs(TARGET_OS_OUTPUT_DIR, exist_ok=True)
+
+# Function to ensure the output directory is set
+if not TARGET_OS_OUTPUT_DIR:
+    raise ValueError("Missing required setting: TARGET_OS_OUTPUT_DIR. Please set it in settings.py.")
 
 # ========================
 # ✅ PACKET SETTINGS
