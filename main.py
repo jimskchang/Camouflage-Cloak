@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--nic', action="store", required=True, help='NIC where we capture the packets')
     parser.add_argument('--scan', action="store", required=True, help="Attacker's port scanning technique")
     parser.add_argument('--status', action="store", help='Designate port status')
-    parser.add_argument('--os', action="store", help='Designate OS we want to deceive')
+    parser.add_argument('--os', action="store", default="unknown", help='Designate OS we want to deceive')
     parser.add_argument('--dest', action="store", help='Specify file storage location')    
 
     args = parser.parse_args()
