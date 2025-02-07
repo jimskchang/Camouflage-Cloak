@@ -5,8 +5,11 @@ Camouflage Cloak Configuration - settings.py
 
 # NOTE: Global Constants
 
+import os
+import subprocess
 import datetime
 
+# Global Constants
 ETH_HEADER_LEN = 14
 IP_HEADER_LEN = 20
 ARP_HEADER_LEN = 28
@@ -16,9 +19,10 @@ ICMP_HEADER_LEN = 8
 L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
 
-# NOTE: Network Configuration
+# Network Configuration
 host = '192.168.23.200'
 NIC = 'ens192'
+
 # Fetch MAC address dynamically
 def get_mac_address(nic):
     try:
