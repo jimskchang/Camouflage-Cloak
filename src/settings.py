@@ -19,9 +19,17 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 host = '192.168.23.200'
 NIC = 'ens192'  # Change this if your NIC is different
 
+# Manual MAC Address (Set to None if you want to auto-detect)
+MANUAL_MAC_ADDRESS = '00:50:56:8e:35:6f'  # Replace with your MAC address or set to None
+
 def get_mac_address(nic):
-    """Fetch MAC address dynamically, supporting multiple methods for VM compatibility."""
+    """Fetch MAC address dynamically, with an option for manual input."""
     
+    # Return manual MAC address if provided
+    if MANUAL_MAC_ADDRESS:
+        logging.info(f"Using manual MAC address: {MANUAL_MAC_ADDRESS}")
+        return MANUAL_MAC_ADDRESS
+
     # Standard Linux method
     mac_path = f"/sys/class/net/{nic}/address"
     if os.path.exists(mac_path):
