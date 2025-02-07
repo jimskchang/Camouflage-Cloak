@@ -1,12 +1,11 @@
-"""
+
 =============================================
 Camouflage Cloak Configuration - settings.py
 =============================================
 
 # NOTE: Global Constants
-import os
+
 import datetime
-import subprocess
 
 ETH_HEADER_LEN = 14
 IP_HEADER_LEN = 20
