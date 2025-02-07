@@ -16,11 +16,7 @@ except ImportError:
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
 
-logging.basicConfig(
-    format="%(asctime)s [%(levelname)s]: %(message)s",
-    datefmt="%y-%m-%d %H:%M",
-    level=logging.INFO,
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
 
 
 def main():
