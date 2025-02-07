@@ -2,9 +2,13 @@ import logging
 import argparse
 import os
 import sys
-from src import settings
-from src.port_deceiver import PortDeceiver
-from src.os_deceiver import OsDeceiver
+
+# Ensure the `src` directory is in the Python module path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "src")))
+
+import settings  # Import settings after modifying the path
+from port_deceiver import PortDeceiver
+from os_deceiver import OsDeceiver
 
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
