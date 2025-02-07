@@ -11,16 +11,16 @@ logging.basicConfig(
             level=logging.INFO
         )
 
-
 def main():
     parser = argparse.ArgumentParser(description='Deceiver Demo')
-    parser.add_argument('--host', action="store", help='specify destination ip')
-    parser.add_argument('--port', action="store", help='specify destination port')
-    parser.add_argument('--nic', action="store", help='nic where we capture the packets')
-    parser.add_argument('--scan', action="store", help='attacker\'s port scanning technique')
-    parser.add_argument('--status', action="store", help='designate port status')
-    parser.add_argument('--os', action="store", help='designate os we want to deceive')
-    parser.add_argument('--dest', action="store", FILE_ADDRESS specify file storage location')    
+    parser.add_argument('--host', action="store", help='Specify destination IP')
+    parser.add_argument('--port', action="store", help='Specify destination port')
+    parser.add_argument('--nic', action="store", help='NIC where we capture the packets')
+    parser.add_argument('--scan', action="store", help="Attacker's port scanning technique")
+    parser.add_argument('--status', action="store", help='Designate port status')
+    parser.add_argument('--os', action="store", help='Designate OS we want to deceive')
+    parser.add_argument('--dest', action="store", help='Specify file storage location')    
+
     args = parser.parse_args()
     settings.host = args.host
 
