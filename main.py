@@ -3,8 +3,8 @@ import argparse
 import os
 import sys
 from src import settings
-from src.port_deceiver import PortDeceiver
-from src.os_deceiver import OsDeceiver
+from src  import PortDeceiver
+from src import OsDeceiver
 
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
