@@ -19,6 +19,25 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 # NOTE: Network Configuration
 host = '192.168.23.200'
 NIC = 'ens192'
-NICAddr = '/sys/class/net/%s/address' % NIC
+# Fetch MAC address dynamically
+def get_mac_address(nic):
+    try:
+        return subprocess.check_output(["cat", f"/sys/class/net/{nic}/address"]).decode().strip()
+    except Exception:
+        return "Unknown"
+
+NICAddr = get_mac_address(NIC)
+
+# Default OS record output path
+TARGET_OS_OUTPUT_DIR = os.path.join(os.getcwd(), "os_records")
+os.makedirs(TARGET_OS_OUTPUT_DIR, exist_ok=True)
+
+# Ensure the directory exists
+def get_os_record_dir(custom_path=None):
+    os_record_dir = custom_path if custom_path else TARGET_OS_OUTPUT_DIR
+    os.makedirs(os_record_dir, exist_ok=True)
+    return os_record_dir
+
+# Record Path
 record_path = 'pkt_record.txt'
-mac = "00:0C:29:1E:77:FD"  # Updated to string format
+mac = NICAddr
