@@ -14,7 +14,7 @@ UDP_HEADER_LEN = 8
 ICMP_HEADER_LEN = 8
 L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
-host = '10.192.23.200'
+host = '192.168.23.200'
 
 
 # NOTE: Settings
