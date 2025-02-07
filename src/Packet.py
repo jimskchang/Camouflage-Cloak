@@ -10,15 +10,6 @@ except ImportError:
     logging.warning("Failed to import settings.py. Using default values.")
     settings = None
 
-# Import utility functions
-from src.utils import (
-    calculate_checksum,
-    convert_ip_to_bytes,
-    convert_mac_to_bytes,
-    convert_bytes_to_ip,
-    convert_bytes_to_mac
-)
-
 # Default protocol processing lists (if missing from settings.py)
 L3_PROC = getattr(settings, "L3_PROC", ['ip', 'arp'])
 L4_PROC = getattr(settings, "L4_PROC", ['tcp', 'udp', 'icmp'])
