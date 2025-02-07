@@ -5,7 +5,7 @@ import os
 
 # Ensure settings is properly imported
 try:
-    import src.settings as settings
+    import settings
 except ImportError:
     logging.warning("Failed to import settings.py. Using default values.")
     settings = None
