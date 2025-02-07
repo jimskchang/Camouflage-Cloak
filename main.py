@@ -1,5 +1,7 @@
 import logging
 import argparse
+import os
+import sys
 from src import settings
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
@@ -24,35 +26,38 @@ def main():
     settings.host = args.host
     settings.NIC = args.nic
 
-    os_record_dir = settings.get_os_record_dir(args.dest)  # Ensure directory exists
+    if args.dest:
+        os_record_dir = settings.get_os_record_dir(args.dest)
+    else:
+        os_record_dir = settings.TARGET_OS_OUTPUT_DIR
+    
+    if not os.path.exists(os_record_dir):
+        logging.info(f"Creating output directory: {os_record_dir}")
+        os.makedirs(os_record_dir, exist_ok=True)
+    
+    port_scan_tech = args.scan
 
-    if args.scan:
-        port_scan_tech = args.scan
-
-        if port_scan_tech == 'ts':
-            deceiver = OsDeceiver(args.host, args.os)
-            deceiver.os_record(output_path=os_record_dir)
-        elif port_scan_tech == 'od':
-            if args.os is None:
-                logging.debug('No OS is designated')
-            else:
-                deceiver = OsDeceiver(args.host, args.os)
-                deceiver.os_deceive(output_path=os_record_dir)
-        elif port_scan_tech == 'rr':
-            deceiver = OsDeceiver(args.host, args.os)
-            deceiver.store_rsp(output_path=os_record_dir)
-        elif port_scan_tech == 'pd':
-            if args.status:
-                deceiver = PortDeceiver(args.host)
-                deceiver.deceive_ps_hs(args.status, output_path=os_record_dir)
-            else:
-                logging.error('Port status must be specified for PD scan')
-                return
+    if port_scan_tech == 'ts':
+        deceiver = OsDeceiver(args.host, args.os)
+        deceiver.os_record(output_path=os_record_dir)
+    elif port_scan_tech == 'od':
+        if args.os is None:
+            logging.debug('No OS is designated')
         else:
-            logging.error('Invalid port scan technique specified')
+            deceiver = OsDeceiver(args.host, args.os)
+            deceiver.os_deceive(output_path=os_record_dir)
+    elif port_scan_tech == 'rr':
+        deceiver = OsDeceiver(args.host, args.os)
+        deceiver.store_rsp(output_path=os_record_dir)
+    elif port_scan_tech == 'pd':
+        if args.status:
+            deceiver = PortDeceiver(args.host)
+            deceiver.deceive_ps_hs(args.status, output_path=os_record_dir)
+        else:
+            logging.error('Port status must be specified for PD scan')
             return
     else:
-        logging.error('No scan technique is designated')
+        logging.error('Invalid port scan technique specified')
         return
 
 if __name__ == '__main__':
