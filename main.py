@@ -38,14 +38,14 @@ def main():
     settings.NIC = args.nic
 
     # Create the deceiver object based on parameters
-    deceiver = OsDeceiver(args.host, args.os)  # Initialize with os as is (may be None)
+    deceiver = OsDeceiver(args.host, args.os)  
 
     if args.scan:
         port_scan_tech = args.scan
 
         if port_scan_tech == 'ts':
-            # For ts scan, proceed without needing a valid OS name
             if deceiver:
+                # Pass the dest directory to os_record
                 deceiver.os_record(output_path=args.dest)  
             else:
                 logging.error('Failed to create OsDeceiver for ts scan.')
