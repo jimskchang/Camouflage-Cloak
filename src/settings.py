@@ -15,11 +15,11 @@ ICMP_HEADER_LEN = 8
 L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
 
-# Network Configuration
-host = '192.168.23.200'
+# Camouflage-Cloak Server Network Configuration
+host = '192.168.23.206'
 NIC = 'ens192'  # Change this if your NIC is different
 
-# Manual MAC Address (Set to None if you want to auto-detect)
+# Camouflage-Cloak Server Manual MAC Address (Set to None if you want to auto-detect)
 MANUAL_MAC_ADDRESS = '00:50:56:8e:35:6f'  # Replace with your MAC address or set to None
 
 def get_mac_address(nic):
