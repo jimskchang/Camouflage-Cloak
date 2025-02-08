@@ -21,11 +21,12 @@ class TcpConnect:
 
         if settings:
             try:
-                with open(settings.NICAddr) as f:
+                # Change NICAddr to NIC_ADDR
+                with open(settings.NIC_ADDR) as f:  # Corrected here
                     mac = f.readline()
                     self.mac = binascii.unhexlify(str.encode(''.join(mac.split(':')))[:-1])
             except FileNotFoundError:
-                print(f"Warning: Unable to read NIC address from {settings.NICAddr}. Ensure the path is correct.")
+                print(f"Warning: Unable to read NIC address from {settings.NIC_ADDR}. Ensure the path is correct.")
                 self.mac = b'\x00\x00\x00\x00\x00\x00'  # Default MAC address placeholder
 
             self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
