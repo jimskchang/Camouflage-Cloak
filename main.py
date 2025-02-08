@@ -26,28 +26,27 @@ def main():
     parser.add_argument("--nic", required=True, help="NIC where we capture the packets")
     parser.add_argument("--scan", required=True, help="Attacker's port scanning technique")
     parser.add_argument("--status", help="Designate port status")
-    parser.add_argument("--os", required=True, help="Designate OS we want to deceive")  # Make OS required
-    parser.add_argument("--dest", help="Specify file storage location")
+    parser.add_argument("--os", help="Designate OS we want to deceive (not required for 'ts')")  # Make OS optional
+    parser.add_argument("--dest", help="Specify file storage location", required=True)  # Make destination required
 
     args = parser.parse_args()
     settings.host = args.host
     settings.NIC = args.nic
 
     # Ensure output directory
-    os_record_dir = settings.get_os_record_dir(args.dest if args.dest else None)
+    os_record_dir = settings.get_os_record_dir(args.dest)
 
     if not os.path.exists(os_record_dir):
         logging.info(f"Creating output directory: {os_record_dir}")
         os.makedirs(os_record_dir, exist_ok=True)
 
-    # Fix: Ensure OS name is properly handled
+    port_scan_tech = args.scan
     os_name = args.os.strip().lower() if args.os else "unknown"
 
-    port_scan_tech = args.scan
-
     if port_scan_tech == "ts":
+        # Create the Template Synthesis and store in --dest folder
         deceiver = OsDeceiver(args.host, os_name)
-        deceiver.os_record(output_path=os_record_dir)
+        deceiver.template_synthesis(output_path=os_record_dir)  # Call to a hypothetical method to create the template
     elif port_scan_tech == "od":
         if os_name == "unknown":
             logging.debug("No OS is designated")
