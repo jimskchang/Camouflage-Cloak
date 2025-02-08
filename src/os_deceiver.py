@@ -22,14 +22,11 @@ from tcp import TcpConnect
 class OsDeceiver:
     def __init__(self, host, os_name):
         self.host = host
-        if os_name is not None:
-            self.os = os_name.strip().lower()  # Handle only non-None OS names
-        else:
-            self.os = "unknown"  # Assign a default value or any handling you prefer
+        self.os = os_name.strip().lower() if os_name else "unknown"  # Handle only non-None OS names
         self.conn = TcpConnect(host)
         self.knocking_history = {}
         self.white_list = {}
-        self.port_seq = [4441, 5551, 6661]  # Hardcoded port knocking seque
+        self.port_seq = [4441, 5551, 6661]  # Hardcoded port knocking sequence
 
     def os_record(self, output_path=None):
         """Records incoming OS fingerprinting packets and saves them."""
@@ -90,10 +87,10 @@ class OsDeceiver:
 
         os.makedirs(output_path, exist_ok=True)
 
-        # Create a template synthesis based on the OS name (this is an example implementation)
+        # Create a template synthesis based on the OS name
         template_file = os.path.join(output_path, f"{self.os}_template.txt")
         
-        # Here you can define the content of your template
+        # Define the content of your template
         template_content = f"""Template Synthesis for OS: {self.os}
 Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 ---------------------------------------
