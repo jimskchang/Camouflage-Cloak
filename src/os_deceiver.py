@@ -19,7 +19,6 @@ except ImportError:
 from Packet import Packet
 from tcp import TcpConnect
 
-
 class OsDeceiver:
     def __init__(self, host, os_name):
         self.host = host
@@ -35,10 +34,8 @@ class OsDeceiver:
             output_path = settings.TARGET_OS_OUTPUT_DIR
 
         os.makedirs(output_path, exist_ok=True)
-        
-        # ✅ Ensure the correct OS name is used in the filename
-        record_file = os.path.join(output_path, f"{self.os}_record.txt")
 
+        record_file = os.path.join(output_path, f"{self.os}_record.txt")
         pkt_dict = {}
         port_pair_seq = []
         key_seq = []
@@ -82,3 +79,28 @@ class OsDeceiver:
                     # Save to file
                     with open(record_file, "w") as f:
                         f.write(str(pkt_dict))
+
+    def template_synthesis(self, output_path=None):
+        """Generates and stores template synthesis for the given OS."""
+        if output_path is None:
+            output_path = settings.TARGET_OS_OUTPUT_DIR
+
+        os.makedirs(output_path, exist_ok=True)
+
+        # Create a template synthesis based on the OS name (this is an example implementation)
+        template_file = os.path.join(output_path, f"{self.os}_template.txt")
+        
+        # Here you can define the content of your template
+        template_content = f"""Template Synthesis for OS: {self.os}
+Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+---------------------------------------
+- Host: {self.host}
+- Known Ports: {self.port_seq}
+- Additional settings or configurations can go here.
+"""
+
+        logging.info(f"Storing template synthesis to: {template_file}")
+        
+        # Write the template to the specified file
+        with open(template_file, "w") as f:
+            f.write(template_content)
