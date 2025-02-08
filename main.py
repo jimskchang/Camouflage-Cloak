@@ -26,11 +26,11 @@ def main():
     parser = argparse.ArgumentParser(description='Deceiver Demo')
     parser.add_argument('--host', required=True, help='Specify destination IP')
     parser.add_argument('--port', action="store", help='Specify destination port')
-    parser.add_argument('--nic', action="store", help='NIC where we capture the packets', required=True)
-    parser.add_argument('--scan', action="store", help='Attacker\'s port scanning technique', required=True)
+    parser.add_argument('--nic', required=True, help='NIC where we capture the packets')
+    parser.add_argument('--scan', required=True, help='Attacker\'s port scanning technique')
     parser.add_argument('--status', action="store", help='Designate port status')
     parser.add_argument('--os', action="store", help='Designate OS we want to deceive (optional for ts)')
-    parser.add_argument('--dest', action="store", help='Designate folder to store logs', required=True)
+    parser.add_argument('--dest', required=True, help='Designate folder to store logs')
 
     args = parser.parse_args()
 
@@ -38,14 +38,17 @@ def main():
     settings.NIC = args.nic
 
     # Create the deceiver object based on parameters
-    deceiver = OsDeceiver(args.host, args.os) if args.os else None
+    if args.os is not None:
+        # Only strip if os is provided
+        deceiver = OsDeceiver(args.host, args.os.strip())  
+    else:
+        # Optionally, handle if OS is not required for ts
+        deceiver = OsDeceiver(args.host, None)  # Pass None if os is not required for handling
 
     if args.scan:
         port_scan_tech = args.scan
 
         if port_scan_tech == 'ts':
-            # If ts scan is specified, we can proceed without a designated OS argument
-            deceiver = OsDeceiver(args.host, args.os)  # Create the deceiver with or without OS
             if deceiver:
                 # Pass the dest directory to os_record
                 deceiver.os_record(output_path=args.dest)  
