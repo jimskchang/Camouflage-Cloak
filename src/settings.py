@@ -83,4 +83,4 @@ def get_os_record_dir(custom_path=None):
 
 # Record Path
 RECORD_PATH = 'pkt_record.txt'
-MAC = NIC_ADDR 
+MAC = NIC_ADDR  # Assign the resolved MAC address
