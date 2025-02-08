@@ -29,7 +29,7 @@ def main():
     parser.add_argument('--nic', action="store", help='NIC where we capture the packets', required=True)
     parser.add_argument('--scan', action="store", help='Attacker\'s port scanning technique', required=True)
     parser.add_argument('--status', action="store", help='Designate port status')
-    parser.add_argument('--os', action="store", help='Designate OS we want to deceive')
+    parser.add_argument('--os', action="store", help='Designate OS we want to deceive (optional for ts)')
     parser.add_argument('--dest', action="store", help='Designate folder to store logs', required=True)
 
     args = parser.parse_args()
@@ -44,16 +44,18 @@ def main():
         port_scan_tech = args.scan
 
         if port_scan_tech == 'ts':
+            # If ts scan is specified, we can proceed without a designated OS argument
+            deceiver = OsDeceiver(args.host, args.os)  # Create the deceiver with or without OS
             if deceiver:
                 # Pass the dest directory to os_record
                 deceiver.os_record(output_path=args.dest)  
             else:
-                logging.error('Missing OS argument for ts scan.')
+                logging.error('Failed to create OsDeceiver for ts scan.')
         elif port_scan_tech == 'od':
             if deceiver:
                 deceiver.os_deceive()
             else:
-                logging.debug('No OS is designated.')
+                logging.debug('No OS is designated for od scan.')
         elif port_scan_tech == 'rr':
             if deceiver:
                 deceiver.store_rsp()
@@ -66,7 +68,6 @@ def main():
                 logging.debug('No port status designated for PD scan.')
         else:
             logging.debug('No valid scan technique is designated.')
-            return
 
 if __name__ == '__main__':
     main()
