@@ -22,11 +22,14 @@ from tcp import TcpConnect
 class OsDeceiver:
     def __init__(self, host, os_name):
         self.host = host
-        self.os = os_name.strip().lower()  # Ensure OS name is always lowercase and cleaned
+        if os_name is not None:
+            self.os = os_name.strip().lower()  # Handle only non-None OS names
+        else:
+            self.os = "unknown"  # Assign a default value or any handling you prefer
         self.conn = TcpConnect(host)
         self.knocking_history = {}
         self.white_list = {}
-        self.port_seq = [4441, 5551, 6661]  # Hardcoded port knocking sequence
+        self.port_seq = [4441, 5551, 6661]  # Hardcoded port knocking seque
 
     def os_record(self, output_path=None):
         """Records incoming OS fingerprinting packets and saves them."""
