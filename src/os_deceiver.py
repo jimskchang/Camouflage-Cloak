@@ -66,8 +66,8 @@ class OsDeceiver:
                         packet_count += 1
                         logging.info(f"ICMP Packet Captured ({packet_count})")
 
-                        with open(icmp_record_file, "w") as f:
-                            f.write(str(icmp_pkt_dict))
+                        with open(icmp_record_file, "wb") as f:  # Save as bytes
+                            f.write(str(icmp_pkt_dict).encode())
 
                 elif eth_protocol == 1544:  # ARP packets
                     key, _ = self.gen_arp_key(packet)
@@ -75,8 +75,8 @@ class OsDeceiver:
                     packet_count += 1
                     logging.info(f"ARP Packet Captured ({packet_count})")
 
-                    with open(arp_record_file, "w") as f:
-                        f.write(str(arp_pkt_dict))
+                    with open(arp_record_file, "wb") as f:  # Save as bytes
+                        f.write(str(arp_pkt_dict).encode())
 
             logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
@@ -118,7 +118,7 @@ class OsDeceiver:
 
             if response_pkt:
                 # Ensure response is sent as bytes
-                if isinstance(response_pkt, str):  
+                if isinstance(response_pkt, str):
                     response_pkt = response_pkt.encode()  # Convert to bytes if needed
 
                 logging.info(f"Sending deceptive {proc.upper()} packet to Nmap scanner: {nmap_scanner_ip}")
@@ -133,8 +133,8 @@ class OsDeceiver:
             return {}
 
         try:
-            with open(file_path, 'r') as file:
-                return eval(file.readline())  # Read stored dictionary
+            with open(file_path, 'rb') as file:  # Read in bytes mode
+                return eval(file.readline().decode())  # Decode bytes before evaluating
         except Exception as e:
             logging.error(f"Error loading {pkt_type} record: {e}")
             return {}
