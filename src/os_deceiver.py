@@ -7,10 +7,18 @@ from src.Packet import Packet
 from src.tcp import TcpConnect
 
 class OsDeceiver:
-    def __init__(self, host, target_os):
-        self.host = host
-        self.target_os = target_os
-        self.conn = TcpConnect(host)
+    def __init__(self, target_host, camouflage_host, target_os):
+        """
+        Initialize the OS Deceiver.
+        
+        :param target_host: The actual machine we want to mimic (e.g., 192.168.23.201)
+        :param camouflage_host: The machine running deception (e.g., 192.168.23.200)
+        :param target_os: The OS we want the Nmap scan to detect (e.g., "Win10")
+        """
+        self.target_host = target_host  # The host we want to disguise
+        self.camouflage_host = camouflage_host  # The machine executing deception
+        self.target_os = target_os  # OS to mimic
+        self.conn = TcpConnect(camouflage_host)  # Camouflage host intercepts traffic
         self.os_record_path = f"os_record/{self.target_os}"
         self.create_os_folder()
 
@@ -20,56 +28,93 @@ class OsDeceiver:
             logging.info(f"Creating OS record folder: {self.os_record_path}")
             os.makedirs(self.os_record_path)
 
-    def os_record(self):
-        """ Captures and logs OS fingerprinting packets (ARP, ICMP) """
-        logging.info(f"[OS Fingerprint Capture] Capturing fingerprint packets for {self.host}")
+    def os_deceive(self):
+        """ Perform OS deception only for packets targeting the Target Host """
+        logging.info(f"[OS Deception] Intercepting OS fingerprinting packets for {self.target_host}...")
+        logging.info(f"[OS Deception] Sending deceptive {self.target_os} response...")
 
-        arp_pkt_dict = {}
-        icmp_pkt_dict = {}
-
-        arp_record_file = os.path.join(self.os_record_path, "arp_record.txt")
-        icmp_record_file = os.path.join(self.os_record_path, "icmp_record.txt")
+        template_dict = {
+            "arp": self.load_file("arp"),
+            "tcp": self.load_file("tcp"),
+            "udp": self.load_file("udp"),
+            "icmp": self.load_file("icmp")
+        }
 
         while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            eth_header = packet[:ETH_HEADER_LEN]
-            eth = struct.unpack("!6s6sH", eth_header)
-            eth_protocol = socket.ntohs(eth[2])
+            raw_pkt, _ = self.conn.sock.recvfrom(65565)
+            pkt = Packet(packet=raw_pkt)
+            pkt.unpack()
+            proc = pkt.get_proc()
 
-            if eth_protocol == 8:  # IP packets
-                ip_header = packet[ETH_HEADER_LEN:ETH_HEADER_LEN + IP_HEADER_LEN]
-                _, _, _, _, _, _, PROTOCOL, _, src_IP, dest_IP = struct.unpack('!BBHHHBBH4s4s', ip_header)
+            src_ip = socket.inet_ntoa(pkt.l3_field["src_IP"])
+            dest_ip = socket.inet_ntoa(pkt.l3_field["dest_IP"])
 
-                if PROTOCOL == 1:  # ICMP
-                    logging.info("[Fingerprint Capture] Processing ICMP packet...")
-                    icmp_header = packet[ETH_HEADER_LEN + IP_HEADER_LEN: ETH_HEADER_LEN + IP_HEADER_LEN + ICMP_HEADER_LEN]
-                    icmp_type, code, checksum, ID, seq = struct.unpack('BbHHh', icmp_header)
+            # ✅ Ensure we only intercept Nmap scanning packets meant for the Target Host
+            if dest_ip != self.target_host:
+                logging.warning(f"[OS Deception] Ignoring scan packet from {src_ip} → {dest_ip}. Expected: {self.target_host}")
+                continue  # Ignore any traffic not meant for the Target Host
 
-                    if socket.inet_ntoa(dest_IP) == self.host:
-                        key, packet_val = gen_icmp_key(packet)
-                        icmp_pkt_dict[key] = packet
+            logging.info(f"[OS Deception] Received fingerprinting request from {src_ip} targeting {dest_ip}")
 
-                        with open(icmp_record_file, 'w') as f:
-                            f.write(str(icmp_pkt_dict))
-                            f.flush()
-                            logging.info("[Fingerprint Capture] ICMP fingerprint stored.")
+            # Generate and send deceptive response
+            rsp = self.deceived_pkt_synthesis(proc, pkt, template_dict)
+            if rsp:
+                logging.info(f"[OS Deception] Sending deceptive {proc.upper()} packet to {src_ip}")
+                self.conn.sock.send(rsp)
 
-            elif eth_protocol == 1544:  # ARP
-                logging.info("[Fingerprint Capture] Processing ARP packet...")
-                arp_header = packet[ETH_HEADER_LEN: ETH_HEADER_LEN + ARP_HEADER_LEN]
-                hw_type, proto_type, hw_size, proto_size, opcode, sender_mac, sender_ip, recv_mac, recv_ip = struct.unpack(
-                    '!2s2s1s1s2s6s4s6s4s', arp_header)
+    def load_file(self, pkt_type: str):
+        """ Load OS fingerprinting response records """
+        file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
 
-                if socket.inet_ntoa(recv_ip) == self.host:
-                    key, packet_val = gen_arp_key(packet)
-                    arp_pkt_dict[key] = packet
+        if not os.path.exists(file_path):
+            logging.warning(f"Missing {pkt_type} fingerprint record. Skipping...")
+            return {}
 
-                    with open(arp_record_file, 'w') as f:
-                        f.write(str(arp_pkt_dict))
-                        f.flush()
-                        logging.info("[Fingerprint Capture] ARP fingerprint stored.")
+        with open(file_path, "r") as file:
+            try:
+                return eval(file.readline())  # Safely evaluate the stored dictionary
+            except Exception as e:
+                logging.error(f"Error loading {pkt_type} record: {e}")
+                return {}
 
-    def os_deceive(self):
-        """ Performs OS deception by modifying fingerprinting responses """
-        logging.info(f"[OS Deception] Intercepting OS fingerprinting packets for {self.host}...")
-        logging.info(f"[OS Deception] Sending deceptive Windows 10 response...")
+    def deceived_pkt_synthesis(self, proc: str, req: Packet, template: dict):
+        """ Generate a deceptive response packet based on stored fingerprints """
+        key, _ = gen_key(proc, req.packet)
+
+        try:
+            raw_template = template[proc][key]
+        except KeyError:
+            logging.warning(f"No deception template found for {proc}.")
+            return None
+
+        template_pkt = Packet(raw_template)
+        template_pkt.unpack()
+
+        # Swap source & destination details
+        template_pkt.l2_field["dMAC"] = req.l2_field["sMAC"]
+        template_pkt.l2_field["sMAC"] = req.l2_field["dMAC"]
+        template_pkt.l3_field["src_IP"] = req.l3_field["dest_IP"]
+        template_pkt.l3_field["dest_IP"] = req.l3_field["src_IP"]
+
+        if proc == "tcp":
+            template_pkt.l4_field["src_port"] = req.l4_field["dest_port"]
+            template_pkt.l4_field["dest_port"] = req.l4_field["src_port"]
+            template_pkt.l4_field["seq"] = req.l4_field["ack_num"]
+            template_pkt.l4_field["ack_num"] = req.l4_field["seq"] + 1
+
+        elif proc == "icmp":
+            template_pkt.l4_field["ID"] = req.l4_field["ID"]
+            template_pkt.l4_field["seq"] = req.l4_field["seq"]
+
+        elif proc == "udp":
+            template_pkt.l4_field["ID"] = 0
+            template_pkt.l4_field["seq"] = 0
+
+        elif proc == "arp":
+            template_pkt.l3_field["sender_mac"] = settings.mac
+            template_pkt.l3_field["sender_ip"] = socket.inet_aton(self.target_host)
+            template_pkt.l3_field["recv_mac"] = req.l3_field["sender_mac"]
+            template_pkt.l3_field["recv_ip"] = req.l3_field["sender_ip"]
+
+        template_pkt.pack()
+        return template_pkt.packet
