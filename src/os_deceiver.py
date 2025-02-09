@@ -3,7 +3,7 @@ import logging
 import random
 import socket
 import struct
-import os
+import os  # ✅ Ensure this is imported before using os.path
 from typing import List, Any
 
 import src.settings as settings
@@ -14,16 +14,16 @@ from src.tcp import TcpConnect
 class OsDeceiver:
     white_list = []
 
-    def __init__(self, host, os):
+    def __init__(self, host, target_os):  # ✅ Rename 'os' to 'target_os'
         self.host = host
-        self.os = os
+        self.target_os = target_os  # ✅ Store the renamed parameter
         self.conn = TcpConnect(host)
         self.knocking_history = {}
         self.white_list = {}
         self.port_seq = [4441, 5551, 6661]
 
         # Ensure OS-specific record directory exists
-        self.os_record_path = f"os_record/{self.os}"
+        self.os_record_path = f"os_record/{self.target_os}"  # ✅ Use 'target_os' instead of 'os'
         if not os.path.exists(self.os_record_path):
             logging.info(f"Creating OS record folder: {self.os_record_path}")
             os.makedirs(self.os_record_path)
