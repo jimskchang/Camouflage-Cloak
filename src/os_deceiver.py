@@ -1,82 +1,108 @@
-import os
-import argparse
 import logging
-import sys
 import socket
 import struct
-import src.settings as settings
-from src.Packet import Packet
-from src.tcp import TcpConnect
-from src.port_deceiver import PortDeceiver
-from src.os_deceiver import OsDeceiver
+import os
+from _datetime import datetime, timedelta
+from typing import Any
 
-def main():
-    parser = argparse.ArgumentParser(description="Deceiver Demo")
-    parser.add_argument("--host", required=True, help="Specify Target Host (The machine to be disguised)")
-    parser.add_argument("--nic", required=True, help="NIC where we capture the packets")
-    parser.add_argument("--scan", required=True, help="Attacker's port scanning technique")
-    parser.add_argument("--status", action="store", help="Designate port status")
-    parser.add_argument("--os", required=True, help="The OS we want to mimic (e.g., Win10)")
-    args = parser.parse_args()
+class OsDeceiver:
+    def __init__(self, target_host, camouflage_host, target_os):
+        self.target_host = target_host  # Host to mimic
+        self.camouflage_host = camouflage_host  # The real host running deception
+        self.target_os = target_os  # OS fingerprint to mimic
 
-    if settings is not None:
-        settings.HOST = args.host
-        settings.NIC = args.nic
-    else:
-        logging.error("Settings module not found! Exiting...")
-        sys.exit(1)
+        self.knocking_history = {}
+        self.white_list = {}
+        self.port_seq = [4441, 5551, 6661]
 
-    # Define the Camouflage Cloak host as the machine executing deception (this script's machine)
-    camouflage_host = socket.gethostbyname(socket.gethostname())
+        # Ensure OS-specific record directory exists
+        self.os_record_path = f"os_record/{self.target_os}"
+        if not os.path.exists(self.os_record_path):
+            logging.info(f"Creating OS record folder: {self.os_record_path}")
+            os.makedirs(self.os_record_path)
 
-    if args.scan:
-        port_scan_tech = args.scan.lower()
+    def os_record(self):
+        """ Captures and logs OS fingerprinting packets (ARP, ICMP) """
+        import src.settings as settings  # Delay import to avoid circular dependency
+        from src.Packet import Packet  # Import inside function
 
-        if port_scan_tech == "ts":
-            logging.info(f"Executing fingerprint capture (TS mode) for {args.host} mimicking {args.os}...")
-            deceiver = OsDeceiver(target_host=args.host, camouflage_host=camouflage_host, target_os=args.os)
-            deceiver.os_record()
-            logging.info("Fingerprint capture completed.")
-            return
+        logging.info(f"Intercepting OS fingerprinting packets for {self.target_host}")
 
-        elif port_scan_tech == "od":
-            logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os}...")
-            deceiver = OsDeceiver(target_host=args.host, camouflage_host=camouflage_host, target_os=args.os)
-            if hasattr(deceiver, "os_deceive") and callable(getattr(deceiver, "os_deceive")):
-                logging.info("Starting OS deception...")
-                try:
-                    deceiver.os_deceive()
-                except Exception as e:
-                    logging.error(f"Error in os_deceive(): {e}")
-                    sys.exit(1)
-            else:
-                logging.error("os_deceive() function is missing or not callable in OsDeceiver!")
-                sys.exit(1)
+        icmp_pkt_dict = {}
+        arp_pkt_dict = {}
+        
+        icmp_record_file = os.path.join(self.os_record_path, "icmp_record.txt")
+        arp_record_file = os.path.join(self.os_record_path, "arp_record.txt")
 
-        elif port_scan_tech == "rr":
-            logging.info("Recording response packets...")
-            deceiver = OsDeceiver(target_host=args.host, camouflage_host=camouflage_host, target_os=args.os)
-            deceiver.store_rsp()
+        while True:
+            packet, _ = self.conn.sock.recvfrom(65565)
+            eth_header = packet[: settings.ETH_HEADER_LEN]
+            eth_protocol = socket.ntohs(struct.unpack("!6s6sH", eth_header)[2])
 
-        elif port_scan_tech == "pd":
-            if args.status:
-                deceive_status = args.status
-                logging.info(f"Executing Port Deception (status: {deceive_status})...")
-                deceiver = PortDeceiver(args.host)
-                deceiver.deceive_ps_hs(deceive_status)
-            else:
-                logging.warning("No port status specified for 'pd' technique.")
+            if eth_protocol == 8:  # IP packets
+                ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+                _, _, _, _, _, _, PROTOCOL, _, src_IP, dest_IP = struct.unpack("!BBHHHBBH4s4s", ip_header)
 
-        else:
-            logging.error("Invalid scan technique provided!")
+                if PROTOCOL == 1 and socket.inet_ntoa(dest_IP) == self.target_host:  # ICMP
+                    key, packet_val = self.gen_icmp_key(packet)
+                    icmp_pkt_dict[key] = packet
+                    with open(icmp_record_file, "w") as f:
+                        f.write(str(icmp_pkt_dict))
+                        f.flush()
+                    logging.info(f"ICMP Packet Captured from {socket.inet_ntoa(src_IP)}")
 
-    else:
-        logging.warning("No scan technique specified!")
+            elif eth_protocol == 1544:  # ARP packets
+                arp_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
+                _, _, _, _, _, sender_mac, sender_ip, recv_mac, recv_ip = struct.unpack("!2s2s1s1s2s6s4s6s4s", arp_header)
 
-if __name__ == "__main__":
-    logging.basicConfig(
-        format="%(asctime)s [%(levelname)s]: %(message)s",
-        datefmt="%y-%m-%d %H:%M",
-        level=logging.INFO
-    )
-    main()
+                if socket.inet_ntoa(recv_ip) == self.target_host:
+                    key, packet_val = self.gen_arp_key(packet)
+                    arp_pkt_dict[key] = packet
+                    with open(arp_record_file, "w") as f:
+                        f.write(str(arp_pkt_dict))
+                        f.flush()
+                    logging.info(f"ARP Packet Captured from {socket.inet_ntoa(sender_ip)}")
+
+    def os_deceive(self):
+        """ Performs OS deception by modifying fingerprinting responses """
+        import src.settings as settings
+        from src.Packet import Packet
+
+        logging.info(f"Executing OS deception for {self.target_host}, mimicking {self.target_os}")
+        
+        template_dict = {
+            "arp": self.load_file("arp"),
+            "tcp": self.load_file("tcp"),
+            "udp": self.load_file("udp"),
+            "icmp": self.load_file("icmp"),
+        }
+
+        while True:
+            raw_pkt, _ = self.conn.sock.recvfrom(65565)
+            pkt = Packet(packet=raw_pkt)
+            pkt.unpack()
+            proc = pkt.get_proc()
+
+            if (pkt.l3 == "ip" and pkt.l3_field["dest_IP"] == socket.inet_aton(self.target_host)) or \
+               (pkt.l3 == "arp" and pkt.l3_field["recv_ip"] == socket.inet_aton(self.target_host)):
+                req = pkt
+                rsp = self.deceived_pkt_synthesis(proc, req, template_dict)
+
+                if rsp:
+                    logging.info(f"Sending deceptive {proc.upper()} response to {self.target_host}")
+                    self.conn.sock.send(rsp)
+
+    def load_file(self, pkt_type: str):
+        """ Loads stored OS fingerprinting response records """
+        file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
+
+        if not os.path.exists(file_path):
+            logging.warning(f"Missing {pkt_type} fingerprint record.")
+            return {}
+
+        with open(file_path, "r") as file:
+            try:
+                return eval(file.readline())  # Safely read the dictionary
+            except Exception as e:
+                logging.error(f"Error loading {pkt_type} record: {e}")
+                return {}
