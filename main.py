@@ -28,6 +28,8 @@ def main():
         logging.error("Settings module not found! Exiting...")
         sys.exit(1)
 
+    logging.info(f"Initializing OsDeceiver for target {args.host}, mimicking {args.os}...")
+
     # Initialize OsDeceiver with the correct arguments
     try:
         deceiver = OsDeceiver(target_host=args.host, target_os=args.os)
@@ -40,16 +42,23 @@ def main():
 
     if port_scan_tech == "ts":
         logging.info("Executing fingerprint capture (TS mode)...")
-        deceiver.os_record(max_packets=100)
-        logging.info("Fingerprint capture completed.")
+        try:
+            deceiver.os_record(max_packets=100)
+            logging.info("Fingerprint capture completed.")
+        except Exception as e:
+            logging.error(f"[Fingerprinting Error] os_record() failed: {e}")
+            sys.exit(1)
         return  # Exit after capturing
 
     elif port_scan_tech == "od":
         logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os}...")
         try:
             deceiver.os_deceive()
+        except AttributeError as e:
+            logging.error(f"[OS Deception] Attribute Error: {e} - Ensure os_deceive() is defined properly in os_deceiver.py.")
+            sys.exit(1)
         except Exception as e:
-            logging.error(f"[OS Deception] Error in os_deceive(): {e}")
+            logging.error(f"[OS Deception] Unexpected error in os_deceive(): {e}")
             sys.exit(1)
 
     elif port_scan_tech == "rr":
