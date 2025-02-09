@@ -20,7 +20,7 @@ class OsDeceiver:
         self.target_os = target_os
         self.conn = TcpConnect(target_host)
         self.os_record_path = f"os_record/{self.target_os}"
-        self.capture_timeout = 120  # Timeout in seconds (2 minutes)
+        self.capture_timeout = 120  # Timeout for fingerprint capture (2 min)
 
         # Ensure OS-specific record directory exists
         if not os.path.exists(self.os_record_path):
@@ -40,7 +40,7 @@ class OsDeceiver:
         arp_record_file = os.path.join(self.os_record_path, "arp_record.txt")
         icmp_record_file = os.path.join(self.os_record_path, "icmp_record.txt")
 
-        start_time = time.time()  # Track elapsed time
+        start_time = time.time()
         packet_count = 0
 
         try:
@@ -57,7 +57,7 @@ class OsDeceiver:
                     ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
                     _, _, _, _, _, _, protocol, _, src_ip, dest_ip = struct.unpack("!BBHHHBBH4s4s", ip_header)
 
-                    if socket.inet_ntoa(dest_ip) != self.target_host:
+                    if dest_ip != socket.inet_aton(self.target_host):  # Convert target IP to bytes
                         continue  # Ignore non-target packets
 
                     if protocol == 1:  # ICMP packets
@@ -66,8 +66,8 @@ class OsDeceiver:
                         packet_count += 1
                         logging.info(f"ICMP Packet Captured ({packet_count})")
 
-                        with open(icmp_record_file, "wb") as f:  # Save as bytes
-                            f.write(str(icmp_pkt_dict).encode())
+                        with open(icmp_record_file, "w") as f:
+                            f.write(str(icmp_pkt_dict))
 
                 elif eth_protocol == 1544:  # ARP packets
                     key, _ = self.gen_arp_key(packet)
@@ -75,8 +75,8 @@ class OsDeceiver:
                     packet_count += 1
                     logging.info(f"ARP Packet Captured ({packet_count})")
 
-                    with open(arp_record_file, "wb") as f:  # Save as bytes
-                        f.write(str(arp_pkt_dict).encode())
+                    with open(arp_record_file, "w") as f:
+                        f.write(str(arp_pkt_dict))
 
             logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
@@ -106,10 +106,7 @@ class OsDeceiver:
             pkt = Packet(packet=raw_pkt)
             pkt.unpack()
 
-            # Detect Nmap scanner dynamically
-            nmap_scanner_ip = socket.inet_ntoa(pkt.l3_field['src_IP'])
-
-            # Ensure target IP matches
+            # Convert target host to bytes before comparing
             if pkt.l3_field['dest_IP'] != socket.inet_aton(self.target_host):
                 continue  # Ignore non-target packets
 
@@ -117,11 +114,7 @@ class OsDeceiver:
             response_pkt = self.deceived_pkt_synthesis(proc, pkt, template_dict)
 
             if response_pkt:
-                # Ensure response is sent as bytes
-                if isinstance(response_pkt, str):
-                    response_pkt = response_pkt.encode()  # Convert to bytes if needed
-
-                logging.info(f"Sending deceptive {proc.upper()} packet to Nmap scanner: {nmap_scanner_ip}")
+                logging.info(f"Sending deceptive {proc.upper()} packet.")
                 self.conn.sock.send(response_pkt)
 
     def load_file(self, pkt_type: str):
@@ -133,8 +126,8 @@ class OsDeceiver:
             return {}
 
         try:
-            with open(file_path, 'rb') as file:  # Read in bytes mode
-                return eval(file.readline().decode())  # Decode bytes before evaluating
+            with open(file_path, 'r') as file:
+                return eval(file.readline())  # Read stored dictionary
         except Exception as e:
             logging.error(f"Error loading {pkt_type} record: {e}")
             return {}
@@ -152,31 +145,11 @@ class OsDeceiver:
         template_pkt = Packet(raw_template)
         template_pkt.unpack()
 
-        # Ensure responses go back to the correct Nmap scanning host
+        # Ensure responses go back to the correct scanning host
         template_pkt.l2_field['dMAC'] = req.l2_field['sMAC']
         template_pkt.l2_field['sMAC'] = settings.mac  # Use our spoofed MAC
         template_pkt.l3_field['src_IP'] = req.l3_field['dest_IP']
         template_pkt.l3_field['dest_IP'] = req.l3_field['src_IP']
-
-        if proc == 'tcp':
-            template_pkt.l4_field['src_port'] = req.l4_field['dest_port']
-            template_pkt.l4_field['dest_port'] = req.l4_field['src_port']
-            template_pkt.l4_field['seq'] = req.l4_field['ack_num']
-            template_pkt.l4_field['ack_num'] = req.l4_field['seq'] + 1
-
-        elif proc == 'icmp':
-            template_pkt.l4_field['ID'] = req.l4_field['ID']
-            template_pkt.l4_field['seq'] = req.l4_field['seq']
-
-        elif proc == 'udp':
-            template_pkt.l4_field['ID'] = 0
-            template_pkt.l4_field['seq'] = 0
-
-        elif proc == 'arp':
-            template_pkt.l3_field['sender_mac'] = settings.mac
-            template_pkt.l3_field['sender_ip'] = socket.inet_aton(self.target_host)
-            template_pkt.l3_field['recv_mac'] = req.l3_field['sender_mac']
-            template_pkt.l3_field['recv_ip'] = req.l3_field['sender_ip']
 
         template_pkt.pack()
         return template_pkt.packet
