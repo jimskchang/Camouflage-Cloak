@@ -1,121 +1,96 @@
-import os
+from _datetime import datetime, timedelta
 import logging
+import random
 import socket
 import struct
-from datetime import datetime
-from src import settings
+from typing import List, Any
+
+import src.settings as settings
 from src.Packet import Packet
 from src.tcp import TcpConnect
 
 
 class OsDeceiver:
-    """Handles OS fingerprint capture and deception"""
+    white_list = []
 
-    def __init__(self, host, os_name):
+    def __init__(self, host, os):
         self.host = host
-        self.os = os_name.lower().replace(" ", "_")  # Normalize OS name, e.g., "win 10" -> "win_10"
+        self.os = os
         self.conn = TcpConnect(host)
-        self.record_path = f"os_record/{self.os}"  # OS-specific directory for storing packets
-        os.makedirs(self.record_path, exist_ok=True)  # Ensure directory exists
+        self.knocking_history = {}
+        self.white_list = {}
+        self.port_seq = [4441, 5551, 6661]
 
     def os_record(self):
-        """Captures packets from the target and stores logs in OS-specific files"""
-        pkt_dict = {"tcp": {}, "icmp": {}, "udp": {}, "arp": {}}
-        logging.info(f"Starting packet capture for OS: {self.os} ({self.host})")
+        arp_pkt_dict = {}
+        ip_pair_seq = []
+        arp_key_seq = []
 
+        udp_pkt_dict = {}
+        icmp_pkt_dict = {}  # Fix: Ensure dictionary is initialized
+        id_pair_seq = []
+        icmp_key_seq = []
+
+        pkt_dict = {}
+        port_pair_seq = []
+        key_seq = []  # prevent IndexError since dict.keys() ignores duplicates
+
+        count = 1
         while True:
-            try:
-                # Receive raw packet
-                packet, _ = self.conn.sock.recvfrom(65565)
-                eth_protocol, _, dest_IP, PROTOCOL = self._parse_ethernet_ip(packet)
+            packet, _ = self.conn.sock.recvfrom(65565)
+            eth_header = packet[: settings.ETH_HEADER_LEN]
+            eth = struct.unpack('!6s6sH', eth_header)
+            eth_protocol = socket.ntohs(eth[2])
 
-                # Process based on protocol
-                if eth_protocol == 8:  # IP packets
-                    if PROTOCOL == 6:  # TCP
-                        key, _ = self._generate_tcp_key(packet)
-                        pkt_dict["tcp"][key] = packet
-                    elif PROTOCOL == 1:  # ICMP
-                        key, _ = self._generate_icmp_key(packet)
-                        pkt_dict["icmp"][key] = packet
-                    elif PROTOCOL == 17:  # UDP
-                        key, _ = self._generate_udp_key(packet)
-                        pkt_dict["udp"][key] = packet
-                elif eth_protocol == 1544:  # ARP
-                    key, _ = self._generate_arp_key(packet)
-                    pkt_dict["arp"][key] = packet
+            if eth_protocol == 8:  # IP packets
+                ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+                _, _, _, _, _, _, PROTOCOL, _, src_IP, dest_IP = struct.unpack('!BBHHHBBH4s4s', ip_header)
+                
+                logging.info(f"Received IP packet - Protocol: {PROTOCOL}, Source: {socket.inet_ntoa(src_IP)}, Dest: {socket.inet_ntoa(dest_IP)}")
+                
+                if PROTOCOL == 1:  # ICMP
+                    icmp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
+                                         settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN]
+                    icmp_type, code, checksum, ID, seq = struct.unpack('BbHHh', icmp_header)
 
-                # Save packets to files
-                self._write_record("tcp", pkt_dict["tcp"])
-                self._write_record("icmp", pkt_dict["icmp"])
-                self._write_record("udp", pkt_dict["udp"])
-                self._write_record("arp", pkt_dict["arp"])
+                    if socket.inet_ntoa(dest_IP) == self.host:  # Fix: Ensuring correct destination
+                        key, packet_val = gen_icmp_key(packet)
+                        id_pair_seq.append(ID)
+                        icmp_key_seq.append(key)
+                        if key not in icmp_pkt_dict.keys():
+                            icmp_pkt_dict[key] = None
 
-            except socket.error as e:
-                logging.error(f"Socket error while receiving packets: {e}")
-            except Exception as e:
-                logging.error(f"Unexpected error in os_record: {e}")
+                    elif socket.inet_ntoa(src_IP) == self.host:  # ICMP Response handling
+                        if ID in id_pair_seq:
+                            pkt_index = id_pair_seq.index(ID)
+                            key = icmp_key_seq[pkt_index]
+                            icmp_pkt_dict[key] = packet
 
-    def _write_record(self, pkt_type: str, data: dict):
-        """Writes captured packets to OS-specific files"""
-        file_path = f"{self.record_path}/{pkt_type}_record.txt"
-        try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(str(data))
-            logging.info(f"Saved {pkt_type} records for {self.os} in {file_path}")
-        except IOError as e:
-            logging.error(f"Error writing to {file_path}: {e}")
+                    logging.info(f"ICMP Record Updated - Count: {len(icmp_pkt_dict)}")
+                    with open('icmp_record.txt', 'w') as f:
+                        f.write(str(icmp_pkt_dict))
+                        f.flush()
 
-    def _parse_ethernet_ip(self, packet):
-        """Parses Ethernet and IP headers"""
-        eth_header = packet[:settings.ETH_HEADER_LEN]
-        eth = struct.unpack("!6s6sH", eth_header)
-        eth_protocol = socket.ntohs(eth[2])
+            elif eth_protocol == 1544:  # ARP
+                arp_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
+                hw_type, proto_type, hw_size, proto_size, opcode, sender_mac, sender_ip, recv_mac, recv_ip = struct.unpack(
+                    '2s2s1s1s2s6s4s6s4s', arp_header)
 
-        ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-        _, _, _, _, _, _, PROTOCOL, _, _, dest_IP = struct.unpack("!BBHHHBBH4s4s", ip_header)
+                if socket.inet_ntoa(recv_ip) == self.host:
+                    key, packet_val = gen_arp_key(packet)
+                    ip_pair_seq.append((sender_ip, recv_ip))
+                    arp_key_seq.append(key)
+                    if key not in arp_pkt_dict.keys():
+                        arp_pkt_dict[key] = None
+                elif socket.inet_ntoa(sender_ip) == self.host and (recv_ip, sender_ip) in ip_pair_seq:
+                    pkt_index = ip_pair_seq.index((recv_ip, sender_ip))
+                    key = arp_key_seq[pkt_index]
+                    arp_pkt_dict[key] = packet
 
-        return eth_protocol, _, dest_IP, PROTOCOL
-
-    def _generate_tcp_key(self, packet: bytes):
-        """Generates a unique key for TCP packet"""
-        ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-        tcp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN: settings.ETH_HEADER_LEN +
-                            settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN]
-
-        src_IP, dest_IP = struct.unpack("!4s4s", ip_header[12:20])
-        src_port, dest_port, _, _, _, flags, _, _, _ = struct.unpack("!HHLLBBHHH", tcp_header)
-
-        key = f"{socket.inet_ntoa(src_IP)}:{src_port} -> {socket.inet_ntoa(dest_IP)}:{dest_port} (Flags: {flags})"
-        return key, packet
-
-    def _generate_icmp_key(self, packet: bytes):
-        """Generates a unique key for ICMP packet"""
-        ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-        icmp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN: settings.ETH_HEADER_LEN +
-                            settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN]
-
-        src_IP, dest_IP = struct.unpack("!4s4s", ip_header[12:20])
-        icmp_type, _, _, ID, seq = struct.unpack("BbHHh", icmp_header)
-
-        key = f"{socket.inet_ntoa(src_IP)} -> {socket.inet_ntoa(dest_IP)} (ICMP Type: {icmp_type}, ID: {ID}, Seq: {seq})"
-        return key, packet
-
-    def _generate_udp_key(self, packet: bytes):
-        """Generates a unique key for UDP packet"""
-        ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-        udp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN: settings.ETH_HEADER_LEN +
-                            settings.IP_HEADER_LEN + settings.UDP_HEADER_LEN]
-
-        src_IP, dest_IP = struct.unpack("!4s4s", ip_header[12:20])
-        src_port, dest_port, _, _ = struct.unpack("!4H", udp_header)
-
-        key = f"{socket.inet_ntoa(src_IP)}:{src_port} -> {socket.inet_ntoa(dest_IP)}:{dest_port} (UDP)"
-        return key, packet
-
-    def _generate_arp_key(self, packet: bytes):
-        """Generates a unique key for ARP packet"""
-        arp_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
-        sender_mac, sender_ip, recv_mac, recv_ip = struct.unpack("!6s4s6s4s", arp_header[8:28])
-
-        key = f"ARP {socket.inet_ntoa(sender_ip)} -> {socket.inet_ntoa(recv_ip)}"
-        return key, packet
+                logging.info(f"ARP Record Updated - Count: {len(arp_pkt_dict)}")
+                with open('arp_record.txt', 'w') as f:
+                    f.write(str(arp_pkt_dict))
+                    f.flush()
+            
+            else:
+                continue
