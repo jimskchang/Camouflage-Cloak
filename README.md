@@ -141,46 +141,6 @@ sudo python3 main.py --scan pd --host 192.168.1.150 --status open
 
 ---
 
-## Logging & Output
-
-- **Logs are stored in `/var/log/camouflage_cloak/cloak.log`**
-- **OS scan records are saved in `/os_record/{OS_TYPE}/`**
-- **Packet captures are stored in `pkt_record.txt`**
-
----
-
-## Troubleshooting
-
-### Permission Errors
-
-If you get `Operation not permitted` errors, ensure:
-
-- You are running the script **as root**:
-  ```bash
-  sudo python3 main.py ...
-  ```
-- Your network interface **supports packet injection** (check using `ifconfig` or `ip a`).
-
-### Missing Dependencies
-
-Run:
-```bash
-pip install -r requirements.txt
-```
-
-or manually install missing packages:
-```bash
-pip install scapy
-```
-
-### Check Logging for Errors
-
-```bash
-cat /var/log/camouflage_cloak/cloak.log
-```
-
----
-
 ## Security & Legal Disclaimer
 
 This tool is **for educational and security research purposes only**.
@@ -206,10 +166,4 @@ For issues, feature requests, or contributions:
 
 ---
 
-
-## References
-
-- **TCP/IP Stack Fingerprinting**: [Read More](https://en.wikipedia.org/wiki/TCP/IP_stack_fingerprinting)
-- **Network Deception Techniques**: [Security Journal](https://www.cybersecurity-insights.com)
-- **Raw Sockets in Python**: [Python Docs](https://docs.python.org/3/library/socket.html)
 
