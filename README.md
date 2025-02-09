@@ -102,6 +102,7 @@ sudo python3 main.py --host <protected server IP> --scan ts --os <host OS templa
 ```bash
 sudo nmap -O <Protected Server IP>
 ```
+The time out set in the --scan ts (to build Template Synthesis) is 120 second.  Therefore, you should perfom the Nmap scan immediately after you execute the --scan ts command. After two minutes it will return to the command mode for you to execute deception.
 
 ***Step 4:*** Check the Template
 ```bash
