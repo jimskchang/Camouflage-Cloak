@@ -31,12 +31,13 @@ def main():
     parser.add_argument('--status', action="store", help='Designate port status')
     parser.add_argument('--os', action="store", help='Designate OS we want to deceive (optional for ts)')
     args = parser.parse_args()
+
     settings.host = args.host
 
     if args.nic:
         settings.NIC = args.nic
 
-     if args.scan:
+    if args.scan:  # <-- FIXED INDENTATION HERE
         port_scan_tech = args.scan
 
         if port_scan_tech == 'ts':
