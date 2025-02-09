@@ -20,7 +20,7 @@ class OsDeceiver:
         self.target_os = target_os
         self.conn = TcpConnect(target_host)
         self.os_record_path = f"os_record/{self.target_os}"
-        self.capture_timeout = 120  # Timeout for fingerprint capture (2 min)
+        self.capture_timeout = 120  # Timeout for fingerprint capture (2 minutes)
 
         # Ensure OS-specific record directory exists
         if not os.path.exists(self.os_record_path):
@@ -166,3 +166,17 @@ class OsDeceiver:
             return self.gen_arp_key(packet)
         else:
             return None, None
+
+    def gen_arp_key(self, packet: bytes):
+        """ Generate ARP fingerprinting key """
+        arp_header = packet[settings.ETH_HEADER_LEN:settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
+        key = arp_header[:8]
+        return key, packet
+
+    def gen_icmp_key(self, packet: bytes):
+        """ Generate ICMP fingerprinting key """
+        ip_header = packet[settings.ETH_HEADER_LEN:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+        icmp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
+                             settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN]
+        key = ip_header[12:16] + icmp_header[:4]
+        return key, packet
