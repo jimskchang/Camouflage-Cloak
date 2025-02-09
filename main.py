@@ -30,42 +30,42 @@ def main():
     parser.add_argument('--scan', required=True, help='Attacker\'s port scanning technique')
     parser.add_argument('--status', action="store", help='Designate port status')
     parser.add_argument('--os', action="store", help='Designate OS we want to deceive (optional for ts)')
-    parser.add_argument('--dest', required=True, help='Designate folder to store logs')
-
     args = parser.parse_args()
-
     settings.host = args.host
-    settings.NIC = args.nic
 
-    # Create the deceiver object based on parameters
-    deceiver = OsDeceiver(args.host, args.os)  
+    if args.nic:
+        settings.NIC = args.nic
 
-    if args.scan:
+     if args.scan:
         port_scan_tech = args.scan
 
         if port_scan_tech == 'ts':
-            if deceiver:
-                # Pass the dest directory to os_record
-                deceiver.os_record(output_path=args.dest)  
-            else:
-                logging.error('Failed to create OsDeceiver for ts scan.')
+            deceiver = OsDeceiver(args.host, args.os)
+            deceiver.os_record()
         elif port_scan_tech == 'od':
-            if deceiver:
+            if args.os is None:
+                logging.debug('No os is designated')
+            else:
+                deceiver = OsDeceiver(args.host, args.os)
                 deceiver.os_deceive()
-            else:
-                logging.debug('No OS is designated for od scan.')
         elif port_scan_tech == 'rr':
-            if deceiver:
-                deceiver.store_rsp()
-        elif port_scan_tech == 'pd':
-            if args.status:
-                deceive_status = args.status
-                port_deceiver = PortDeceiver(args.host)
-                port_deceiver.deceive_ps_hs(deceive_status)
-            else:
-                logging.debug('No port status designated for PD scan.')
+            deceiver = OsDeceiver(args.host, args.os)
+            deceiver.store_rsp()
+
+        if args.status:
+            deceive_status = args.status
+            if port_scan_tech == 'pd':
+                deceiver = PortDeceiver(args.host)
+                deceiver.deceive_ps_hs(deceive_status)
+
         else:
-            logging.debug('No valid scan technique is designated.')
+            logging.debug('No port scan technique is designated')
+            return
+
+    else:
+        logging.debug('No scan technique is designated')
+        return
+
 
 if __name__ == '__main__':
     main()
