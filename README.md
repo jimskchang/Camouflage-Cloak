@@ -161,7 +161,6 @@ This tool is **for educational and security research purposes only**.
 
 For issues, feature requests, or contributions:
 
-- **Open a GitHub Issue**: [Camouflage Cloak Issues](https://github.com/jimskchang/CamouflageCloak/issues)
 - **Email**: 108356507@nccu.edu.tw
 
 ---
