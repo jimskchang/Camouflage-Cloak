@@ -5,10 +5,10 @@ import os
 from _datetime import datetime, timedelta
 from typing import Any
 
-# Delay import to avoid circular dependency
 import src.settings as settings
 from src.Packet import Packet
-from src.tcp import TcpConnect  # ✅ Ensure we import TcpConnect for connection handling
+from src.tcp import TcpConnect
+
 
 class OsDeceiver:
     def __init__(self, target_host, camouflage_host, target_os):
@@ -34,45 +34,6 @@ class OsDeceiver:
             logging.info(f"Creating OS record folder: {self.os_record_path}")
             os.makedirs(self.os_record_path)
 
-    def os_record(self):
-        """ Captures and logs OS fingerprinting packets (ARP, ICMP) """
-        logging.info(f"Intercepting OS fingerprinting packets for {self.target_host}")
-
-        icmp_pkt_dict = {}
-        arp_pkt_dict = {}
-
-        icmp_record_file = os.path.join(self.os_record_path, "icmp_record.txt")
-        arp_record_file = os.path.join(self.os_record_path, "arp_record.txt")
-
-        while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            eth_header = packet[: settings.ETH_HEADER_LEN]
-            eth_protocol = socket.ntohs(struct.unpack("!6s6sH", eth_header)[2])
-
-            if eth_protocol == 8:  # IP packets
-                ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-                _, _, _, _, _, _, PROTOCOL, _, src_IP, dest_IP = struct.unpack("!BBHHHBBH4s4s", ip_header)
-
-                if PROTOCOL == 1 and socket.inet_ntoa(dest_IP) == self.target_host:  # ICMP
-                    key, packet_val = self.gen_icmp_key(packet)
-                    icmp_pkt_dict[key] = packet
-                    with open(icmp_record_file, "w") as f:
-                        f.write(str(icmp_pkt_dict))
-                        f.flush()
-                    logging.info(f"ICMP Packet Captured from {socket.inet_ntoa(src_IP)}")
-
-            elif eth_protocol == 1544:  # ARP packets
-                arp_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
-                _, _, _, _, _, sender_mac, sender_ip, recv_mac, recv_ip = struct.unpack("!2s2s1s1s2s6s4s6s4s", arp_header)
-
-                if socket.inet_ntoa(recv_ip) == self.target_host:
-                    key, packet_val = self.gen_arp_key(packet)
-                    arp_pkt_dict[key] = packet
-                    with open(arp_record_file, "w") as f:
-                        f.write(str(arp_pkt_dict))
-                        f.flush()
-                    logging.info(f"ARP Packet Captured from {socket.inet_ntoa(sender_ip)}")
-
     def os_deceive(self):
         """ Performs OS deception by modifying fingerprinting responses """
         logging.info(f"Executing OS deception for {self.target_host}, mimicking {self.target_os}")
@@ -87,14 +48,26 @@ class OsDeceiver:
         while True:
             raw_pkt, _ = self.conn.sock.recvfrom(65565)
             pkt = Packet(packet=raw_pkt)
-            pkt.unpack()
+            pkt.unpack()  # ✅ Make sure this is correctly implemented in Packet.py
+
             proc = pkt.get_proc()
 
-            if (pkt.l3 == "ip" and pkt.l3_field["dest_IP"] == socket.inet_aton(self.target_host)) or \
-               (pkt.l3 == "arp" and pkt.l3_field["recv_ip"] == socket.inet_aton(self.target_host)):
-                req = pkt
-                rsp = self.deceived_pkt_synthesis(proc, req, template_dict)
+            # ✅ Fix: ARP Handling - Prevent calling non-existent function
+            if proc == "arp":
+                if not hasattr(pkt, "l3_field") or "recv_ip" not in pkt.l3_field:
+                    logging.error("Malformed ARP packet received, skipping...")
+                    continue  # Skip if ARP packet structure is incorrect
 
+                # Only respond if the target IP matches
+                if pkt.l3_field["recv_ip"] == socket.inet_aton(self.target_host):
+                    rsp = self.deceived_pkt_synthesis(proc, pkt, template_dict)
+                    if rsp:
+                        logging.info(f"Sending deceptive ARP response to {self.target_host}")
+                        self.conn.sock.send(rsp)
+
+            # ✅ Fix: Other protocols (TCP, ICMP, UDP)
+            elif (pkt.l3 == "ip" and pkt.l3_field["dest_IP"] == socket.inet_aton(self.target_host)):
+                rsp = self.deceived_pkt_synthesis(proc, pkt, template_dict)
                 if rsp:
                     logging.info(f"Sending deceptive {proc.upper()} response to {self.target_host}")
                     self.conn.sock.send(rsp)
@@ -113,3 +86,45 @@ class OsDeceiver:
             except Exception as e:
                 logging.error(f"Error loading {pkt_type} record: {e}")
                 return {}
+
+    def deceived_pkt_synthesis(self, proc: str, req: Packet, template: dict):
+        """ Generates a deceptive response packet based on stored fingerprints """
+        key, _ = gen_key(proc, req.packet)
+
+        try:
+            raw_template = template[proc][key]
+        except KeyError:
+            logging.warning(f"No deception template found for {proc}.")
+            return None
+
+        template_pkt = Packet(raw_template)
+        template_pkt.unpack()
+
+        # Swap source & destination details
+        template_pkt.l2_field["dMAC"] = req.l2_field["sMAC"]
+        template_pkt.l2_field["sMAC"] = req.l2_field["dMAC"]
+        template_pkt.l3_field["src_IP"] = req.l3_field["dest_IP"]
+        template_pkt.l3_field["dest_IP"] = req.l3_field["src_IP"]
+
+        if proc == "tcp":
+            template_pkt.l4_field["src_port"] = req.l4_field["dest_port"]
+            template_pkt.l4_field["dest_port"] = req.l4_field["src_port"]
+            template_pkt.l4_field["seq"] = req.l4_field["ack_num"]
+            template_pkt.l4_field["ack_num"] = req.l4_field["seq"] + 1
+
+        elif proc == "icmp":
+            template_pkt.l4_field["ID"] = req.l4_field["ID"]
+            template_pkt.l4_field["seq"] = req.l4_field["seq"]
+
+        elif proc == "udp":
+            template_pkt.l4_field["ID"] = 0
+            template_pkt.l4_field["seq"] = 0
+
+        elif proc == "arp":
+            template_pkt.l3_field["sender_mac"] = settings.mac
+            template_pkt.l3_field["sender_ip"] = socket.inet_aton(self.target_host)
+            template_pkt.l3_field["recv_mac"] = req.l3_field["sender_mac"]
+            template_pkt.l3_field["recv_ip"] = req.l3_field["sender_ip"]
+
+        template_pkt.pack()
+        return template_pkt.packet
