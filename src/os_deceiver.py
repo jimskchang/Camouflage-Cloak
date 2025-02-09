@@ -94,3 +94,8 @@ class OsDeceiver:
             
             else:
                 continue
+
+    def os_deceive(self):
+        logging.info("Executing OS deception...")
+        # Placeholder for actual deception logic
+        pass
