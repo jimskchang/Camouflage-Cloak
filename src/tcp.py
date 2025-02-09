@@ -14,7 +14,7 @@ class TcpConnect:
     """ Handles raw TCP connections and packet manipulation. """
 
     def __init__(self, host: str):
-        self.dip = host
+        self.dip = socket.inet_aton(host)  # ✅ Convert host IP to bytes
 
         # Validate and read NIC MAC address
         self.mac = self._get_mac_address()
@@ -35,6 +35,9 @@ class TcpConnect:
 
     def build_tcp_header_from_reply(self, tcp_len, seq, ack_num, src_port, dest_port, src_IP, dest_IP, flags):
         """ Builds a TCP header based on a response template. """
+        src_IP = socket.inet_aton(src_IP)  # ✅ Convert string IP to bytes
+        dest_IP = socket.inet_aton(dest_IP)  # ✅ Convert string IP to bytes
+
         offset = tcp_len << 4
         reply_tcp_header = struct.pack("!HHIIBBHHH", src_port, dest_port, seq, ack_num, offset, flags, 0, 0, 0)
 
@@ -47,6 +50,9 @@ class TcpConnect:
 def os_build_tcp_header_from_reply(tcp_len, seq, ack_num, src_port, dest_port, src_IP, dest_IP, flags, window,
                                    reply_tcp_option):
     """ Builds a TCP header for OS deception. """
+    src_IP = socket.inet_aton(src_IP)  # ✅ Convert string IP to bytes
+    dest_IP = socket.inet_aton(dest_IP)  # ✅ Convert string IP to bytes
+
     offset = tcp_len << 4
     reply_tcp_header = struct.pack("!HHIIBBHHH", src_port, dest_port, seq, ack_num, offset, flags, window, 0, 0)
     reply_tcp_header_option = reply_tcp_header + reply_tcp_option
@@ -75,80 +81,6 @@ def calculate_tcp_checksum(packet):
     res += res >> 16
 
     return (~res) & 0xffff
-
-
-def unpack_tcp_option(tcp_option):
-    """ Unpacks TCP options from a raw TCP header. """
-    start_ptr = 0
-    kind_seq = []
-    option_val = {
-        "padding": [],
-        "mss": None,
-        "shift_count": None,
-        "sack_permitted": None,
-        "ts_val": None,
-        "ts_echo_reply": None,
-    }
-
-    while start_ptr < len(tcp_option):
-        kind = tcp_option[start_ptr]
-        start_ptr += 1
-
-        if kind == 1:  # No operation (NOP)
-            option_val["padding"].append(kind)
-            kind_seq.append(kind)
-
-        elif kind == 2:  # Maximum Segment Size (MSS)
-            length = tcp_option[start_ptr]
-            start_ptr += 1
-            option_val["mss"] = struct.unpack("!H", tcp_option[start_ptr:start_ptr + 2])[0]
-            start_ptr += 2
-            kind_seq.append(kind)
-
-        elif kind == 3:  # Window Scale
-            length = tcp_option[start_ptr]
-            start_ptr += 1
-            option_val["shift_count"] = tcp_option[start_ptr]
-            start_ptr += 1
-            kind_seq.append(kind)
-
-        elif kind == 4:  # SACK permitted
-            option_val["sack_permitted"] = True
-            start_ptr += 1
-            kind_seq.append(kind)
-
-        elif kind == 8:  # Timestamp
-            length = tcp_option[start_ptr]
-            start_ptr += 1
-            option_val["ts_val"], option_val["ts_echo_reply"] = struct.unpack("!LL", tcp_option[start_ptr:start_ptr + 8])
-            start_ptr += 8
-            kind_seq.append(kind)
-
-    return option_val, kind_seq
-
-
-def pack_tcp_option(option_val, kind_seq):
-    """ Packs TCP options based on provided values. """
-    reply_tcp_option = b""
-
-    for kind in kind_seq:
-        if kind == 2:
-            reply_tcp_option += struct.pack("!BBH", 2, 4, option_val["mss"])
-
-        elif kind == 4:
-            reply_tcp_option += struct.pack("!BB", 4, 2)
-
-        elif kind == 8:
-            ts_val = int(time.time())
-            reply_tcp_option += struct.pack("!BBLL", 8, 10, ts_val, option_val["ts_echo_reply"])
-
-        elif kind == 1:
-            reply_tcp_option += struct.pack("!B", 1)
-
-        elif kind == 3:
-            reply_tcp_option += struct.pack("!BBB", 3, 3, option_val["shift_count"])
-
-    return reply_tcp_option
 
 
 def byte_to_mac(mac_byte):
