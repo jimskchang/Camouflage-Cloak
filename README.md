@@ -54,20 +54,12 @@ cd CamouflageCloak
 Edit **`settings.py`** to match your environment:
 
 ```python
-# Required: Network Settings (Modify as needed)
-CLOAK_NIC = "eth0"
-TS_SERVER_NIC = "eth1"
-TARGET_NIC = "eth2"
+# Camouflage-Cloak Server Network Configuration
+HOST = '192.168.23.206'
+NIC = 'ens192'  # Change this if your NIC is different
 
-CLOAK_HOST = "192.168.1.1"
-TS_SERVER = "192.168.1.200"
-TARGET_HOST = "192.168.1.150"
-
-CLOAK_MAC = "00:50:56:b0:10:e9"
-TS_SERVER_MAC = "00:AA:BB:CC:DD:EE"
-TARGET_MAC = "00:11:22:33:44:55"
-
-TS_SERVER_OS = "win10"  # Modify based on the OS you want to deceive
+# Camouflage-Cloak Server Manual MAC Address (set to None to auto-detect)
+MANUAL_MAC_ADDRESS = '00:50:56:8e:35:6f'  # Replace with your MAC address or set to None
 ```
 
 > Ensure these values are set correctly before running the tool.
