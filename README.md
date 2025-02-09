@@ -20,8 +20,7 @@
 
 ```
 CamouflageCloak/
-├── main.py                  # Main execution script
-├── README.md                # Documentation
+├── os_record                # OS Template Synthesis
 ├── src/
 │   ├── settings.py          # Config settings for hosts, NICs, etc.
 │   ├── Packet.py            # Packet processing logic (modularized)
@@ -67,6 +66,7 @@ MANUAL_MAC_ADDRESS = '00:50:56:8e:35:6f'  # Replace based on your Camouflage-Clo
 ---
 
 ## Usage
+Prepare 3 hosts (or VMs), which include an attacker foothold (with Nmap), a protected server (Target Host), and a Camouflage Cloak server (at least contains 2 NICs). Make the traffic between the attacker foothold and the protected server can pass through the Camouflage Cloak server (make sure they all connect to the Camouflage Cloak server's 2 NIC respectively and then bridging the NICs)
 
 ### Run the Main Script
 Eg:
@@ -88,10 +88,47 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <deceiv
 
 #### Example Commands
 
-**Record OS Fingerprint for Windows 10**
+**Build Template Synthesis**
+
+***Step 1:***clone this repository to the Camouflage Cloak server
 ```bash
-sudo python3 main.py --scan ts --host 192.168.1.200 --output-dir /os_record/win10
+git clone https:"//github.com/jimskchang/Camouflage-Cloak.git
 ```
+
+***Step 2:***cd to the Camouflage-Cloak folder and execute the following instruction
+```bash
+sudo python3 main.py --host <protected server IP> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos> 
+```
+
+***Step 3:***run Nmap OS detection on attacker 
+```bash
+sudo nmap -O <Protected Server IP>
+```
+
+***Step 4:*** Move the Template
+```bash
+Camouflage Cloak will generate the template in your current directory to prevent overriding. You have to move them to /os_record/<OS template name> to deploy the template correctly.
+```
+
+**OS deceiver test**
+
+***Step 1:***clone this repository to the Camouflage Cloak server
+```bash
+git clone https:"//github.com/jimskchang/Camouflage-Cloak.git
+```
+
+***Step 2:***cd to the Camouflage-Cloak folder and execute the following instruction
+```bash
+sudo python3 main.py --host <protected server IP> --nic <protected server NIC> --scan od --os <OS template e.g. win7/win10/centos> 
+```
+
+***Step 3:***run Nmap OS detection on attacker foothold and observe the result
+```bash
+sudo nmap -O <Protected Server IP>
+```
+
+
+
 
 **Deceive an OS Fingerprint Scan**
 ```bash
