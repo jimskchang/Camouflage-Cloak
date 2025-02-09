@@ -32,40 +32,42 @@ def main():
     parser.add_argument('--os', action="store", help='Designate OS we want to deceive (optional for ts)')
     args = parser.parse_args()
 
-    settings.host = args.host
-
-    if args.nic:
+    if settings is not None:  # Ensure settings is imported
+        settings.HOST = args.host
         settings.NIC = args.nic
+    else:
+        logging.error("Settings module not found! Exiting...")
+        sys.exit(1)
 
-    if args.scan:  # <-- FIXED INDENTATION HERE
+    if args.scan:
         port_scan_tech = args.scan
+        deceiver = None  # Initialize to avoid undefined variable errors
 
         if port_scan_tech == 'ts':
             deceiver = OsDeceiver(args.host, args.os)
             deceiver.os_record()
         elif port_scan_tech == 'od':
             if args.os is None:
-                logging.debug('No os is designated')
+                logging.debug('No OS is designated')
             else:
                 deceiver = OsDeceiver(args.host, args.os)
                 deceiver.os_deceive()
         elif port_scan_tech == 'rr':
             deceiver = OsDeceiver(args.host, args.os)
             deceiver.store_rsp()
-
-        if args.status:
-            deceive_status = args.status
-            if port_scan_tech == 'pd':
+        elif port_scan_tech == 'pd':
+            if args.status:
+                deceive_status = args.status
                 deceiver = PortDeceiver(args.host)
                 deceiver.deceive_ps_hs(deceive_status)
+            else:
+                logging.debug("No port status specified for 'pd' technique")
 
-        else:
-            logging.debug('No port scan technique is designated')
-            return
+        if deceiver is None:
+            logging.debug("No valid port scan technique provided")
 
     else:
         logging.debug('No scan technique is designated')
-        return
 
 
 if __name__ == '__main__':
