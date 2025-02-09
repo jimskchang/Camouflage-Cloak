@@ -95,7 +95,7 @@ git clone https:"//github.com/jimskchang/Camouflage-Cloak.git
 
 ***Step 2:***cd to the Camouflage-Cloak folder and execute the following instruction
 ```bash
-sudo python3 main.py --host <protected server IP> --scan ts --os <OS template you want to synthesize e.g. win7/win10/centos> 
+sudo python3 main.py --host <protected server IP> --scan ts --os <host OS template you want to synthesize e.g. "win10" or "centos"> 
 ```
 
 ***Step 3:***run Nmap OS detection on attacker 
@@ -103,9 +103,9 @@ sudo python3 main.py --host <protected server IP> --scan ts --os <OS template yo
 sudo nmap -O <Protected Server IP>
 ```
 
-***Step 4:*** Move the Template
+***Step 4:*** Check the Template
 ```bash
-Camouflage Cloak will generate the template in your current directory to prevent overriding. You have to move them to /os_record/<OS template name> to deploy the template correctly.
+Camouflage Cloak will generate the template to /os_record/<"OS template name"> to deploy the template correctly.
 ```
 
 **OS deceiver test**
