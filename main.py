@@ -43,15 +43,15 @@ def main():
                 logging.warning("No OS specified for deception.")
             else:
                 deceiver = OsDeceiver(args.host, args.os)
-                if hasattr(deceiver, 'os_deceive'):
+                if hasattr(deceiver, 'os_deceive') and callable(getattr(deceiver, 'os_deceive')):
                     logging.info("Starting OS deception...")
                     try:
-                        deceiver.os_deceive()  # Ensure it is being called
+                        deceiver.os_deceive()
                     except Exception as e:
                         logging.error(f"Error in os_deceive(): {e}")
                         sys.exit(1)
                 else:
-                    logging.error("os_deceive() function is missing in OsDeceiver!")
+                    logging.error("os_deceive() function is missing or not callable in OsDeceiver!")
                     sys.exit(1)
 
         elif port_scan_tech == "rr":
@@ -81,3 +81,4 @@ if __name__ == "__main__":
         level=logging.INFO
     )
     main()
+    #
