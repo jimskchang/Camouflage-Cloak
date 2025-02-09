@@ -16,11 +16,11 @@ L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
 
 # Camouflage-Cloak Server Network Configuration
-HOST = '192.168.23.206'
-NIC = 'ens192'  # Change this if your NIC is different
+HOST = '192.168.23.206'  # Replace based on your Camouflage-Cloak Server IP
+NIC = 'ens192'  # Replace based on your Camouflage-Cloak Server NIC
 
-# Camouflage-Cloak Server Manual MAC Address (set to None to auto-detect)
-MANUAL_MAC_ADDRESS = '00:50:56:8e:35:6f'  # Replace with your MAC address or set to None
+# Camouflage-Cloak Server Input Manual MAC Address (set to None to auto-detect)
+MANUAL_MAC_ADDRESS = '00:50:56:8e:35:6f'  # Replace based on your Camouflage-Cloak Server MAC address or set to None
 
 def get_mac_address(nic):
     """Fetch MAC address dynamically, with an option for manual input."""
