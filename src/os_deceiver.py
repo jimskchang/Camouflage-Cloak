@@ -3,6 +3,7 @@ import logging
 import random
 import socket
 import struct
+import os
 from typing import List, Any
 
 import src.settings as settings
@@ -22,18 +23,18 @@ class OsDeceiver:
         self.port_seq = [4441, 5551, 6661]
 
     def os_record(self):
+        os_record_path = f"os_record/{self.os}"
+        
+        # Ensure OS folder exists
+        if not os.path.exists(os_record_path):
+            logging.info(f"Creating OS record folder: {os_record_path}")
+            os.makedirs(os_record_path)
+        
         arp_pkt_dict = {}
-        ip_pair_seq = []
-        arp_key_seq = []
-
-        udp_pkt_dict = {}
-        icmp_pkt_dict = {}  # Fix: Ensure dictionary is initialized
-        id_pair_seq = []
-        icmp_key_seq = []
-
-        pkt_dict = {}
-        port_pair_seq = []
-        key_seq = []  # prevent IndexError since dict.keys() ignores duplicates
+        icmp_pkt_dict = {}  # Ensure dictionary is initialized
+        
+        arp_record_file = os.path.join(os_record_path, "arp_record.txt")
+        icmp_record_file = os.path.join(os_record_path, "icmp_record.txt")
 
         count = 1
         while True:
@@ -55,19 +56,12 @@ class OsDeceiver:
 
                     if socket.inet_ntoa(dest_IP) == self.host:  # Fix: Ensuring correct destination
                         key, packet_val = gen_icmp_key(packet)
-                        id_pair_seq.append(ID)
-                        icmp_key_seq.append(key)
                         if key not in icmp_pkt_dict.keys():
                             icmp_pkt_dict[key] = None
-
-                    elif socket.inet_ntoa(src_IP) == self.host:  # ICMP Response handling
-                        if ID in id_pair_seq:
-                            pkt_index = id_pair_seq.index(ID)
-                            key = icmp_key_seq[pkt_index]
-                            icmp_pkt_dict[key] = packet
+                        icmp_pkt_dict[key] = packet
 
                     logging.info(f"ICMP Record Updated - Count: {len(icmp_pkt_dict)}")
-                    with open('icmp_record.txt', 'w') as f:
+                    with open(icmp_record_file, 'w') as f:
                         f.write(str(icmp_pkt_dict))
                         f.flush()
 
@@ -78,17 +72,12 @@ class OsDeceiver:
 
                 if socket.inet_ntoa(recv_ip) == self.host:
                     key, packet_val = gen_arp_key(packet)
-                    ip_pair_seq.append((sender_ip, recv_ip))
-                    arp_key_seq.append(key)
                     if key not in arp_pkt_dict.keys():
                         arp_pkt_dict[key] = None
-                elif socket.inet_ntoa(sender_ip) == self.host and (recv_ip, sender_ip) in ip_pair_seq:
-                    pkt_index = ip_pair_seq.index((recv_ip, sender_ip))
-                    key = arp_key_seq[pkt_index]
                     arp_pkt_dict[key] = packet
 
                 logging.info(f"ARP Record Updated - Count: {len(arp_pkt_dict)}")
-                with open('arp_record.txt', 'w') as f:
+                with open(arp_record_file, 'w') as f:
                     f.write(str(arp_pkt_dict))
                     f.flush()
             
