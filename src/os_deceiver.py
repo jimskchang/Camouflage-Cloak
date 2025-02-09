@@ -1,182 +1,96 @@
-import os
-import logging
-import socket
 import struct
-import time
-from datetime import datetime
+import socket
+import logging
 import src.settings as settings
-from src.Packet import Packet
-from src.tcp import TcpConnect
 
+class Packet:
+    """ Handles unpacking and storing network packet details. """
 
-class OsDeceiver:
-    def __init__(self, target_host, target_os):
-        """
-        Initialize OS Deceiver for fingerprint collection & deception.
-        :param target_host: The host to mimic (e.g., "192.168.23.201")
-        :param target_os: The OS to mimic (e.g., "win10", "centos")
-        """
-        self.target_host = target_host
-        self.target_os = target_os
-        self.conn = TcpConnect(target_host)
-        self.os_record_path = f"os_record/{self.target_os}"
-        self.capture_timeout = 120  # Timeout for fingerprint capture (2 minutes)
+    def __init__(self, packet):
+        self.packet = packet
+        self.l2_field = {}
+        self.l3_field = {}
+        self.l4_field = {}
 
-        # Ensure OS-specific record directory exists
-        if not os.path.exists(self.os_record_path):
-            logging.info(f"Creating OS record folder: {self.os_record_path}")
-            os.makedirs(self.os_record_path)
-
-    def os_record(self, max_packets=100):
-        """
-        Captures OS fingerprinting packets (ARP, ICMP) and exits after reaching max_packets or timeout.
-        :param max_packets: Number of packets to capture before exiting (default: 100).
-        """
-        logging.info(f"Intercepting OS fingerprinting packets for {self.target_host} (Max: {max_packets}, Timeout: {self.capture_timeout}s)")
-
-        arp_pkt_dict = {}
-        icmp_pkt_dict = {}
-
-        arp_record_file = os.path.join(self.os_record_path, "arp_record.txt")
-        icmp_record_file = os.path.join(self.os_record_path, "icmp_record.txt")
-
-        start_time = time.time()
-        packet_count = 0
-
+    def unpack(self):
+        """ Unpack the Ethernet frame to determine the protocol. """
         try:
-            while packet_count < max_packets:
-                if time.time() - start_time > self.capture_timeout:
-                    logging.info("Timeout reached. Exiting OS fingerprinting mode.")
-                    break
+            eth_header = self.packet[:settings.ETH_HEADER_LEN]
+            eth = struct.unpack("!6s6sH", eth_header)
+            eth_protocol = socket.ntohs(eth[2])
 
-                packet, _ = self.conn.sock.recvfrom(65565)
-                eth_header = packet[:settings.ETH_HEADER_LEN]
-                eth_protocol = struct.unpack("!H", eth_header[12:14])[0]
+            self.l2_field["sMAC"] = eth[1]  # Source MAC
+            self.l2_field["dMAC"] = eth[0]  # Destination MAC
+            self.l2_field["protocol"] = eth_protocol
 
-                if eth_protocol == 8:  # IPv4 packets
-                    ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-                    _, _, _, _, _, _, protocol, _, src_ip, dest_ip = struct.unpack("!BBHHHBBH4s4s", ip_header)
-
-                    if dest_ip != socket.inet_aton(self.target_host):  # Convert target IP to bytes
-                        continue  # Ignore non-target packets
-
-                    if protocol == 1:  # ICMP packets
-                        key, _ = self.gen_icmp_key(packet)
-                        icmp_pkt_dict[key] = packet
-                        packet_count += 1
-                        logging.info(f"ICMP Packet Captured ({packet_count})")
-
-                        with open(icmp_record_file, "w") as f:
-                            f.write(str(icmp_pkt_dict))
-
-                elif eth_protocol == 1544:  # ARP packets
-                    key, _ = self.gen_arp_key(packet)
-                    arp_pkt_dict[key] = packet
-                    packet_count += 1
-                    logging.info(f"ARP Packet Captured ({packet_count})")
-
-                    with open(arp_record_file, "w") as f:
-                        f.write(str(arp_pkt_dict))
-
-            logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
-
-        except KeyboardInterrupt:
-            logging.info("User interrupted capture. Exiting...")
+            if eth_protocol == 0x0800:  # IPv4
+                self.unpack_ip_header()
+            elif eth_protocol == 0x0806:  # ARP
+                self.unpack_arp_header()
         except Exception as e:
-            logging.error(f"Error while capturing packets: {e}")
+            logging.error(f"Error unpacking Ethernet frame: {e}")
 
-        logging.info("Returning to command mode.")
-
-    def os_deceive(self):
-        """
-        Performs OS deception by modifying fingerprinting responses.
-        Dynamically detects Nmap scanner and responds to it.
-        """
-        logging.info(f"Executing OS deception for {self.target_host}, mimicking {self.target_os}...")
-
-        template_dict = {
-            'arp': self.load_file("arp"),
-            'tcp': self.load_file("tcp"),
-            'udp': self.load_file("udp"),
-            'icmp': self.load_file("icmp")
-        }
-
-        while True:
-            raw_pkt, _ = self.conn.sock.recvfrom(65565)
-            pkt = Packet(packet=raw_pkt)
-            pkt.unpack()
-
-            # Convert target host to bytes before comparing
-            if pkt.l3_field['dest_IP'] != socket.inet_aton(self.target_host):
-                continue  # Ignore non-target packets
-
-            proc = pkt.get_proc()
-            response_pkt = self.deceived_pkt_synthesis(proc, pkt, template_dict)
-
-            if response_pkt:
-                logging.info(f"Sending deceptive {proc.upper()} packet.")
-                self.conn.sock.send(response_pkt)
-
-    def load_file(self, pkt_type: str):
-        """ Loads OS fingerprinting response records. """
-        file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
-
-        if not os.path.exists(file_path):
-            logging.warning(f"Missing {pkt_type} fingerprint record. Skipping...")
-            return {}
-
+    def unpack_ip_header(self):
+        """ Unpacks the IPv4 header. """
         try:
-            with open(file_path, 'r') as file:
-                return eval(file.readline())  # Read stored dictionary
+            ip_header = self.packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+            unpacked = struct.unpack("!BBHHHBBH4s4s", ip_header)
+
+            self.l3_field["version"] = unpacked[0] >> 4
+            self.l3_field["src_IP"] = unpacked[8]  # Source IP (bytes)
+            self.l3_field["dest_IP"] = unpacked[9]  # Destination IP (bytes)
+            self.l3_field["protocol"] = unpacked[6]
+
+            if self.l3_field["protocol"] == 1:  # ICMP
+                self.unpack_icmp_header()
+            elif self.l3_field["protocol"] == 6:  # TCP
+                self.unpack_tcp_header()
         except Exception as e:
-            logging.error(f"Error loading {pkt_type} record: {e}")
-            return {}
+            logging.error(f"Error unpacking IP header: {e}")
 
-    def deceived_pkt_synthesis(self, proc: str, req: Packet, template: dict):
-        """ Generates a deceptive response packet based on stored fingerprints. """
-        key, _ = self.gen_key(proc, req.packet)
-
+    def unpack_tcp_header(self):
+        """ Unpacks the TCP header. """
         try:
-            raw_template = template[proc][key]
-        except KeyError:
-            logging.warning(f"No deception template found for {proc}.")
-            return None
+            tcp_header = self.packet[
+                settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
+                settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN
+            ]
+            unpacked = struct.unpack("!HHLLBBHHH", tcp_header)
 
-        template_pkt = Packet(raw_template)
-        template_pkt.unpack()
+            self.l4_field["src_port"] = unpacked[0]
+            self.l4_field["dest_port"] = unpacked[1]
+            self.l4_field["seq"] = unpacked[2]
+            self.l4_field["ack"] = unpacked[3]
+            self.l4_field["flags"] = unpacked[5]
+        except Exception as e:
+            logging.error(f"Error unpacking TCP header: {e}")
 
-        # Ensure responses go back to the correct scanning host
-        template_pkt.l2_field['dMAC'] = req.l2_field['sMAC']
-        template_pkt.l2_field['sMAC'] = settings.mac  # Use our spoofed MAC
-        template_pkt.l3_field['src_IP'] = req.l3_field['dest_IP']
-        template_pkt.l3_field['dest_IP'] = req.l3_field['src_IP']
+    def unpack_icmp_header(self):
+        """ Unpacks the ICMP header. """
+        try:
+            icmp_header = self.packet[
+                settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
+                settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN
+            ]
+            unpacked = struct.unpack("!BBH", icmp_header)
 
-        template_pkt.pack()
-        return template_pkt.packet
+            self.l4_field["icmp_type"] = unpacked[0]
+            self.l4_field["icmp_code"] = unpacked[1]
+        except Exception as e:
+            logging.error(f"Error unpacking ICMP header: {e}")
 
-    def gen_key(self, proc, packet):
-        """ Generates a key for identifying fingerprint packets. """
-        if proc == 'tcp':
-            return self.gen_tcp_key(packet)
-        elif proc == 'udp':
-            return self.gen_udp_key(packet)
-        elif proc == 'icmp':
-            return self.gen_icmp_key(packet)
-        elif proc == 'arp':
-            return self.gen_arp_key(packet)
-        else:
-            return None, None
+    def unpack_arp_header(self):
+        """ Unpacks the ARP header. """
+        try:
+            arp_header = self.packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
+            unpacked = struct.unpack("!HHBBH6s4s6s4s", arp_header)
 
-    def gen_arp_key(self, packet: bytes):
-        """ Generate ARP fingerprinting key """
-        arp_header = packet[settings.ETH_HEADER_LEN:settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
-        key = arp_header[:8]
-        return key, packet
-
-    def gen_icmp_key(self, packet: bytes):
-        """ Generate ICMP fingerprinting key """
-        ip_header = packet[settings.ETH_HEADER_LEN:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-        icmp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                             settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN]
-        key = ip_header[12:16] + icmp_header[:4]
-        return key, packet
+            self.l3_field["hw_type"] = unpacked[0]
+            self.l3_field["proto_type"] = unpacked[1]
+            self.l3_field["opcode"] = unpacked[4]
+            self.l3_field["sender_mac"] = unpacked[5]
+            self.l3_field["sender_ip"] = unpacked[6]
+            self.l3_field["target_mac"] = unpacked[7]
+            self.l3_field["target_ip"] = unpacked[8]
+        except Exception as e:
+            logging.error(f"Error unpacking ARP header: {e}")
