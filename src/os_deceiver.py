@@ -5,17 +5,30 @@ import os
 from _datetime import datetime, timedelta
 from typing import Any
 
+# Delay import to avoid circular dependency
+import src.settings as settings
+from src.Packet import Packet
+from src.tcp import TcpConnect  # ✅ Ensure we import TcpConnect for connection handling
+
 class OsDeceiver:
     def __init__(self, target_host, camouflage_host, target_os):
-        self.target_host = target_host  # Host to mimic
-        self.camouflage_host = camouflage_host  # The real host running deception
-        self.target_os = target_os  # OS fingerprint to mimic
+        """
+        target_host: The IP address being mimicked (Target)
+        camouflage_host: The real host running the deception (Camouflage Cloak)
+        target_os: The OS fingerprint we are trying to mimic
+        """
+        self.target_host = target_host
+        self.camouflage_host = camouflage_host
+        self.target_os = target_os
+
+        # ✅ Create a raw socket connection for packet reception
+        self.conn = TcpConnect(self.camouflage_host)
 
         self.knocking_history = {}
         self.white_list = {}
         self.port_seq = [4441, 5551, 6661]
 
-        # Ensure OS-specific record directory exists
+        # ✅ Ensure OS-specific record directory exists
         self.os_record_path = f"os_record/{self.target_os}"
         if not os.path.exists(self.os_record_path):
             logging.info(f"Creating OS record folder: {self.os_record_path}")
@@ -23,14 +36,11 @@ class OsDeceiver:
 
     def os_record(self):
         """ Captures and logs OS fingerprinting packets (ARP, ICMP) """
-        import src.settings as settings  # Delay import to avoid circular dependency
-        from src.Packet import Packet  # Import inside function
-
         logging.info(f"Intercepting OS fingerprinting packets for {self.target_host}")
 
         icmp_pkt_dict = {}
         arp_pkt_dict = {}
-        
+
         icmp_record_file = os.path.join(self.os_record_path, "icmp_record.txt")
         arp_record_file = os.path.join(self.os_record_path, "arp_record.txt")
 
@@ -65,11 +75,8 @@ class OsDeceiver:
 
     def os_deceive(self):
         """ Performs OS deception by modifying fingerprinting responses """
-        import src.settings as settings
-        from src.Packet import Packet
-
         logging.info(f"Executing OS deception for {self.target_host}, mimicking {self.target_os}")
-        
+
         template_dict = {
             "arp": self.load_file("arp"),
             "tcp": self.load_file("tcp"),
