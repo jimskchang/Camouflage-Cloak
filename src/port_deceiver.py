@@ -1,174 +1,115 @@
 import logging
 import socket
 import struct
-import src.settings as settings
-from src.tcp import TcpConnect, getIPChecksum, getTCPChecksum
+from src import settings
+from src.tcp import TcpConnect, calculate_ip_checksum, calculate_tcp_checksum
 
 
 class PortDeceiver:
+    """Handles deceptive port scanning responses."""
 
-    def __init__(self, host):
+    def __init__(self, host: str):
         self.host = host
         self.conn = TcpConnect(host)
 
     def send_packet(self, recv_flags, reply_flags):
+        """Intercepts packets and sends deceptive responses."""
         while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            eth_header = packet[: settings.ETH_HEADER_LEN]
-            eth = struct.unpack('!6s6sH', eth_header)
-            eth_protocol = socket.ntohs(eth[2])
-
-            if eth_protocol != 8:
+            try:
+                packet, _ = self.conn.sock.recvfrom(65565)
+            except socket.error as e:
+                logging.error(f"Socket error: {e}")
                 continue
 
-            # build eth_header
-            eth_dMAC = eth[0]
-            eth_sMAC = eth[1]
-            reply_eth_dMAC = eth_sMAC
-            reply_eth_sMAC = eth_dMAC
-            reply_eth_header = struct.pack('!6s6sH', reply_eth_dMAC, reply_eth_sMAC, eth[2])
+            eth_protocol, src_IP, dest_IP, PROTOCOL = self._parse_ethernet_ip(packet)
 
-            ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-            IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID, FRAGMENT_STATUS, TIME_TO_LIVE, PROTOCOL, check_sum_of_hdr, \
-                    src_IP, dest_IP = struct.unpack('!BBHHHBBH4s4s', ip_header)
-
-            if dest_IP != socket.inet_aton(self.conn.dip):
+            if eth_protocol != 8 or PROTOCOL != 6:  # Only handle TCP
                 continue
 
-            # tcp=0x06
-            if PROTOCOL != 6:
-                continue
+            # Build Ethernet header
+            reply_eth_header = self._build_eth_header(packet)
 
-            # build ip_header
-            pktID = 456  # arbitrary number
-            reply_src_IP = dest_IP
-            reply_dest_IP = src_IP
-            check_sum_of_hdr = 0
-            reply_ttl = TIME_TO_LIVE + 1
-            total_len = 40
-            reply_ip_header = struct.pack('!BBHHHBBH4s4s', IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID,
-                                          FRAGMENT_STATUS, reply_ttl, PROTOCOL, check_sum_of_hdr,
-                                          reply_src_IP, reply_dest_IP)
-            check_sum_of_hdr = getIPChecksum(reply_ip_header)
-            reply_ip_header = struct.pack('!BBHHHBBH4s4s', IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID,
-                                          FRAGMENT_STATUS, reply_ttl, PROTOCOL, check_sum_of_hdr,
-                                          reply_src_IP, reply_dest_IP)
+            # Build IP header
+            reply_ip_header = self._build_ip_header(packet, src_IP, dest_IP)
 
             tcp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN: settings.ETH_HEADER_LEN
-                                                        + settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN]
-            src_port, dest_port, seq, ack_num, offset, flags, window, checksum, urgent_ptr = struct.unpack('!HHLLBBHHH',
-                                                                                                           tcp_header)
+                                + settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN]
+            src_port, dest_port, seq, ack_num, offset, flags, _, _, _ = struct.unpack('!HHLLBBHHH', tcp_header)
 
-            if flags in recv_flags:
-                print('receive flag=' + str(flags))
-                pass
-            else:
+            if flags not in recv_flags:
                 continue
 
+            logging.info(f"Received flag: {flags}")
+
             reply_seq = ack_num
-            reply_ack_vum = seq + 1
+            reply_ack_num = seq + 1
             reply_src_port = dest_port
             reply_dest_port = src_port
-            num_recv = len(recv_flags)
 
+            num_recv = len(recv_flags)
             for i in range(num_recv):
-                if flags == recv_flags[i]:
-                    if reply_flags[i] == 0:
-                        continue
-                    reply_tcp_header = self.conn.build_tcp_header_from_reply(5, reply_seq, reply_ack_vum,
-                                                                             reply_src_port, reply_dest_port,
-                                                                             reply_src_IP, reply_dest_IP,
-                                                                             reply_flags[i])
+                if flags == recv_flags[i] and reply_flags[i] != 0:
+                    reply_tcp_header = self.conn.build_tcp_header_from_reply(
+                        5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port, src_IP, dest_IP, reply_flags[i]
+                    )
                     packet = reply_eth_header + reply_ip_header + reply_tcp_header
                     self.conn.sock.send(packet)
-                    print('reply flag=' + str(reply_flags[i]))
+                    logging.info(f"Replied with flag: {reply_flags[i]}")
 
             return True
 
-    def deceive_ps_hs(self, port_status):
-        if port_status == 'open':
-            port_flag = 18
-            print('deceive open')
-        elif port_status == 'close':
-            port_flag = 20
-            print('deceive close')
-        # count = 0
+    def deceive_ps_hs(self, port_status: str):
+        """Deceives port scanning tools."""
+        port_flag = 18 if port_status == "open" else 20
+        logging.info(f"Deceiving {port_status} port.")
 
         while True:
-            packet, _ = self.conn.sock.recvfrom(65565)
-            eth_header = packet[: settings.ETH_HEADER_LEN]
-            eth = struct.unpack('!6s6sH', eth_header)
-            eth_protocol = socket.ntohs(eth[2])
+            try:
+                packet, _ = self.conn.sock.recvfrom(65565)
+            except socket.error as e:
+                logging.error(f"Socket error: {e}")
+                continue
+
+            eth_protocol, src_IP, dest_IP, PROTOCOL = self._parse_ethernet_ip(packet)
 
             if eth_protocol != 8:
                 continue
 
-            # build eth_header
-            eth_dMAC = eth[0]
-            eth_sMAC = eth[1]
-            reply_eth_dMAC = eth_sMAC
-            reply_eth_sMAC = eth_dMAC
-            reply_eth_header = struct.pack('!6s6sH', reply_eth_dMAC, reply_eth_sMAC, eth[2])
+            # Build Ethernet header
+            reply_eth_header = self._build_eth_header(packet)
 
-            ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-            IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID, FRAGMENT_STATUS, TIME_TO_LIVE, PROTOCOL, check_sum_of_hdr, \
-                src_IP, dest_IP = struct.unpack('!BBHHHBBH4s4s', ip_header)
-            '''
-            if dest_IP != socket.inet_aton(self.sip) or src_IP != socket.inet_aton(self.dip):
-                continue
-            '''
+            # Build IP header
+            reply_ip_header = self._build_ip_header(packet, src_IP, dest_IP)
 
-            if dest_IP != socket.inet_aton(self.conn.dip):
-                continue
-
-            # build ip_header
-            pktID = 456  # arbitrary number
-            reply_src_IP = dest_IP
-            reply_dest_IP = src_IP
-            check_sum_of_hdr = 0
-            reply_ttl = TIME_TO_LIVE + 1
-            total_len = 40
-            reply_ip_header = struct.pack('!BBHHHBBH4s4s', IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID,
-                                          FRAGMENT_STATUS,
-                                          reply_ttl, PROTOCOL, check_sum_of_hdr, reply_src_IP, reply_dest_IP)
-            check_sum_of_hdr = getIPChecksum(reply_ip_header)
-            reply_ip_header = struct.pack('!BBHHHBBH4s4s', IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID,
-                                          FRAGMENT_STATUS,
-                                          reply_ttl, PROTOCOL, check_sum_of_hdr, reply_src_IP, reply_dest_IP)
-
-            # tcp=0x06
-            if PROTOCOL == 6:
-                if port_status == 'record':
-                    f = open('pkt_record.txt', 'a')
-                    f.write(str(packet) + '\n')
+            if PROTOCOL == 6:  # TCP
+                if port_status == "record":
+                    with open("pkt_record.txt", "a", encoding="utf-8") as f:
+                        f.write(str(packet) + "\n")
                     continue
+
                 tcp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN: settings.ETH_HEADER_LEN +
                                     settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN]
-                src_port, dest_port, seq, ack_num, offset, flags, window, checksum, urgent_ptr = struct.unpack(
-                    '!HHLLBBHHH', tcp_header)
+                src_port, dest_port, seq, ack_num, offset, flags, _, _, _ = struct.unpack("!HHLLBBHHH", tcp_header)
 
                 reply_seq = ack_num
-                reply_ack_vum = seq + 1
+                reply_ack_num = seq + 1
                 reply_src_port = dest_port
                 reply_dest_port = src_port
 
-                if flags == 2:
-                    print('receive syn')
-                    # reply ack_rst
-                    reply_tcp_header = self.conn.build_tcp_header_from_reply(5, reply_seq, reply_ack_vum,
-                                                                             reply_src_port, reply_dest_port,
-                                                                             reply_src_IP, reply_dest_IP, port_flag)
-                # receive ack receive
-                elif flags == 16:
-                    # reply rst
-                    print('receive ack')
-                    reply_tcp_header = self.conn.build_tcp_header_from_reply(5, reply_seq, reply_ack_vum,
-                                                                             reply_src_port, reply_dest_port,
-                                                                             reply_src_IP, reply_dest_IP, 4)
-                elif port_status == 'close':  # flag != syn or ack and status == close
-                    reply_tcp_header = self.conn.build_tcp_header_from_reply(5, reply_seq, reply_ack_vum,
-                                                                             reply_src_port, reply_dest_port,
-                                                                             reply_src_IP, reply_dest_IP, port_flag)
+                if flags == 2:  # SYN
+                    logging.info("Received SYN, sending deceptive response.")
+                    reply_tcp_header = self.conn.build_tcp_header_from_reply(
+                        5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port, src_IP, dest_IP, port_flag
+                    )
+                elif flags == 16:  # ACK
+                    logging.info("Received ACK, sending deceptive response.")
+                    reply_tcp_header = self.conn.build_tcp_header_from_reply(
+                        5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port, src_IP, dest_IP, 4
+                    )
+                elif port_status == "close":
+                    reply_tcp_header = self.conn.build_tcp_header_from_reply(
+                        5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port, src_IP, dest_IP, port_flag
+                    )
                 else:
                     continue
 
@@ -176,27 +117,28 @@ class PortDeceiver:
                 self.conn.sock.send(packet)
                 continue
 
-            # icmp=0x01
-            elif PROTOCOL == 1:
-                if port_status == 'record':
+            elif PROTOCOL == 1:  # ICMP
+                if port_status == "record":
                     continue
-                icmp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN: settings.ETH_HEADER_LEN +
-                                     settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN]
+
+                icmp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
+                                     settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN]
                 data = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN:]
-                icmp_type, code, checksum, pktID, seq = struct.unpack('BbHHh', icmp_header)
+                icmp_type, code, checksum, pktID, seq = struct.unpack("BbHHh", icmp_header)
                 pktID = 456
 
                 if icmp_type == 8:
-                    print('receive icmp8 & reply icmp0')
+                    logging.info("Received ICMP Echo Request, replying with Echo Reply.")
                     icmp_type = 0
                 elif icmp_type == 13:
-                    print('receive icmp13 & reply icmp14')
+                    logging.info("Received ICMP Timestamp Request, replying with Timestamp Reply.")
                     icmp_type = 14
 
                 checksum = 0
-                pseudo_packet = struct.pack('BbHHh', icmp_type, code, checksum, pktID, seq) + data
-                checksum = getTCPChecksum(pseudo_packet)
-                reply_icmp_header = struct.pack('BbHHh', icmp_type, code, checksum, pktID, seq)
+                pseudo_packet = struct.pack("BbHHh", icmp_type, code, checksum, pktID, seq) + data
+                checksum = calculate_tcp_checksum(pseudo_packet)
+                reply_icmp_header = struct.pack("BbHHh", icmp_type, code, checksum, pktID, seq)
+
                 packet = reply_eth_header + reply_ip_header + reply_icmp_header + data
                 self.conn.sock.send(packet)
                 continue
@@ -204,7 +146,37 @@ class PortDeceiver:
             else:
                 continue
 
+    def _parse_ethernet_ip(self, packet):
+        """Parses Ethernet and IP headers."""
+        eth_header = packet[:settings.ETH_HEADER_LEN]
+        eth = struct.unpack("!6s6sH", eth_header)
+        eth_protocol = socket.ntohs(eth[2])
 
+        ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+        _, _, _, _, _, _, PROTOCOL, _, src_IP, dest_IP = struct.unpack("!BBHHHBBH4s4s", ip_header)
 
+        return eth_protocol, src_IP, dest_IP, PROTOCOL
 
+    def _build_eth_header(self, packet):
+        """Builds an Ethernet header for response packets."""
+        eth_header = packet[:settings.ETH_HEADER_LEN]
+        eth = struct.unpack("!6s6sH", eth_header)
+        return struct.pack("!6s6sH", eth[1], eth[0], eth[2])  # Swap src and dest MAC
 
+    def _build_ip_header(self, packet, src_IP, dest_IP):
+        """Builds an IP header for response packets."""
+        ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+        IHL_VERSION, TYPE_OF_SERVICE, _, pktID, FRAGMENT_STATUS, TIME_TO_LIVE, PROTOCOL, _, _, _ = \
+            struct.unpack("!BBHHHBBH4s4s", ip_header)
+
+        pktID = 456  # Arbitrary ID
+        check_sum_of_hdr = 0
+        reply_ttl = TIME_TO_LIVE + 1
+        total_len = 40
+
+        reply_ip_header = struct.pack("!BBHHHBBH4s4s", IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID,
+                                      FRAGMENT_STATUS, reply_ttl, PROTOCOL, check_sum_of_hdr, dest_IP, src_IP)
+        check_sum_of_hdr = calculate_ip_checksum(reply_ip_header)
+
+        return struct.pack("!BBHHHBBH4s4s", IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID,
+                           FRAGMENT_STATUS, reply_ttl, PROTOCOL, check_sum_of_hdr, dest_IP, src_IP)
