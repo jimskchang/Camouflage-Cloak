@@ -20,7 +20,11 @@ def main():
 
     args = parser.parse_args()
 
-    # Ensure settings are correctly assigned
+    # Ensure network interface is in promiscuous mode
+    logging.info(f"Setting {args.nic} to promiscuous mode...")
+    os.system(f"sudo ip link set {args.nic} promisc on")
+
+    # Verify settings are properly configured
     if settings is not None:
         settings.HOST = args.host
         settings.NIC = args.nic
@@ -28,11 +32,10 @@ def main():
         logging.error("Settings module not found! Exiting...")
         sys.exit(1)
 
-    logging.info(f"Initializing OsDeceiver for target {args.host}, mimicking {args.os}...")
-
-    # Initialize OsDeceiver with the correct arguments
+    # Initialize OsDeceiver with correct arguments
     try:
         deceiver = OsDeceiver(target_host=args.host, target_os=args.os)
+        logging.info(f"OsDeceiver initialized for {args.host}, mimicking {args.os}")
     except TypeError as e:
         logging.error(f"Error initializing OsDeceiver: {e}")
         sys.exit(1)
@@ -41,24 +44,17 @@ def main():
     port_scan_tech = args.scan.lower()
 
     if port_scan_tech == "ts":
-        logging.info("Executing fingerprint capture (TS mode)...")
-        try:
-            deceiver.os_record(max_packets=100)
-            logging.info("Fingerprint capture completed.")
-        except Exception as e:
-            logging.error(f"[Fingerprinting Error] os_record() failed: {e}")
-            sys.exit(1)
+        logging.info(f"Executing OS Fingerprinting on {args.host} (Max: 100 packets, Timeout: 2 min)...")
+        deceiver.os_record(max_packets=100)
+        logging.info("Fingerprinting completed.")
         return  # Exit after capturing
 
     elif port_scan_tech == "od":
         logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os}...")
         try:
             deceiver.os_deceive()
-        except AttributeError as e:
-            logging.error(f"[OS Deception] Attribute Error: {e} - Ensure os_deceive() is defined properly in os_deceiver.py.")
-            sys.exit(1)
         except Exception as e:
-            logging.error(f"[OS Deception] Unexpected error in os_deceive(): {e}")
+            logging.error(f"[OS Deception] Error in os_deceive(): {e}")
             sys.exit(1)
 
     elif port_scan_tech == "rr":
@@ -90,6 +86,6 @@ if __name__ == "__main__":
     logging.basicConfig(
         format="%(asctime)s [%(levelname)s]: %(message)s",
         datefmt="%y-%m-%d %H:%M",
-        level=logging.INFO
+        level=logging.DEBUG  # Enable debug logging
     )
     main()
