@@ -2,7 +2,6 @@ import os
 import argparse
 import logging
 import sys
-from _datetime import datetime, timedelta
 import socket
 import struct
 import src.settings as settings
@@ -39,12 +38,21 @@ def main():
             return
 
         elif port_scan_tech == "od":
-            logging.info("Executing OS Deception...")
+            logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os}...")
             if args.os is None:
                 logging.warning("No OS specified for deception.")
             else:
                 deceiver = OsDeceiver(args.host, args.os)
-                deceiver.os_deceive()
+                if hasattr(deceiver, 'os_deceive'):
+                    logging.info("Starting OS deception...")
+                    try:
+                        deceiver.os_deceive()  # Ensure it is being called
+                    except Exception as e:
+                        logging.error(f"Error in os_deceive(): {e}")
+                        sys.exit(1)
+                else:
+                    logging.error("os_deceive() function is missing in OsDeceiver!")
+                    sys.exit(1)
 
         elif port_scan_tech == "rr":
             logging.info("Recording response packets...")
