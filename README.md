@@ -105,7 +105,7 @@ sudo nmap -O <Protected Server IP>
 
 ***Step 4:*** Check the Template
 ```bash
-Camouflage Cloak will generate the template to /os_record/<"OS template name"> to deploy the template correctly.
+Camouflage Cloak will intercept Nmap fingerprinting packets and generate the packetts template to /os_record/<"OS template name"> to deploy the template correctly.
 ```
 
 **OS deceiver test**
