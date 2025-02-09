@@ -3,13 +3,13 @@ import socket
 import struct
 from src import settings
 from src.tcp import TcpConnect, calculate_ip_checksum, calculate_tcp_checksum
-
+from src.Packet import Packet  # Ensure Packet class is imported
 
 class PortDeceiver:
     """Handles deceptive port scanning responses."""
 
     def __init__(self, host: str):
-        self.host = host
+        self.host = socket.inet_aton(host)  # Convert host IP to bytes
         self.conn = TcpConnect(host)
 
     def send_packet(self, recv_flags, reply_flags):
@@ -21,6 +21,7 @@ class PortDeceiver:
                 logging.error(f"Socket error: {e}")
                 continue
 
+            # Process the incoming packet
             eth_protocol, src_IP, dest_IP, PROTOCOL = self._parse_ethernet_ip(packet)
 
             if eth_protocol != 8 or PROTOCOL != 6:  # Only handle TCP
@@ -32,8 +33,8 @@ class PortDeceiver:
             # Build IP header
             reply_ip_header = self._build_ip_header(packet, src_IP, dest_IP)
 
-            tcp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN: settings.ETH_HEADER_LEN
-                                + settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN]
+            tcp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN: settings.ETH_HEADER_LEN +
+                                settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN]
             src_port, dest_port, seq, ack_num, offset, flags, _, _, _ = struct.unpack('!HHLLBBHHH', tcp_header)
 
             if flags not in recv_flags:
@@ -46,16 +47,14 @@ class PortDeceiver:
             reply_src_port = dest_port
             reply_dest_port = src_port
 
-            num_recv = len(recv_flags)
-            for i in range(num_recv):
-                if flags == recv_flags[i] and reply_flags[i] != 0:
+            for i, recv_flag in enumerate(recv_flags):
+                if flags == recv_flag and reply_flags[i] != 0:
                     reply_tcp_header = self.conn.build_tcp_header_from_reply(
                         5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port, src_IP, dest_IP, reply_flags[i]
                     )
                     packet = reply_eth_header + reply_ip_header + reply_tcp_header
                     self.conn.sock.send(packet)
                     logging.info(f"Replied with flag: {reply_flags[i]}")
-
             return True
 
     def deceive_ps_hs(self, port_status: str):
@@ -115,35 +114,6 @@ class PortDeceiver:
 
                 packet = reply_eth_header + reply_ip_header + reply_tcp_header
                 self.conn.sock.send(packet)
-                continue
-
-            elif PROTOCOL == 1:  # ICMP
-                if port_status == "record":
-                    continue
-
-                icmp_header = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                                     settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN]
-                data = packet[settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN:]
-                icmp_type, code, checksum, pktID, seq = struct.unpack("BbHHh", icmp_header)
-                pktID = 456
-
-                if icmp_type == 8:
-                    logging.info("Received ICMP Echo Request, replying with Echo Reply.")
-                    icmp_type = 0
-                elif icmp_type == 13:
-                    logging.info("Received ICMP Timestamp Request, replying with Timestamp Reply.")
-                    icmp_type = 14
-
-                checksum = 0
-                pseudo_packet = struct.pack("BbHHh", icmp_type, code, checksum, pktID, seq) + data
-                checksum = calculate_tcp_checksum(pseudo_packet)
-                reply_icmp_header = struct.pack("BbHHh", icmp_type, code, checksum, pktID, seq)
-
-                packet = reply_eth_header + reply_ip_header + reply_icmp_header + data
-                self.conn.sock.send(packet)
-                continue
-
-            else:
                 continue
 
     def _parse_ethernet_ip(self, packet):
