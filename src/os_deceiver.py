@@ -3,7 +3,7 @@ import logging
 import random
 import socket
 import struct
-import os  # ✅ Ensure this is imported before using os.path
+import os  # Ensure os module is correctly imported
 from typing import List, Any
 
 import src.settings as settings
@@ -14,16 +14,16 @@ from src.tcp import TcpConnect
 class OsDeceiver:
     white_list = []
 
-    def __init__(self, host, target_os):  # ✅ Rename 'os' to 'target_os'
+    def __init__(self, host, target_os):  # ✅ Use `target_os` instead of `os`
         self.host = host
-        self.target_os = target_os  # ✅ Store the renamed parameter
+        self.target_os = target_os  # ✅ Store correctly
         self.conn = TcpConnect(host)
         self.knocking_history = {}
         self.white_list = {}
         self.port_seq = [4441, 5551, 6661]
 
         # Ensure OS-specific record directory exists
-        self.os_record_path = f"os_record/{self.target_os}"  # ✅ Use 'target_os' instead of 'os'
+        self.os_record_path = f"os_record/{self.target_os}"  # ✅ Use `target_os`
         if not os.path.exists(self.os_record_path):
             logging.info(f"Creating OS record folder: {self.os_record_path}")
             os.makedirs(self.os_record_path)
@@ -31,7 +31,7 @@ class OsDeceiver:
     def os_record(self):
         """ Captures and logs OS fingerprinting packets (ARP, ICMP) """
         arp_pkt_dict = {}
-        icmp_pkt_dict = {}  # Initialize ICMP dictionary
+        icmp_pkt_dict = {}
 
         arp_record_file = os.path.join(self.os_record_path, "arp_record.txt")
         icmp_record_file = os.path.join(self.os_record_path, "icmp_record.txt")
@@ -55,7 +55,7 @@ class OsDeceiver:
                                          settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN]
                     icmp_type, code, checksum, ID, seq = struct.unpack('BbHHh', icmp_header)
 
-                    if socket.inet_ntoa(dest_IP) == self.host:  
+                    if socket.inet_ntoa(dest_IP) == self.host:
                         key, packet_val = gen_icmp_key(packet)
                         icmp_pkt_dict[key] = packet
 
@@ -77,13 +77,10 @@ class OsDeceiver:
                     with open(arp_record_file, 'w') as f:
                         f.write(str(arp_pkt_dict))
                         f.flush()
-            
-            else:
-                continue
 
     def os_deceive(self):
         """ Performs OS deception by modifying fingerprinting responses """
-        logging.info(f"Executing OS deception for {self.host}, mimicking {self.os}")
+        logging.info(f"Executing OS deception for {self.host}, mimicking {self.target_os}")
         logging.info(f"Sending deceptive Windows 10 response...")
 
         # Load fingerprinting response templates
@@ -124,59 +121,3 @@ class OsDeceiver:
             except Exception as e:
                 logging.error(f"Error loading {pkt_type} record: {e}")
                 return {}
-
-    def deceived_pkt_synthesis(self, proc: str, req: Packet, template: dict):
-        """ Generates a deceptive response packet based on stored fingerprints """
-        key, _ = gen_key(proc, req.packet)
-
-        try:
-            raw_template = template[proc][key]
-        except KeyError:
-            logging.warning(f"No deception template found for {proc}.")
-            return None
-
-        template_pkt = Packet(raw_template)
-        template_pkt.unpack()
-
-        # Swap source & destination details
-        template_pkt.l2_field['dMAC'] = req.l2_field['sMAC']
-        template_pkt.l2_field['sMAC'] = req.l2_field['dMAC']
-        template_pkt.l3_field['src_IP'] = req.l3_field['dest_IP']
-        template_pkt.l3_field['dest_IP'] = req.l3_field['src_IP']
-
-        if proc == 'tcp':
-            template_pkt.l4_field['src_port'] = req.l4_field['dest_port']
-            template_pkt.l4_field['dest_port'] = req.l4_field['src_port']
-            template_pkt.l4_field['seq'] = req.l4_field['ack_num']
-            template_pkt.l4_field['ack_num'] = req.l4_field['seq'] + 1
-
-        elif proc == 'icmp':
-            template_pkt.l4_field['ID'] = req.l4_field['ID']
-            template_pkt.l4_field['seq'] = req.l4_field['seq']
-
-        elif proc == 'udp':
-            template_pkt.l4_field['ID'] = 0
-            template_pkt.l4_field['seq'] = 0
-
-        elif proc == 'arp':
-            template_pkt.l3_field['sender_mac'] = settings.mac
-            template_pkt.l3_field['sender_ip'] = socket.inet_aton(self.host)
-            template_pkt.l3_field['recv_mac'] = req.l3_field['sender_mac']
-            template_pkt.l3_field['recv_ip'] = req.l3_field['sender_ip']
-
-        template_pkt.pack()
-        return template_pkt.packet
-
-
-def gen_key(proc, packet):
-    """ Generates a key for identifying fingerprint packets """
-    if proc == 'tcp':
-        return gen_tcp_key(packet)
-    elif proc == 'udp':
-        return gen_udp_key(packet)
-    elif proc == 'icmp':
-        return gen_icmp_key(packet)
-    elif proc == 'arp':
-        return gen_arp_key(packet)
-    else:
-        return None, None
