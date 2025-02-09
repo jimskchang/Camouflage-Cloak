@@ -77,9 +77,10 @@ TS_SERVER_OS = "win10"  # Modify based on the OS you want to deceive
 ## Usage
 
 ### Run the Main Script
+Eg:
 
 ```bash
-sudo python3 main.py --scan ts --host 192.168.1.200 --output-dir /os_record/win10
+sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <deceiver>] [--ststus <status>]
 ```
 
 ### Available Arguments
