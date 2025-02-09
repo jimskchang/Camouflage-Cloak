@@ -19,7 +19,18 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 HOST = '192.168.23.206'  # Replace based on your Camouflage-Cloak Server IP
 NIC = 'ens192'  # Replace based on your Camouflage-Cloak Server NIC
 
-NICAddr = '/sys/class/net/%s/address' % NIC
-record_path = 'pkt_record.txt'
-mac = b'\x00\x50\x56\x8e\x35\x6f'
+# Validate NIC before setting address path
+NICAddr = f"/sys/class/net/{NIC}/address"
+if not os.path.exists(NICAddr):
+    logging.error(f"NIC {NIC} does not exist. Check network interface.")
+    NICAddr = None  # Avoid using an invalid NIC path
 
+record_path = 'pkt_record.txt'
+
+# Get MAC dynamically
+try:
+    import netifaces
+    mac = netifaces.ifaddresses(NIC)[netifaces.AF_LINK][0]['addr']
+except Exception as e:
+    logging.error(f"Failed to fetch MAC address: {e}")
+    mac = b'\x00\x50\x56\x8e\x35\x6f'  # Fallback
