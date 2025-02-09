@@ -54,11 +54,9 @@ Edit **`settings.py`** to match your environment:
 
 ```python
 # Camouflage-Cloak Server Network Configuration
-HOST = '192.168.23.206'  # Replace based on your Camouflage-Cloak Server IP
-NIC = 'ens192'  # Replace based on your Camouflage-Cloak Server NIC
-
-# Camouflage-Cloak Server Input Manual MAC Address (set to None to auto-detect)
-MANUAL_MAC_ADDRESS = '00:50:56:8e:35:6f'  # Replace based on your Camouflage-Cloak Server MAC address or set to None
+# 🛠️ **Camouflage-Cloak Server Settings**
+HOST = "192.168.23.206"  # Replace with the actual server IP
+NIC = "ens192"  # Replace with the correct network interface
 ```
 
 > Ensure these values are set correctly before running the tool.
