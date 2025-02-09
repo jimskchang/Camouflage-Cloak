@@ -1,3 +1,16 @@
+import os
+import argparse
+import logging
+import sys
+from _datetime import datetime, timedelta
+import socket
+import struct
+import src.settings as settings
+from src.Packet import Packet
+from src.tcp import TcpConnect
+from src.port_deceiver import PortDeceiver
+from src.os_deceiver import OsDeceiver
+
 def main():
     parser = argparse.ArgumentParser(description="Deceiver Demo")
     parser.add_argument("--host", required=True, help="Specify destination IP")
@@ -16,15 +29,16 @@ def main():
         sys.exit(1)
 
     if args.scan:
-        port_scan_tech = args.scan.lower()  # Convert to lowercase to avoid case sensitivity issues
+        port_scan_tech = args.scan.lower()
 
-        if port_scan_tech == "ts":  # Capture fingerprint ONLY, no deception!
+        if port_scan_tech == "ts":
             logging.info("Executing fingerprint capture (TS mode)...")
             deceiver = OsDeceiver(args.host, args.os)
-            deceiver.os_record()  # ✅ Correct function to execute
-            return  # ⬅️ Prevents any other execution
+            deceiver.os_record()
+            logging.info("Fingerprint capture completed.")
+            return
 
-        elif port_scan_tech == "od":  # OS Deception
+        elif port_scan_tech == "od":
             logging.info("Executing OS Deception...")
             if args.os is None:
                 logging.warning("No OS specified for deception.")
@@ -32,12 +46,12 @@ def main():
                 deceiver = OsDeceiver(args.host, args.os)
                 deceiver.os_deceive()
 
-        elif port_scan_tech == "rr":  # Response Recording
+        elif port_scan_tech == "rr":
             logging.info("Recording response packets...")
             deceiver = OsDeceiver(args.host, args.os)
             deceiver.store_rsp()
 
-        elif port_scan_tech == "pd":  # Port Deception
+        elif port_scan_tech == "pd":
             if args.status:
                 deceive_status = args.status
                 logging.info(f"Executing Port Deception (status: {deceive_status})...")
@@ -51,3 +65,11 @@ def main():
 
     else:
         logging.warning("No scan technique specified!")
+
+if __name__ == "__main__":
+    logging.basicConfig(
+        format='%(asctime)s [%(levelname)s]: %(message)s',
+        datefmt='%y-%m-%d %H:%M',
+        level=logging.INFO
+    )
+    main()
