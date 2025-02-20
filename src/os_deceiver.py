@@ -9,33 +9,40 @@ from src.Packet import Packet
 from src.tcp import TcpConnect
 
 class OsDeceiver:
-    def __init__(self, target_host, target_os, dest):
+    def __init__(self, target_host, target_os, dest, mode="deception"):
         """
-        Initialize OS Deceiver with retrieved fingerprint data.
+        Initialize OS Deceiver.
+        Mode can be:
+        - 'scan' for --scan ts (to capture and store fingerprint data)
+        - 'deception' for --od (to mimic an OS using stored data)
         """
         self.target_host_str = target_host
-        self.target_host = socket.inet_aton(target_host)  # Convert IP to bytes
+        self.target_host = socket.inet_aton(target_host)
         self.target_os = target_os
         self.conn = TcpConnect(target_host)
-        self.os_record_path = os.path.join(dest, self.target_os)  # Retrieve from --dest directory
-        self.running = False  # Flag to track deception state
-        self.thread = None  # Thread for deception process
-        self.packet_data = {}  # Stores retrieved OS fingerprint packets
+        self.os_record_path = os.path.join(dest, self.target_os)
+        self.running = False
+        self.thread = None
+        self.packet_data = {}
 
-        # Ensure OS fingerprint directory exists
-        if not os.path.exists(self.os_record_path):
-            logging.error(f"OS fingerprint for '{self.target_os}' not found in '{dest}'.")
-            logging.error(f"Run '--scan ts' first to collect fingerprint data.")
-            raise FileNotFoundError(f"Missing OS fingerprint directory: {self.os_record_path}")
+        if mode == "deception":
+            # Ensure OS fingerprint exists before starting deception
+            if not os.path.exists(self.os_record_path):
+                logging.error(f"OS fingerprint for '{self.target_os}' not found in '{dest}'.")
+                logging.error("Run '--scan ts' first to collect fingerprint data.")
+                raise FileNotFoundError(f"Missing OS fingerprint directory: {self.os_record_path}")
+            self._load_fingerprint_data()
 
-        # Load OS fingerprint data before starting deception
-        self._load_fingerprint_data()
+        elif mode == "scan":
+            # Ensure fingerprint directory exists (create it if necessary)
+            os.makedirs(self.os_record_path, exist_ok=True)
+            logging.info(f"Created OS fingerprint directory: {self.os_record_path}")
 
-        logging.info(f"OsDeceiver initialized for {self.target_host_str} (Mimic: {self.target_os})")
+        logging.info(f"OsDeceiver initialized for {self.target_host_str} (Mode: {mode})")
 
     def _load_fingerprint_data(self):
         """
-        Loads fingerprint data from stored files.
+        Loads fingerprint data from stored files for OS deception.
         """
         fingerprint_files = {
             "arp": os.path.join(self.os_record_path, "arp_record.txt"),
@@ -51,13 +58,13 @@ class OsDeceiver:
                 raise FileNotFoundError(f"Missing required fingerprint file: {file_path}")
 
             with open(file_path, "r") as f:
-                self.packet_data[proto] = f.read().splitlines()  # Load packet data
+                self.packet_data[proto] = f.read().splitlines()
 
         logging.info(f"Loaded OS fingerprint data from {self.os_record_path}")
 
     def os_deceive(self):
         """
-        Starts OS Deception in a separate thread using retrieved fingerprint data.
+        Starts OS Deception using retrieved fingerprint data.
         """
         logging.info(f"Starting OS Deception for {self.target_host_str}, mimicking {self.target_os}")
         self.running = True
@@ -66,7 +73,7 @@ class OsDeceiver:
 
     def _deception_loop(self):
         """
-        Internal method to send retrieved packets as OS deception.
+        Internal method to simulate OS deception using stored fingerprint data.
         """
         while self.running:
             try:
@@ -74,7 +81,6 @@ class OsDeceiver:
                     logging.error("No fingerprint data available for deception.")
                     break
 
-                # Simulating deception based on fingerprinted packets
                 for proto, packets in self.packet_data.items():
                     if not packets:
                         continue
