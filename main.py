@@ -117,7 +117,7 @@ def main():
             logging.error("--dest argument is required for ts mode")
             sys.exit(1)
         logging.info(f"Executing OS Fingerprinting on {args.host} (Max: 100 packets, Timeout: 2 min)...")
-        deceiver = OsDeceiver(target_host=args.host, target_os="unknown", dest=args.dest)  # OS mimicry not needed
+        deceiver = OsDeceiver(target_host=args.host, target_os="unknown", dest=args.dest, mode="scan")  # OS mimicry not needed
         deceiver.os_record(max_packets=100)
         logging.info("Fingerprinting completed.")
         return  # Exit after capturing
@@ -125,7 +125,7 @@ def main():
     # Start deception modes
     if args.od:
         logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os} for {args.time} minutes...")
-        active_os_deceiver = OsDeceiver(target_host=args.host, target_os=args.os, dest=args.dest)
+        active_os_deceiver = OsDeceiver(target_host=args.host, target_os=args.os, dest=args.dest, mode="deception")
         if hasattr(active_os_deceiver, "os_deceive"):
             try:
                 active_os_deceiver.os_deceive()
