@@ -51,18 +51,26 @@ def main():
 
     elif port_scan_tech == "od":
         logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os}...")
-        try:
-            deceiver.os_deceive()
-        except Exception as e:
-            logging.error(f"[OS Deception] Error in os_deceive(): {e}")
+        if hasattr(deceiver, "os_deceive"):
+            try:
+                deceiver.os_deceive()
+            except Exception as e:
+                logging.error(f"[OS Deception] Error in os_deceive(): {e}")
+                sys.exit(1)
+        else:
+            logging.error("Method os_deceive() not implemented in OsDeceiver class.")
             sys.exit(1)
 
     elif port_scan_tech == "rr":
         logging.info("Recording response packets...")
-        try:
-            deceiver.store_rsp()
-        except Exception as e:
-            logging.error(f"Error in store_rsp(): {e}")
+        if hasattr(deceiver, "store_rsp"):
+            try:
+                deceiver.store_rsp()
+            except Exception as e:
+                logging.error(f"Error in store_rsp(): {e}")
+                sys.exit(1)
+        else:
+            logging.error("Method store_rsp() not implemented in OsDeceiver class.")
             sys.exit(1)
 
     elif port_scan_tech == "pd":
@@ -89,3 +97,4 @@ if __name__ == "__main__":
         level=logging.DEBUG  # Enable debug logging
     )
     main()
+
