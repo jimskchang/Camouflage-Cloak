@@ -3,7 +3,6 @@ import argparse
 import logging
 import sys
 import threading
-import time
 import src.settings as settings
 from src.os_deceiver import OsDeceiver
 from src.port_deceiver import PortDeceiver
@@ -13,6 +12,7 @@ active_os_deceiver = None
 active_port_deceiver = None
 
 def disable_deception():
+    """Stops OS and Port Deception after the specified duration."""
     global active_os_deceiver, active_port_deceiver
 
     if active_os_deceiver:
@@ -45,13 +45,13 @@ def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS Deception & Fingerprinting System")
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint (e.g., 192.168.23.201)")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets (e.g., ens192)")
-    parser.add_argument("--scan", required=True, choices=["ts"], help="Scanning technique [ts: fingerprinting]")
-    parser.add_argument("--dest", help="Directory to store captured fingerprints for ts mode", required=False)
+    parser.add_argument("--scan", choices=["ts"], help="Scanning technique [ts: fingerprinting]")
+    parser.add_argument("--dest", help="Directory to store captured fingerprints for ts mode")
     parser.add_argument("--od", action="store_true", help="Enable OS deception mode")
     parser.add_argument("--os", help="The OS to mimic in od mode (e.g., win10, centos)", required=False)
     parser.add_argument("--pd", action="store_true", help="Enable Port Deception mode")
     parser.add_argument("--status", help="Designate port status for 'pd' (Port Deception) mode")
-    parser.add_argument("--time", type=int, help="Duration (in minutes) for deception mode", required=False)
+    parser.add_argument("--time", type=int, help="Duration (in minutes) for deception mode")
 
     args = parser.parse_args()
 
@@ -60,14 +60,16 @@ def main():
         logging.error("--os should not be used with --scan ts mode")
         sys.exit(1)
 
-    if args.od or args.pd:
-        if args.time is None:
-            logging.error("--time argument is required when --od or --pd is enabled")
-            sys.exit(1)
-        if args.time <= 0:
-            logging.error("--time must be a positive integer")
-            sys.exit(1)
+    # Ensure --time is only required for --od or --pd
+    if (args.od or args.pd) and args.time is None:
+        logging.error("--time argument is required when --od or --pd is enabled")
+        sys.exit(1)
+    
+    if args.time and args.time <= 0:
+        logging.error("--time must be a positive integer")
+        sys.exit(1)
 
+    # Validate OS fingerprint requirement for --od
     if args.od:
         if not args.os:
             logging.error("--os argument is required for --od mode")
@@ -75,8 +77,6 @@ def main():
         if not args.dest:
             logging.error("--dest argument is required to validate OS fingerprints")
             sys.exit(1)
-
-        # Validate OS fingerprint existence
         validate_os_fingerprint(args.dest, args.os)
 
     # Ensure network interface is in promiscuous mode
@@ -93,7 +93,7 @@ def main():
         logging.error("Settings module not found! Exiting...")
         sys.exit(1)
 
-    # Determine the mode of operation
+    # If --scan ts is selected, perform fingerprinting and exit
     if args.scan == "ts":
         if not args.dest:
             logging.error("--dest argument is required for ts mode")
@@ -132,8 +132,9 @@ def main():
             sys.exit(1)
 
     # Start a timer to disable deception after the specified time
-    timer = threading.Timer(args.time * 60, disable_deception)
-    timer.start()
+    if args.od or args.pd:
+        timer = threading.Timer(args.time * 60, disable_deception)
+        timer.start()
 
 if __name__ == "__main__":
     logging.basicConfig(
