@@ -12,12 +12,16 @@ class PortDeceiver:
     """Handles deceptive port scanning responses."""
 
     def __init__(self, host: str, port_status: str, dest: str):
+        """
+        Initialize Port Deceiver with stored fingerprint data.
+        """
         self.host = socket.inet_aton(host)  # Convert host IP to bytes
         self.conn = TcpConnect(host)
         self.port_status = port_status
         self.deception_data_path = os.path.join(dest, f"port_{port_status}")  # Retrieve deception data from --dest
         self.running = False  # Flag for controlling deception process
         self.thread = None  # Thread for deception loop
+        self.packet_data = []  # Stores retrieved port fingerprint packets
 
         # Ensure port deception data exists
         if not os.path.exists(self.deception_data_path):
@@ -25,7 +29,26 @@ class PortDeceiver:
             logging.error(f"Run '--scan ts' first to collect port fingerprinting data.")
             raise FileNotFoundError(f"Missing port deception directory: {self.deception_data_path}")
 
+        # Load fingerprint data
+        self._load_fingerprint_data()
+
         logging.info(f"PortDeceiver initialized for {host} (Port Status: {port_status})")
+
+    def _load_fingerprint_data(self):
+        """
+        Loads fingerprint data from stored files.
+        """
+        fingerprint_file = os.path.join(self.deception_data_path, "port_record.txt")
+
+        if not os.path.exists(fingerprint_file):
+            logging.error(f"Missing fingerprint data for port deception.")
+            logging.error(f"Ensure '{fingerprint_file}' exists and run '--scan ts' if needed.")
+            raise FileNotFoundError(f"Missing required fingerprint file: {fingerprint_file}")
+
+        with open(fingerprint_file, "r") as f:
+            self.packet_data = f.read().splitlines()  # Load packet data
+
+        logging.info(f"Loaded Port fingerprint data from {self.deception_data_path}")
 
     def port_deceive(self):
         """Starts Port Deception in a separate thread."""
