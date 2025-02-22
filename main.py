@@ -6,6 +6,7 @@ import threading
 import socket
 import struct
 import src.settings as settings
+import time
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
 
