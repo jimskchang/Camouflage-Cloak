@@ -15,97 +15,64 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     Captures fingerprinting packets for the target host only.
     """
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
-    
     os.makedirs(os.path.join(dest, 'unknown'), exist_ok=True)
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
     sock.setblocking(False)  # Prevent indefinite hanging
     target_ip = socket.inet_aton(target_host)
-    start_time = time.time()
     packet_count = 0
-    detected_os = "unknown"
-    os_dest = os.path.join(dest, detected_os)
-    os.makedirs(os_dest, exist_ok=True)
-    os_dest = os.path.join(dest, detected_os)
+    os_dest = os.path.join(dest, "unknown")
     os.makedirs(os_dest, exist_ok=True)
     logging.info(f"Storing data in: {os_dest}")
 
-    try:
-        packet, addr = sock.recvfrom(65565)
-    except BlockingIOError:
-        logging.warning("No packets received, continuing...")
-        continue
-    except Exception as e:
-        logging.error(f"Unexpected error while receiving packets: {e}")
-        break
-    
-    except Exception as e:
-        logging.error(f"Unexpected error while receiving packets: {e}")
-        return
-    packet, addr = sock.recvfrom(65565)
-    
-        logging.warning("No packets received within timeout period. Exiting scan.")
-        return
-    except Exception as e:
-    logging.error(f"Unexpected error while receiving packets: {e}")
-    return
-        logging.error(f"Unexpected error while receiving packets: {e}")
-        return
-    packet, addr = sock.recvfrom(65565)
-        packet, addr = sock.recvfrom(65565)
-        packet, addr = sock.recvfrom(65565)
-            
-        while packet_count < max_packets:
-            try:
-        packet, addr = sock.recvfrom(65565)
-        logging.warning("No packets received within timeout period. Exiting scan.")
-        return
-        logging.warning("No packets received within timeout period. Exiting scan.")
-        return
-            eth_protocol = struct.unpack("!H", packet[12:14])[0]
-            proto_type = None
-            ip_header = packet[14:34]
-            ip_unpack = struct.unpack("!BBHHHBBH4s4s", ip_header)
-            src_ip = ip_unpack[8]
-            dest_ip = ip_unpack[9]
-            
-            if src_ip != target_ip:
-                continue  # Ignore packets not meant for the target host
-            
-            packet_files = {
-                "arp": os.path.join(os_dest, "arp_record.txt"),
-                "icmp": os.path.join(os_dest, "icmp_record.txt"),
-                "tcp": os.path.join(os_dest, "tcp_record.txt"),
-                "udp": os.path.join(os_dest, "udp_record.txt")
-            }
-            
-            if eth_protocol == 0x0806:
-                proto_type = "arp"
-            elif eth_protocol == 0x0800:
-                ip_proto = packet[23]
-                if ip_proto == 1:
-                    proto_type = "icmp"
-                elif ip_proto == 6:
-                    proto_type = "tcp"
-                elif ip_proto == 17:
-                    proto_type = "udp"
-            
-            if proto_type:
-                with open(packet_files[proto_type], "a") as f:
-                    f.write(str(packet) + "\n")
-                packet_count += 1
-                logging.info(f"Captured {proto_type.upper()} Packet ({packet_count})")
+    while packet_count < max_packets:
+        try:
+            packet, addr = sock.recvfrom(65565)
+        except BlockingIOError:
+            logging.warning("No packets received, continuing...")
+            continue
+        except Exception as e:
+            logging.error(f"Unexpected error while receiving packets: {e}")
+            break
         
-        if packet_count == 0:
-            logging.warning("No packets captured! Check network interface settings and traffic.")
-        logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
-    except KeyboardInterrupt:
-        logging.info("User interrupted capture. Exiting...")
-    except Exception as e:
-        logging.error(f"Error while capturing packets: {e}")
-    logging.info("Returning to command mode.")
+        eth_protocol = struct.unpack("!H", packet[12:14])[0]
+        proto_type = None
+        ip_header = packet[14:34]
+        ip_unpack = struct.unpack("!BBHHHBBH4s4s", ip_header)
+        src_ip = ip_unpack[8]
+        dest_ip = ip_unpack[9]
+        
+        if src_ip != target_ip:
+            continue  # Ignore packets not meant for the target host
+        
+        packet_files = {
+            "arp": os.path.join(os_dest, "arp_record.txt"),
+            "icmp": os.path.join(os_dest, "icmp_record.txt"),
+            "tcp": os.path.join(os_dest, "tcp_record.txt"),
+            "udp": os.path.join(os_dest, "udp_record.txt")
+        }
+        
+        if eth_protocol == 0x0806:
+            proto_type = "arp"
+        elif eth_protocol == 0x0800:
+            ip_proto = packet[23]
+            if ip_proto == 1:
+                proto_type = "icmp"
+            elif ip_proto == 6:
+                proto_type = "tcp"
+            elif ip_proto == 17:
+                proto_type = "udp"
+        
+        if proto_type:
+            with open(packet_files[proto_type], "a") as f:
+                f.write(str(packet) + "\n")
+            packet_count += 1
+            logging.info(f"Captured {proto_type.upper()} Packet ({packet_count})")
+    
+    if packet_count == 0:
+        logging.warning("No packets captured! Check network interface settings and traffic.")
+    logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
 def main():
-    global active_os_deceiver, active_port_deceiver
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS Deception & Fingerprinting System")
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint (e.g., 192.168.23.201)")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets (e.g., ens192)")
@@ -117,6 +84,7 @@ def main():
     parser.add_argument("--status", help="Designate port status for 'pd' (Port Deception) mode (open/close)")
     parser.add_argument("--time", type=int, help="Duration (in minutes) for deception mode")
     args = parser.parse_args()
+    
     if args.scan == "ts":
         if not args.dest:
             logging.error("--dest argument is required for ts mode")
@@ -125,17 +93,16 @@ def main():
         collect_fingerprint(target_host=args.host, dest=args.dest, max_packets=100)
         logging.info("Fingerprinting completed. No OS deception performed.")
         return
+    
     if args.od:
         if not args.time:
             logging.error("--time is required when using --od mode.")
             sys.exit(1)
-        if not os.path.exists(args.dest):
-            os.makedirs(args.dest, exist_ok=True)
-        if not os.path.exists(os.path.join(args.dest, 'unknown')):
-            os.makedirs(os.path.join(args.dest, 'unknown'), exist_ok=True)
         if not args.dest or not args.os:
             logging.error("--dest and --os arguments are required for --od mode")
             sys.exit(1)
+        os.makedirs(args.dest, exist_ok=True)
+        os.makedirs(os.path.join(args.dest, args.os), exist_ok=True)
         logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os} for {args.time} minutes...")
         active_os_deceiver = OsDeceiver(target_host=args.host, target_os=args.os, dest=args.dest, mode="deception")
         try:
@@ -143,6 +110,7 @@ def main():
         except Exception as e:
             logging.error(f"[OS Deception] Error: {e}")
             sys.exit(1)
+    
     if args.pd:
         if not args.time:
             logging.error("--time is required when using --pd mode.")
@@ -154,10 +122,7 @@ def main():
         except Exception as e:
             logging.error(f"[Port Deception] Error: {e}")
             sys.exit(1)
-    if args.od or args.pd:
-        timer = threading.Timer(args.time * 60, disable_deception)
-        timer.start()
-
+    
 if __name__ == "__main__":
     logging.basicConfig(format="%(asctime)s [%(levelname)s]: %(message)s", datefmt="%y-%m-%d %H:%M", level=logging.DEBUG)
     main()
