@@ -20,7 +20,7 @@ def collect_fingerprint(target_host, dest, nic, max_packets=100):
     if not os.path.exists(os.path.join(dest, 'unknown')):
         os.makedirs(os.path.join(dest, 'unknown'))
     os.system(f"sudo ip link set {nic} promisc on")# Ensure NIC is in promiscuous mode  # Enable promiscuous mode
-    sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+    sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))  # Capture all traffic
     sock.bind((nic, 0)) # Force bind to interface
     sock.settimeout(5)  # Set a timeout to prevent indefinite waiting  # Prevent indefinite hanging
     target_ip = socket.inet_aton(target_host)
@@ -32,7 +32,8 @@ def collect_fingerprint(target_host, dest, nic, max_packets=100):
     timeout = time.time() + 60  # Ensure it waits for at least 60 seconds
     while packet_count < max_packets and time.time() < timeout:
         try:
-            packet, addr = sock.recvfrom(65565)
+        packet, addr = sock.recvfrom(65565)
+        logging.info(f"Packet received from {addr}: {packet[:50].hex()}")  # Print first 50 bytes
         except BlockingIOError:
             logging.warning(f"No packets received from {addr}. Interface: {args.nic}, Target: {target_host}")
             continue
@@ -47,7 +48,9 @@ def collect_fingerprint(target_host, dest, nic, max_packets=100):
         src_ip = ip_unpack[8]
         dest_ip = ip_unpack[9]
         
+        logging.info(f"Captured packet from {socket.inet_ntoa(src_ip)} to {socket.inet_ntoa(dest_ip)}")
         if src_ip != target_ip and dest_ip != target_ip:
+            logging.info("Skipping packet: Not from or to the target host")
             continue  # Ignore packets not meant for the target host
         
         packet_files = {
