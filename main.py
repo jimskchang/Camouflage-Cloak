@@ -37,7 +37,7 @@ def main():
 
     if args.scan == 'ts':
         logging.info(f"Executing OS Fingerprinting for {args.host}...")
-        deceiver = OsDeceiver(args.host, "unknown", dest=args.dest)  # Store in unknown by default
+        deceiver = OsDeceiver(args.host, "unknown", dest=args.dest)
         deceiver.os_record()
         logging.info(f"Fingerprinting completed. Data stored in {args.dest}")
     
@@ -57,7 +57,7 @@ def main():
     
     elif args.scan == 'rr':
         logging.info(f"Storing OS response fingerprint for {args.host} in {args.dest}...")
-        deceiver = OsDeceiver(args.host, "unknown", dest=args.dest)  
+        deceiver = OsDeceiver(args.host, "unknown", dest=args.dest)
         deceiver.store_rsp()
         logging.info("OS response stored.")
     
