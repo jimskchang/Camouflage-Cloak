@@ -10,7 +10,7 @@ import time
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
 
-def collect_fingerprint(target_host, dest, max_packets=100):
+def collect_fingerprint(target_host, dest, nic, max_packets=100):
     """
     Captures fingerprinting packets for the target host only.
     """
@@ -19,9 +19,9 @@ def collect_fingerprint(target_host, dest, max_packets=100):
         os.makedirs(dest)
     if not os.path.exists(os.path.join(dest, 'unknown')):
         os.makedirs(os.path.join(dest, 'unknown'))
-    os.system(f"sudo ip link set {args.nic} promisc on")  # Ensure NIC is in promiscuous mode  # Enable promiscuous mode
+    os.system(f"sudo ip link set {nic} promisc on")# Ensure NIC is in promiscuous mode  # Enable promiscuous mode
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-    sock.bind((target_host_nic, 0))  # Force bind to interface
+    sock.bind((nic, 0)) # Force bind to interface
     sock.settimeout(5)  # Set a timeout to prevent indefinite waiting  # Prevent indefinite hanging
     target_ip = socket.inet_aton(target_host)
     packet_count = 0
@@ -96,7 +96,7 @@ def main():
             logging.error("--dest argument is required for ts mode")
             sys.exit(1)
         logging.info(f"Executing OS Fingerprinting on {args.host}...")
-        collect_fingerprint(target_host=args.host, dest=args.dest, max_packets=100)
+        collect_fingerprint(target_host=args.host, dest=args.dest, nic=args.nic, max_packets=100)
         logging.info("Fingerprinting completed. No OS deception performed.")
         return
     
