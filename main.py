@@ -30,6 +30,7 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     logging.info(f"Storing data in: {os_dest}")
 
     try:
+    packet, addr = sock.recvfrom(65565)
         packet, addr = sock.recvfrom(65565)
         packet, addr = sock.recvfrom(65565)
             
