@@ -62,23 +62,6 @@ class OsDeceiver:
 
         logging.info(f"Loaded OS fingerprint data from {self.os_record_path}")
 
-    def _parse_ethernet_ip(self, packet):
-        """
-        Parses Ethernet and IP headers.
-        """
-        try:
-            eth_header = packet[:settings.ETH_HEADER_LEN]
-            eth = struct.unpack("!6s6sH", eth_header)
-            eth_protocol = socket.ntohs(eth[2])
-
-            ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-            _, _, _, _, _, _, PROTOCOL, _, src_IP, dest_IP = struct.unpack("!BBHHHBBH4s4s", ip_header)
-
-            return eth_protocol, src_IP, dest_IP, PROTOCOL
-        except struct.error as e:
-            logging.error(f"Error parsing Ethernet/IP headers: {e}")
-            return None, None, None, None
-
     def os_record(self, max_packets=100):
         """
         Captures OS fingerprinting packets (ARP, ICMP, TCP, UDP) and logs them.
@@ -102,11 +85,13 @@ class OsDeceiver:
                     break
 
                 packet, addr = self.conn.sock.recvfrom(65565)
-                logging.debug(f"Packet received from {addr}")
+                logging.info(f"[DEBUG] Packet received from {addr}: {packet.hex()[:100]}")
 
                 eth_protocol, src_IP, dest_IP, PROTOCOL = self._parse_ethernet_ip(packet)
-
+                logging.info(f"[DEBUG] Received packet for destination IP: {socket.inet_ntoa(dest_IP)}")
+                
                 if dest_IP != self.target_host:
+                    logging.info(f"[DEBUG] Skipping packet - Not for {self.target_host_str}")
                     continue
 
                 proto_type = None
@@ -122,6 +107,7 @@ class OsDeceiver:
                 if proto_type:
                     with open(packet_files[proto_type], "a") as f:
                         f.write(str(packet) + "\n")
+                    logging.info(f"[DEBUG] Writing {proto_type.upper()} packet to {packet_files[proto_type]}")
 
                     packet_count += 1
                     logging.info(f"Captured {proto_type.upper()} Packet ({packet_count})")
@@ -137,3 +123,4 @@ class OsDeceiver:
             logging.error(f"Error while capturing packets: {e}")
 
         logging.info("Returning to command mode.")
+
