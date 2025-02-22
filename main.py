@@ -15,9 +15,13 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     Captures fingerprinting packets for the target host only.
     """
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
-    os.makedirs(os.path.join(dest, 'unknown'), exist_ok=True)
-    os.system(f"sudo ip link set ens192 promisc on")  # Enable promiscuous mode
+    if not os.path.exists(dest):
+        os.makedirs(dest)
+    if not os.path.exists(os.path.join(dest, 'unknown')):
+        os.makedirs(os.path.join(dest, 'unknown'))
+    os.system(f"sudo ip link set {args.nic} promisc on")  # Ensure NIC is in promiscuous mode  # Enable promiscuous mode
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+    sock.bind((args.nic, 0))  # Force bind to interface
     sock.settimeout(5)  # Set a timeout to prevent indefinite waiting  # Prevent indefinite hanging
     target_ip = socket.inet_aton(target_host)
     packet_count = 0
@@ -30,7 +34,7 @@ def collect_fingerprint(target_host, dest, max_packets=100):
         try:
             packet, addr = sock.recvfrom(65565)
         except BlockingIOError:
-            logging.warning("No packets received, continuing...")
+            logging.warning(f"No packets received from {addr}. Interface: {args.nic}, Target: {target_host}")
             continue
         except Exception as e:
             logging.error(f"Unexpected error while receiving packets: {e}")
@@ -43,7 +47,7 @@ def collect_fingerprint(target_host, dest, max_packets=100):
         src_ip = ip_unpack[8]
         dest_ip = ip_unpack[9]
         
-        if src_ip != target_ip:
+        if src_ip != target_ip and dest_ip != target_ip:
             continue  # Ignore packets not meant for the target host
         
         packet_files = {
