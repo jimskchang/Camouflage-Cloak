@@ -26,15 +26,10 @@ def disable_deception():
 
 def detect_os_from_packets(packet):
     """
-    Basic OS detection based on packet characteristics.
-    This should be replaced with a more accurate detection logic.
+    Since OS detection is not automated, always store packets in 'unknown'.
+    Users must manually move data to the correct OS folder after scanning.
     """
-    if b"Windows" in packet:
-        return "win10"
-    elif b"CentOS" in packet or b"Linux" in packet:
-        return "centos"
-    else:
-        return "unknown"
+    return "unknown"
 
 def collect_fingerprint(target_host, dest, max_packets=100):
     import socket
@@ -50,16 +45,17 @@ def collect_fingerprint(target_host, dest, max_packets=100):
 
     try:
         while packet_count < max_packets:
-            if time.time() - start_time > 120:
+            # Removed time limit to allow continuous packet collection
                 logging.info("Timeout reached. Exiting OS fingerprinting mode.")
                 break
             packet, addr = sock.recvfrom(65565)
             eth_protocol = struct.unpack("!H", packet[12:14])[0]
             proto_type = None
             
-            if detected_os is None:
+            if detected_os is None or detected_os == "unknown":
                 detected_os = detect_os_from_packets(packet)
                 os_dest = os.path.join(dest, detected_os)
+                if detected_os != "unknown":
                 os.makedirs(os_dest, exist_ok=True)
                 logging.info(f"Detected OS: {detected_os}, storing data in: {os_dest}")
             
