@@ -3,6 +3,8 @@ import argparse
 import logging
 import sys
 import threading
+import socket
+import struct
 import src.settings as settings
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
@@ -25,20 +27,14 @@ def disable_deception():
         except Exception as e:
             logging.error(f"Error stopping Port Deception: {e}")
 
-def detect_os_from_packets(packet):
-    """
-    Since OS detection is not automated, always store packets in 'unknown'.
-    Users must manually move data to the correct OS folder after scanning.
-    """
-    return "unknown"
-
 def collect_fingerprint(target_host, dest, max_packets=100):
-    import socket
-    import struct
-    import time
+    """
+    Captures fingerprinting packets for the target host only.
+    """
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
     os.makedirs(dest, exist_ok=True)
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+    target_ip = socket.inet_aton(target_host)
     start_time = time.time()
     packet_count = 0
     detected_os = "unknown"
@@ -51,6 +47,13 @@ def collect_fingerprint(target_host, dest, max_packets=100):
             packet, addr = sock.recvfrom(65565)
             eth_protocol = struct.unpack("!H", packet[12:14])[0]
             proto_type = None
+            ip_header = packet[14:34]
+            ip_unpack = struct.unpack("!BBHHHBBH4s4s", ip_header)
+            src_ip = ip_unpack[8]
+            dest_ip = ip_unpack[9]
+            
+            if src_ip != target_ip and dest_ip != target_ip:
+                continue  # Ignore packets not meant for the target host
             
             packet_files = {
                 "arp": os.path.join(os_dest, "arp_record.txt"),
@@ -85,13 +88,6 @@ def collect_fingerprint(target_host, dest, max_packets=100):
         logging.error(f"Error while capturing packets: {e}")
     logging.info("Returning to command mode.")
 
-def validate_os_fingerprint(dest, os_name):
-    """Ensure that the manually selected fingerprint folder exists."""
-    os_path = os.path.join(dest, os_name)
-    if not os.path.exists(os_path):
-        logging.error(f"OS fingerprint for '{os_name}' not found in '{dest}'.")
-        sys.exit(1)
-
 def main():
     global active_os_deceiver, active_port_deceiver
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS Deception & Fingerprinting System")
@@ -111,13 +107,12 @@ def main():
             sys.exit(1)
         logging.info(f"Executing OS Fingerprinting on {args.host}...")
         collect_fingerprint(target_host=args.host, dest=args.dest, max_packets=100)
-        logging.info("Fingerprinting completed.")
+        logging.info("Fingerprinting completed. No OS deception performed.")
         return
     if args.od:
         if not args.dest or not args.os:
             logging.error("--dest and --os arguments are required for --od mode")
             sys.exit(1)
-        validate_os_fingerprint(args.dest, args.os)
         logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os} for {args.time} minutes...")
         active_os_deceiver = OsDeceiver(target_host=args.host, target_os=args.os, dest=args.dest, mode="deception")
         try:
