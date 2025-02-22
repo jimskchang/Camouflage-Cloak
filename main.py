@@ -16,15 +16,17 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     """
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
     os.makedirs(os.path.join(dest, 'unknown'), exist_ok=True)
+    os.system(f"sudo ip link set ens192 promisc on")  # Enable promiscuous mode
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-    sock.setblocking(False)  # Prevent indefinite hanging
+    sock.settimeout(5)  # Set a timeout to prevent indefinite waiting  # Prevent indefinite hanging
     target_ip = socket.inet_aton(target_host)
     packet_count = 0
     os_dest = os.path.join(dest, "unknown")
     os.makedirs(os_dest, exist_ok=True)
     logging.info(f"Storing data in: {os_dest}")
 
-    while packet_count < max_packets:
+    timeout = time.time() + 60  # Ensure it waits for at least 60 seconds
+    while packet_count < max_packets and time.time() < timeout:
         try:
             packet, addr = sock.recvfrom(65565)
         except BlockingIOError:
