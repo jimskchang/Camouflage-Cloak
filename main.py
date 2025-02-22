@@ -24,30 +24,30 @@ def disable_deception():
         except Exception as e:
             logging.error(f"Error stopping Port Deception: {e}")
 
+def detect_os_from_packets(packet):
+    """
+    Basic OS detection based on packet characteristics.
+    This should be replaced with a more accurate detection logic.
+    """
+    if b"Windows" in packet:
+        return "win10"
+    elif b"CentOS" in packet or b"Linux" in packet:
+        return "centos"
+    else:
+        return "unknown"
+
 def collect_fingerprint(target_host, dest, max_packets=100):
-    """
-    Captures OS fingerprinting packets (ARP, ICMP, TCP, UDP) and stores them.
-    """
-    import src.settings as settings
     import socket
     import struct
     import time
-    
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
-    
-    packet_files = {
-        "arp": os.path.join(dest, "arp_record.txt"),
-        "icmp": os.path.join(dest, "icmp_record.txt"),
-        "tcp": os.path.join(dest, "tcp_record.txt"),
-        "udp": os.path.join(dest, "udp_record.txt")
-    }
-
-    # Ensure destination directory exists
     os.makedirs(dest, exist_ok=True)
-    
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
     start_time = time.time()
     packet_count = 0
+    detected_os = None
+    os_dest = None
+
     try:
         while packet_count < max_packets:
             if time.time() - start_time > 120:
@@ -56,21 +56,26 @@ def collect_fingerprint(target_host, dest, max_packets=100):
             packet, addr = sock.recvfrom(65565)
             eth_protocol = struct.unpack("!H", packet[12:14])[0]
             proto_type = None
-            if eth_protocol == 0x0806:
-                proto_type = "arp"
-            elif eth_protocol == 0x0800:
-                ip_proto = packet[23]
-                if ip_proto == 1:
-                    proto_type = "icmp"
-                elif ip_proto == 6:
-                    proto_type = "tcp"
-                elif ip_proto == 17:
-                    proto_type = "udp"
-            if proto_type:
+            
+            if detected_os is None:
+                detected_os = detect_os_from_packets(packet)
+                os_dest = os.path.join(dest, detected_os)
+                os.makedirs(os_dest, exist_ok=True)
+                logging.info(f"Detected OS: {detected_os}, storing data in: {os_dest}")
+            
+            packet_files = {
+                "arp": os.path.join(os_dest, "arp_record.txt"),
+                "icmp": os.path.join(os_dest, "icmp_record.txt"),
+                "tcp": os.path.join(os_dest, "tcp_record.txt"),
+                "udp": os.path.join(os_dest, "udp_record.txt")
+            }
+            
+            if proto_type and os_dest:
                 with open(packet_files[proto_type], "a") as f:
                     f.write(str(packet) + "\n")
                 packet_count += 1
                 logging.info(f"Captured {proto_type.upper()} Packet ({packet_count})")
+        
         if packet_count == 0:
             logging.warning("No packets captured! Check network interface settings and traffic.")
         logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
@@ -97,7 +102,6 @@ def main():
         if not args.dest:
             logging.error("--dest argument is required for ts mode")
             sys.exit(1)
-            
         logging.info(f"Executing OS Fingerprinting on {args.host}...")
         collect_fingerprint(target_host=args.host, dest=args.dest, max_packets=100)
         logging.info("Fingerprinting completed.")
@@ -125,5 +129,3 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(format="%(asctime)s [%(levelname)s]: %(message)s", datefmt="%y-%m-%d %H:%M", level=logging.DEBUG)
     main()
-
-
