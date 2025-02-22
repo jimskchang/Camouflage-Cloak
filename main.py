@@ -18,7 +18,7 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     
     os.makedirs(os.path.join(dest, 'unknown'), exist_ok=True)
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-    sock.settimeout(5)  # Prevent indefinite hanging
+    sock.setblocking(False)  # Prevent indefinite hanging
     target_ip = socket.inet_aton(target_host)
     start_time = time.time()
     packet_count = 0
@@ -31,6 +31,12 @@ def collect_fingerprint(target_host, dest, max_packets=100):
 
     try:
         packet, addr = sock.recvfrom(65565)
+    except BlockingIOError:
+        logging.warning("No packets received, continuing...")
+        continue
+    except Exception as e:
+        logging.error(f"Unexpected error while receiving packets: {e}")
+        break
     except socket.timeout:
         logging.warning("No packets received within timeout period. Exiting scan.")
         return
