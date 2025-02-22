@@ -32,13 +32,13 @@ def collect_fingerprint(target_host, dest, nic, max_packets=100):
     timeout = time.time() + 60  # Ensure it waits for at least 60 seconds
     while packet_count < max_packets and time.time() < timeout:
         try:
-        packet, addr = sock.recvfrom(65565)
+                        packet, addr = sock.recvfrom(65565)
 packet, addr = sock.recvfrom(65565)
         logging.info(f"Packet received from {addr}: {packet[:50].hex()}")  # Print first 50 bytes
-            except BlockingIOError:
+                    except BlockingIOError:
             logging.warning(f"No packets received from {addr}. Interface: {args.nic}, Target: {target_host}")
             continue
-            except Exception as e:
+                    except Exception as e:
             logging.error(f"Unexpected error while receiving packets: {e}")
             break
         
@@ -136,5 +136,3 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(format="%(asctime)s [%(levelname)s]: %(message)s", datefmt="%y-%m-%d %H:%M", level=logging.DEBUG)
     main()
-
-
