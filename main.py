@@ -25,17 +25,26 @@ def disable_deception():
             logging.error(f"Error stopping Port Deception: {e}")
 
 def collect_fingerprint(target_host, dest, max_packets=100):
+    """
+    Captures OS fingerprinting packets (ARP, ICMP, TCP, UDP) and stores them.
+    """
+    import src.settings as settings
     import socket
     import struct
     import time
+    
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
+    
     packet_files = {
         "arp": os.path.join(dest, "arp_record.txt"),
         "icmp": os.path.join(dest, "icmp_record.txt"),
         "tcp": os.path.join(dest, "tcp_record.txt"),
         "udp": os.path.join(dest, "udp_record.txt")
     }
+
+    # Ensure destination directory exists
     os.makedirs(dest, exist_ok=True)
+    
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
     start_time = time.time()
     packet_count = 0
@@ -88,6 +97,7 @@ def main():
         if not args.dest:
             logging.error("--dest argument is required for ts mode")
             sys.exit(1)
+            
         logging.info(f"Executing OS Fingerprinting on {args.host}...")
         collect_fingerprint(target_host=args.host, dest=args.dest, max_packets=100)
         logging.info("Fingerprinting completed.")
