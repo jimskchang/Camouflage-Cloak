@@ -40,6 +40,8 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     detected_os = "unknown"
     os_dest = os.path.join(dest, detected_os)
     os.makedirs(os_dest, exist_ok=True)
+    os_dest = os.path.join(dest, detected_os)
+    os.makedirs(os_dest, exist_ok=True)
     logging.info(f"Storing data in: {os_dest}")
 
     try:
@@ -52,7 +54,7 @@ def collect_fingerprint(target_host, dest, max_packets=100):
             src_ip = ip_unpack[8]
             dest_ip = ip_unpack[9]
             
-            if src_ip != target_ip and dest_ip != target_ip:
+            if src_ip != target_ip:
                 continue  # Ignore packets not meant for the target host
             
             packet_files = {
