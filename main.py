@@ -30,10 +30,11 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     logging.info(f"Storing data in: {os_dest}")
 
     try:
+            
         while packet_count < max_packets:
             try:
         packet, addr = sock.recvfrom(65565)
-    except socket.timeout:
+        except socket.timeout:
         logging.warning("No packets received within timeout period. Exiting scan.")
         return
             eth_protocol = struct.unpack("!H", packet[12:14])[0]
