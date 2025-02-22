@@ -19,10 +19,10 @@ def collect_fingerprint(target_host, dest, nic, max_packets=100):
         os.makedirs(dest)
     if not os.path.exists(os.path.join(dest, 'unknown')):
         os.makedirs(os.path.join(dest, 'unknown'))
-    os.system(f"sudo ip link set {nic} promisc on")# Ensure NIC is in promiscuous mode  # Enable promiscuous mode
-    sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))  # Capture all traffic
-    sock.bind((nic, 0)) # Force bind to interface
-    sock.settimeout(5)  # Set a timeout to prevent indefinite waiting  # Prevent indefinite hanging
+    os.system(f"sudo ip link set {settings.NIC} promisc on")  # Ensure NIC is in promiscuous mode# Ensure NIC is in promiscuous mode  # Enable promiscuous mode
+    sock = TcpConnect(target_host).sock  # Use TcpConnect to avoid duplicate raw socket creation  # Capture all traffic
+    # Binding is handled in TcpConnect, no need to bind again # Force bind to interface
+    # Timeout is managed within TcpConnect, avoid redundant timeout settings  # Set a timeout to prevent indefinite waiting  # Prevent indefinite hanging
     target_ip = socket.inet_aton(target_host)
     packet_count = 0
     os_dest = os.path.join(dest, "unknown")
@@ -32,13 +32,13 @@ def collect_fingerprint(target_host, dest, nic, max_packets=100):
     timeout = time.time() + 60  # Ensure it waits for at least 60 seconds
     while packet_count < max_packets and time.time() < timeout:
         try:
-                        packet, addr = sock.recvfrom(65565)
+        packet, addr = sock.recvfrom(65565)
 packet, addr = sock.recvfrom(65565)
         logging.info(f"Packet received from {addr}: {packet[:50].hex()}")  # Print first 50 bytes
-                    except BlockingIOError:
-            logging.warning(f"No packets received from {addr}. Interface: {args.nic}, Target: {target_host}")
+                                except BlockingIOError:
+                        logging.warning(f"No packets received. Interface: {nic}, Target: {target_host}")
             continue
-                    except Exception as e:
+                                except Exception as e:
             logging.error(f"Unexpected error while receiving packets: {e}")
             break
         
