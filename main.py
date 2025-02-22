@@ -31,6 +31,12 @@ def collect_fingerprint(target_host, dest, max_packets=100):
 
     try:
         packet, addr = sock.recvfrom(65565)
+    except socket.timeout:
+        logging.warning("No packets received within timeout period. Exiting scan.")
+        return
+    except Exception as e:
+        logging.error(f"Unexpected error while receiving packets: {e}")
+        return
     packet, addr = sock.recvfrom(65565)
     except socket.timeout:
     logging.warning("No packets received within timeout period. Exiting scan.")
@@ -154,5 +160,3 @@ def main():
 if __name__ == "__main__":
     logging.basicConfig(format="%(asctime)s [%(levelname)s]: %(message)s", datefmt="%y-%m-%d %H:%M", level=logging.DEBUG)
     main()
-
- 
