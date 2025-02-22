@@ -18,6 +18,7 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     
     os.makedirs(os.path.join(dest, 'unknown'), exist_ok=True)
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+    sock.settimeout(5)  # Prevent indefinite hanging
     target_ip = socket.inet_aton(target_host)
     start_time = time.time()
     packet_count = 0
@@ -30,7 +31,11 @@ def collect_fingerprint(target_host, dest, max_packets=100):
 
     try:
         while packet_count < max_packets:
-            packet, addr = sock.recvfrom(65565)
+            try:
+        packet, addr = sock.recvfrom(65565)
+    except socket.timeout:
+        logging.warning("No packets received within timeout period. Exiting scan.")
+        return
             eth_protocol = struct.unpack("!H", packet[12:14])[0]
             proto_type = None
             ip_header = packet[14:34]
