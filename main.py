@@ -5,6 +5,7 @@ import sys
 import threading
 import src.settings as settings
 from src.port_deceiver import PortDeceiver
+from src.os_deceiver import OsDeceiver
 
 def disable_deception():
     global active_os_deceiver, active_port_deceiver
@@ -40,24 +41,16 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
     start_time = time.time()
     packet_count = 0
-    detected_os = None
-    os_dest = None
+    detected_os = "unknown"
+    os_dest = os.path.join(dest, detected_os)
+    os.makedirs(os_dest, exist_ok=True)
+    logging.info(f"Storing data in: {os_dest}")
 
     try:
         while packet_count < max_packets:
-            # Removed time limit to allow continuous packet collection
-                logging.info("Timeout reached. Exiting OS fingerprinting mode.")
-                break
             packet, addr = sock.recvfrom(65565)
             eth_protocol = struct.unpack("!H", packet[12:14])[0]
             proto_type = None
-            
-            if detected_os is None or detected_os == "unknown":
-                detected_os = detect_os_from_packets(packet)
-                os_dest = os.path.join(dest, detected_os)
-                if detected_os != "unknown":
-                os.makedirs(os_dest, exist_ok=True)
-                logging.info(f"Detected OS: {detected_os}, storing data in: {os_dest}")
             
             packet_files = {
                 "arp": os.path.join(os_dest, "arp_record.txt"),
@@ -66,7 +59,18 @@ def collect_fingerprint(target_host, dest, max_packets=100):
                 "udp": os.path.join(os_dest, "udp_record.txt")
             }
             
-            if proto_type and os_dest:
+            if eth_protocol == 0x0806:
+                proto_type = "arp"
+            elif eth_protocol == 0x0800:
+                ip_proto = packet[23]
+                if ip_proto == 1:
+                    proto_type = "icmp"
+                elif ip_proto == 6:
+                    proto_type = "tcp"
+                elif ip_proto == 17:
+                    proto_type = "udp"
+            
+            if proto_type:
                 with open(packet_files[proto_type], "a") as f:
                     f.write(str(packet) + "\n")
                 packet_count += 1
@@ -80,6 +84,13 @@ def collect_fingerprint(target_host, dest, max_packets=100):
     except Exception as e:
         logging.error(f"Error while capturing packets: {e}")
     logging.info("Returning to command mode.")
+
+def validate_os_fingerprint(dest, os_name):
+    """Ensure that the manually selected fingerprint folder exists."""
+    os_path = os.path.join(dest, os_name)
+    if not os.path.exists(os_path):
+        logging.error(f"OS fingerprint for '{os_name}' not found in '{dest}'.")
+        sys.exit(1)
 
 def main():
     global active_os_deceiver, active_port_deceiver
@@ -103,6 +114,10 @@ def main():
         logging.info("Fingerprinting completed.")
         return
     if args.od:
+        if not args.dest or not args.os:
+            logging.error("--dest and --os arguments are required for --od mode")
+            sys.exit(1)
+        validate_os_fingerprint(args.dest, args.os)
         logging.info(f"Executing OS Deception on {args.host}, mimicking {args.os} for {args.time} minutes...")
         active_os_deceiver = OsDeceiver(target_host=args.host, target_os=args.os, dest=args.dest, mode="deception")
         try:
