@@ -10,30 +10,13 @@ import time
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
 
-def disable_deception():
-    global active_os_deceiver, active_port_deceiver
-    if active_os_deceiver:
-        logging.info("Stopping OS Deception...")
-        try:
-            active_os_deceiver.stop()
-            logging.info("OS Deception successfully stopped.")
-        except Exception as e:
-            logging.error(f"Error stopping OS Deception: {e}")
-
-    if active_port_deceiver:
-        logging.info("Stopping Port Deception...")
-        try:
-            active_port_deceiver.stop()
-            logging.info("Port Deception successfully stopped.")
-        except Exception as e:
-            logging.error(f"Error stopping Port Deception: {e}")
-
 def collect_fingerprint(target_host, dest, max_packets=100):
     """
     Captures fingerprinting packets for the target host only.
     """
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
-    os.makedirs(dest, exist_ok=True)
+    
+    os.makedirs(os.path.join(dest, 'unknown'), exist_ok=True)
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
     target_ip = socket.inet_aton(target_host)
     start_time = time.time()
@@ -113,6 +96,13 @@ def main():
         logging.info("Fingerprinting completed. No OS deception performed.")
         return
     if args.od:
+        if not args.time:
+            logging.error("--time is required when using --od mode.")
+            sys.exit(1)
+        if not os.path.exists(args.dest):
+            os.makedirs(args.dest, exist_ok=True)
+        if not os.path.exists(os.path.join(args.dest, 'unknown')):
+            os.makedirs(os.path.join(args.dest, 'unknown'), exist_ok=True)
         if not args.dest or not args.os:
             logging.error("--dest and --os arguments are required for --od mode")
             sys.exit(1)
@@ -124,6 +114,9 @@ def main():
             logging.error(f"[OS Deception] Error: {e}")
             sys.exit(1)
     if args.pd:
+        if not args.time:
+            logging.error("--time is required when using --pd mode.")
+            sys.exit(1)
         logging.info(f"Executing Port Deception on {args.host} for {args.time} minutes...")
         active_port_deceiver = PortDeceiver(target_host=args.host, port_status=args.status, dest=args.dest)
         try:
