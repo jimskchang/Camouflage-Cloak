@@ -4,7 +4,6 @@ import logging
 import sys
 import threading
 import src.settings as settings
-from src.os_deceiver import OsDeceiver
 from src.port_deceiver import PortDeceiver
 
 def disable_deception():
