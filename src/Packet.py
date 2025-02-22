@@ -37,8 +37,13 @@ class Packet:
             unpacked = struct.unpack("!BBHHHBBH4s4s", ip_header)
 
             self.l3_field["version"] = unpacked[0] >> 4
-            self.l3_field["src_IP"] = unpacked[8]  # Source IP (bytes)
-            self.l3_field["dest_IP"] = unpacked[9]  # Destination IP (bytes)
+            self.l3_field["src_IP"] = socket.inet_ntoa(unpacked[8])  # Convert bytes to string
+            self.l3_field["dest_IP"] = socket.inet_ntoa(unpacked[9])  # Convert bytes to string
+
+            # Debugging logs
+            logging.info(f"Raw src_IP: {unpacked[8]} | Converted: {self.l3_field['src_IP']}")
+            logging.info(f"Raw dest_IP: {unpacked[9]} | Converted: {self.l3_field['dest_IP']}")
+            
             self.l3_field["protocol"] = unpacked[6]
 
             if self.l3_field["protocol"] == 1:  # ICMP
