@@ -19,7 +19,7 @@ def collect_fingerprint(target_host, dest, max_packets=100):
         os.makedirs(dest)
     if not os.path.exists(os.path.join(dest, 'unknown')):
         os.makedirs(os.path.join(dest, 'unknown'))
-    os.system(f"sudo ip link set {args.nic} promisc on")  # Ensure NIC is in promiscuous mode  # Enable promiscuous mode
+    os.system(f"sudo ip link set {target_nic} promisc on")  # Ensure NIC is in promiscuous mode  # Enable promiscuous mode
     sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
     sock.bind((args.nic, 0))  # Force bind to interface
     sock.settimeout(5)  # Set a timeout to prevent indefinite waiting  # Prevent indefinite hanging
