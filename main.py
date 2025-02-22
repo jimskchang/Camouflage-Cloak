@@ -42,12 +42,14 @@ packet, addr = sock.recvfrom(65565)
             logging.error(f"Unexpected error while receiving packets: {e}")
             break
         
-        eth_protocol = struct.unpack("!H", packet[12:14])[0]
+        parsed_packet = Packet(packet)
+        parsed_packet.unpack()
+        eth_protocol = parsed_packet.l2_field.get("protocol", None)
         proto_type = None
         ip_header = packet[14:34]
         ip_unpack = struct.unpack("!BBHHHBBH4s4s", ip_header)
-        src_ip = ip_unpack[8]
-        dest_ip = ip_unpack[9]
+        src_ip = parsed_packet.l3_field.get("src_IP", None)
+        dest_ip = parsed_packet.l3_field.get("dest_IP", None)
         
         logging.info(f"Captured packet from {socket.inet_ntoa(src_ip)} to {socket.inet_ntoa(dest_ip)}")
         if src_ip != target_ip and dest_ip != target_ip:
@@ -61,9 +63,9 @@ packet, addr = sock.recvfrom(65565)
             "udp": os.path.join(os_dest, "udp_record.txt")
         }
         
-        if eth_protocol == 0x0806:
+        if eth_protocol == 0x0806:  # ARP Packets
             proto_type = "arp"
-        elif eth_protocol == 0x0800:
+        elif eth_protocol == 0x0800:  # IPv4 Packets
             ip_proto = packet[23]
             if ip_proto == 1:
                 proto_type = "icmp"
