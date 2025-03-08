@@ -25,7 +25,7 @@ def validate_nic(nic):
         sys.exit(1)
 
 def set_promiscuous_mode(nic):
-    """Enable promiscuous mode securely."""
+    """Enable promiscuous mode securely using subprocess."""
     try:
         subprocess.run(["sudo", "ip", "link", "set", nic, "promisc", "on"], check=True)
         logging.info("Promiscuous mode enabled successfully.")
@@ -110,7 +110,7 @@ def collect_fingerprint(target_host, dest, nic, max_packets=100):
     logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
 def main():
-    parser = argparse.ArgumentParser(description="Camouflage Cloak - OS Deception & Fingerprinting System")
+    parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception Against Malicious Scans")
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scanning technique for fingerprint collection")
