@@ -3,7 +3,6 @@ import argparse
 import os
 import time
 import socket
-import struct
 import sys
 import subprocess
 import src.settings as settings
@@ -44,8 +43,25 @@ def ensure_os_record_exists(dest: str = None) -> str:
 
     return dest_path
 
+def validate_os_fingerprint_files(os_folder: str) -> None:
+    """Ensure all required OS fingerprint files exist and are readable before running deception."""
+    required_files = ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]
+    missing_files = []
+
+    for filename in required_files:
+        file_path = os.path.join(os_folder, filename)
+        if not os.path.exists(file_path):
+            missing_files.append(file_path)
+    
+    if missing_files:
+        logging.error("❌ OS deception failed! Missing required files:")
+        for f in missing_files:
+            logging.error(f"  - {f} (Not Found)")
+        logging.info("💡 Run --scan ts first to collect OS fingerprint data.")
+        sys.exit(1)
+
 def fix_file_permissions(directory: str) -> None:
-    """Ensure that OS fingerprint files are always **readable & writable**."""
+    """Ensure that OS fingerprint files are always readable before OS deception."""
     try:
         if os.path.exists(directory):
             for root, _, files in os.walk(directory):
@@ -56,17 +72,20 @@ def fix_file_permissions(directory: str) -> None:
     except Exception as e:
         logging.error(f"❌ Failed to set file permissions: {e}")
 
-def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
-    """Captures fingerprinting packets for the target host only."""
-    logging.info(f"📡 Starting OS Fingerprinting on {target_host}")
+def collect_fingerprint(target_host, dest, nic, max_packets=100):
+    """
+    Captures fingerprinting packets for the target host only, including responses to malicious scans.
+    Runs for a fixed timeout of **3 minutes (180 seconds)**.
+    """
+    logging.info(f"🛠 Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets, Timeout: 3 minutes)")
 
-    dest = ensure_os_record_exists(dest)
-
+    os.makedirs(dest, exist_ok=True)
+    
     packet_files = {
-        "arp": os.path.join(dest, "arp_record.txt"),
-        "icmp": os.path.join(dest, "icmp_record.txt"),
-        "tcp": os.path.join(dest, "tcp_record.txt"),
-        "udp": os.path.join(dest, "udp_record.txt"),
+        "arp": os.path.abspath(os.path.join(dest, "arp_record.txt")),
+        "icmp": os.path.abspath(os.path.join(dest, "icmp_record.txt")),
+        "tcp": os.path.abspath(os.path.join(dest, "tcp_record.txt")),
+        "udp": os.path.abspath(os.path.join(dest, "udp_record.txt")),
     }
 
     validate_nic(nic)
@@ -81,11 +100,10 @@ def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
         logging.error(f"❌ Error opening raw socket: {e}")
         sys.exit(1)
 
+    packet_count = 0
     logging.info(f"📂 Storing fingerprint data in: {dest}")
 
-    packet_count = 0
-    timeout = time.time() + 180  # **✅ 3-minute timeout restored!**
-
+    timeout = time.time() + 180  # ⏳ **3-minute timeout restored**
     while time.time() < timeout:
         try:
             packet, _ = sock.recvfrom(65565)
@@ -95,39 +113,33 @@ def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
 
             if eth_protocol == 0x0806:
                 proto_type = "arp"
-                packet_data = f"ARP Packet: Raw={packet.hex()[:50]}"
-                logging.info(f"📥 Captured ARP Packet #{packet_count + 1}")
-
+                packet_data = f"ARP Packet: Raw={packet.hex()[:50]}\n"
             elif eth_protocol == 0x0800:
                 ip_proto = packet[23]
-
                 if ip_proto == 1:
                     proto_type = "icmp"
-                    packet_data = f"ICMP Packet: Raw={packet.hex()[:50]}"
-                    logging.info(f"📥 Captured ICMP Packet #{packet_count + 1}")
-
+                    icmp_header = packet[34:42]
+                    icmp_type, icmp_code, _ = struct.unpack("!BBH", icmp_header[:4])
+                    packet_data = f"ICMP Packet: Type={icmp_type}, Code={icmp_code}, Raw={packet.hex()[:50]}\n"
                 elif ip_proto == 6:
                     proto_type = "tcp"
-                    packet_data = f"TCP Packet: Raw={packet.hex()[:50]}"
-                    logging.info(f"📥 Captured TCP Packet #{packet_count + 1}")
-
+                    tcp_header = struct.unpack("!HHLLBBHHH", packet[34:54])
+                    src_port, dst_port, _, _, _, flags, _, _, _ = tcp_header
+                    packet_data = f"TCP Packet: SrcPort={src_port}, DstPort={dst_port}, Flags={flags}, Raw={packet.hex()[:50]}\n"
                 elif ip_proto == 17:
                     proto_type = "udp"
-                    packet_data = f"UDP Packet: Raw={packet.hex()[:50]}"
-                    logging.info(f"📥 Captured UDP Packet #{packet_count + 1}")
-
+                    udp_header = struct.unpack("!HHHH", packet[34:42])
+                    src_port, dst_port, _, _ = udp_header
+                    packet_data = f"UDP Packet: SrcPort={src_port}, DstPort={dst_port}, Raw={packet.hex()[:50]}\n"
+                
             if proto_type and packet_data:
                 with open(packet_files[proto_type], "a") as f:
-                    f.write(packet_data + "\n")
-
+                    f.write(packet_data)
                 packet_count += 1
 
         except Exception as e:
-            logging.error(f"Error while receiving packets: {e}")
+            logging.error(f"❌ Error while receiving packets: {e}")
             break
-
-    # Fix permissions after collection
-    fix_file_permissions(dest)
 
     logging.info(f"✅ OS Fingerprinting Completed. Captured {packet_count} packets.")
 
@@ -139,7 +151,7 @@ def main():
     parser.add_argument("--dest", help="Directory to store or load OS fingerprints")
     parser.add_argument("--os", help="OS to mimic (Required for --scan od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --scan od and --scan pd)")
-    
+
     args = parser.parse_args()
 
     validate_nic(args.nic)
@@ -156,28 +168,12 @@ def main():
             logging.error("❌ Missing required argument: --dest is required for --scan od to load OS fingerprints")
             sys.exit(1)
 
-        # Ensure --dest exists before running OS deception
-        if not os.path.exists(args.dest):
-            logging.error(f"❌ OS deception failed: {args.dest} does not exist! Create it manually.")
-            logging.info("🔹 Manually create the folder before running deception:")
-            logging.info(f"🔹 mkdir -p {args.dest}")
-            sys.exit(1)
-
-        # **Fix file permissions before reading**
+        validate_os_fingerprint_files(args.dest)
         fix_file_permissions(args.dest)
 
-        dest = os.path.abspath(args.dest)  # Use provided OS fingerprint directory
+        dest = os.path.abspath(args.dest)
         deceiver = OsDeceiver(args.host, args.os, dest)
         deceiver.os_deceive()
-
-    elif args.scan == 'pd':
-        if not args.te:
-            logging.error("❌ Missing required argument: --te is required for --scan pd")
-            sys.exit(1)
-        deceiver = PortDeceiver(args.host)
-        deceiver.deceive_ps_hs(args.te)
-    else:
-        logging.error("❌ Invalid command. Specify --scan ts, --scan od, or --scan pd.")
 
 if __name__ == '__main__':
     main()
