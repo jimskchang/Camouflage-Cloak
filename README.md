@@ -63,7 +63,7 @@ CamouflageCloak/
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/jimskchang/CamouflageCloak.git
+git clone https://github.com/jimskchang/Camouflage-Cloak.git
 cd CamouflageCloak
 ```
 
