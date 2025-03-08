@@ -4,7 +4,8 @@ import struct
 import random
 import threading
 import src.settings as settings
-from src.tcp import TcpConnect, getIPChecksum, getTCPChecksum
+from src.tcp import TcpConnect, getTCPChecksum
+from src.Packet import Packet  # Ensure Packet handles IP checksum calculation
 
 # Constants for readability
 ETHERNET_PROTOCOL_IP = 8
