@@ -1,142 +1,130 @@
-import os
 import logging
+import json
 import socket
 import struct
-import time
-import threading
+from datetime import datetime, timedelta
+from typing import List, Any
 import src.settings as settings
 from src.Packet import Packet
 from src.tcp import TcpConnect
 
 class OsDeceiver:
-    def __init__(self, target_host, target_os, dest, mode="deception"):
-        """
-        Initialize OS Deceiver.
-        """
-        self.target_host_str = target_host
-        self.target_host = socket.inet_aton(target_host)
-        self.target_os = target_os
-        self.conn = TcpConnect(target_host)
+    def __init__(self, target_host, target_os, dest=None):
+        """Initialize OS deception with target details."""
+        self.host = target_host
+        self.os = target_os
+        self.conn = TcpConnect(target_host)  # Ensure NIC exists before binding
+        self.white_list = {}
+        self.port_seq = [4441, 5551, 6661]
+        self.dest = dest
 
-        # Ensure OS name is not appended twice
-        if os.path.basename(dest) == target_os:
-            self.os_record_path = dest
-        else:
-            self.os_record_path = os.path.join(dest, target_os)
-
-        self.running = False
-        self.thread = None
-        self.packet_data = {}
-
-        if mode == "deception":
-            if not os.path.exists(self.os_record_path):
-                logging.error(f"OS fingerprint for '{self.target_os}' not found in '{self.os_record_path}'.")
-                logging.error("Run '--scan ts' first to collect fingerprint data.")
-                raise FileNotFoundError(f"Missing OS fingerprint directory: {self.os_record_path}")
-            self._load_fingerprint_data()
-        elif mode == "scan":
-            os.makedirs(self.os_record_path, exist_ok=True)
-            logging.info(f"Created OS fingerprint directory: {self.os_record_path}")
-
-        logging.info(f"OsDeceiver initialized for {self.target_host_str} (Mode: {mode})")
-
-    def _load_fingerprint_data(self):
-        """
-        Loads fingerprint data from stored files for OS deception.
-        """
-        fingerprint_files = {
-            "arp": os.path.join(self.os_record_path, "arp_record.txt"),
-            "icmp": os.path.join(self.os_record_path, "icmp_record.txt"),
-            "tcp": os.path.join(self.os_record_path, "tcp_record.txt"),
-            "udp": os.path.join(self.os_record_path, "udp_record.txt"),
-        }
-
-        for proto, file_path in fingerprint_files.items():
-            if not os.path.exists(file_path):
-                logging.error(f"Missing fingerprint data for {proto.upper()} packets.")
-                logging.error(f"Ensure '{file_path}' exists and run '--scan ts' if needed.")
-                raise FileNotFoundError(f"Missing required fingerprint file: {file_path}")
-
-            with open(file_path, "r") as f:
-                self.packet_data[proto] = f.read().splitlines()
-
-        logging.info(f"Loaded OS fingerprint data from {self.os_record_path}")
-
-    def _parse_ethernet_ip(self, packet):
-        """
-        Parses Ethernet and IP headers.
-        """
-        try:
-            eth_header = packet[:settings.ETH_HEADER_LEN]
-            eth = struct.unpack("!6s6sH", eth_header)
-            eth_protocol = socket.ntohs(eth[2])
-
-            ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-            _, _, _, _, _, _, PROTOCOL, _, src_IP, dest_IP = struct.unpack("!BBHHHBBH4s4s", ip_header)
-
-            return eth_protocol, src_IP, dest_IP, PROTOCOL
-        except struct.error as e:
-            logging.error(f"Error parsing Ethernet/IP headers: {e}")
-            return None, None, None, None
-
-    def os_record(self, max_packets=100):
-        """
-        Captures OS fingerprinting packets (ARP, ICMP, TCP, UDP) and logs them.
-        """
-        logging.info(f"Capturing packets on {settings.NIC} for {self.target_host_str} (Max: {max_packets}, Timeout: 2 min)")
-        
-        packet_files = {
-            "arp": os.path.join(self.os_record_path, "arp_record.txt"),
-            "icmp": os.path.join(self.os_record_path, "icmp_record.txt"),
-            "tcp": os.path.join(self.os_record_path, "tcp_record.txt"),
-            "udp": os.path.join(self.os_record_path, "udp_record.txt")
-        }
-
-        start_time = time.time()
-        packet_count = 0
+    def load_file(self, pkt_type: str):
+        """Load OS deception template records from file."""
+        file_path = f"os_record/{self.os}/{pkt_type}_record.txt"
 
         try:
-            while packet_count < max_packets:
-                if time.time() - start_time > 120:
-                    logging.info("Timeout reached. Exiting OS fingerprinting mode.")
-                    break
+            with open(file_path, 'r') as file:
+                packet_data = file.read().strip()
+                if not packet_data:
+                    return {}  # Empty file case
+                packet_dict = json.loads(packet_data)
+                return {k: v for k, v in packet_dict.items() if v is not None}
 
-                packet, addr = self.conn.sock.recvfrom(65565)
-                logging.info(f"[DEBUG] Packet received from {addr}: {packet.hex()[:100]}")
+        except (json.JSONDecodeError, FileNotFoundError, IOError) as e:
+            logging.error(f"Error loading {file_path}: {e}")
+            return {}
 
-                eth_protocol, src_IP, dest_IP, PROTOCOL = self._parse_ethernet_ip(packet)
-                logging.info(f"[DEBUG] Received packet for destination IP: {socket.inet_ntoa(dest_IP)}")
-                
-                if dest_IP != self.target_host:
-                    logging.info(f"[DEBUG] Skipping packet - Not for {self.target_host_str}")
-                    continue
+    def store_rsp(self):
+        """Store responses to specific TCP ports."""
+        rsp = {}
+        while True:
+            packet, _ = self.conn.sock.recvfrom(65565)
+            eth_protocol = struct.unpack('!H', packet[12:14])[0]
 
-                proto_type = None
-                if PROTOCOL == 1:
-                    proto_type = "icmp"
-                elif PROTOCOL == 6:
-                    proto_type = "tcp"
-                elif PROTOCOL == 17:
-                    proto_type = "udp"
-                elif eth_protocol == 1544:
-                    proto_type = "arp"
+            if eth_protocol == 0x0800:  # IPv4
+                ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+                _, _, _, _, _, _, PROTOCOL, _, src_IP, dest_IP = struct.unpack('!BBHHHBBH4s4s', ip_header)
 
-                if proto_type:
-                    with open(packet_files[proto_type], "a") as f:
-                        f.write(str(packet) + "\n")
-                    logging.info(f"[DEBUG] Writing {proto_type.upper()} packet to {packet_files[proto_type]}")
+                if PROTOCOL == 6 and src_IP == socket.inet_aton(self.host):  # TCP
+                    pkt = Packet(packet)
+                    pkt.unpack()
 
-                    packet_count += 1
-                    logging.info(f"Captured {proto_type.upper()} Packet ({packet_count})")
+                    src_port = pkt.l4_field.get('src_port')  # Use .get() for safety
+                    if src_port:
+                        rsp.setdefault(src_port, []).append(packet)
 
-            if packet_count == 0:
-                logging.warning("No packets captured! Check network interface settings and traffic.")
+                        with open('rsp_record.txt', 'w') as f:
+                            json.dump(rsp, f)  # Use JSON for better storage
 
-            logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
+    def os_deceive(self):
+        """Perform OS deception based on template packets."""
+        logging.info(f'Loading OS deception template for {self.os}')
+        template_dict = {p: self.load_file(p) for p in ['arp', 'tcp', 'udp', 'icmp']}
 
-        except KeyboardInterrupt:
-            logging.info("User interrupted capture. Exiting...")
-        except Exception as e:
-            logging.error(f"Error while capturing packets: {e}")
+        while True:
+            raw_pkt, _ = self.conn.sock.recvfrom(65565)
+            pkt = Packet(packet=raw_pkt)
+            pkt.unpack()
 
-        logging.info("Returning to command mode.")
+            proc = pkt.get_proc()
+            if proc == 'tcp' and pkt.l3_field['dest_IP'] == Packet.ip_str2byte(self.host):
+                if pkt.l4_field['dest_port'] in settings.FREE_PORT:
+                    continue  # Ignore free ports
+
+            if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == socket.inet_aton(self.host)) or \
+                    (pkt.l3 == 'arp' and pkt.l3_field['recv_ip'] == socket.inet_aton(self.host)):
+
+                rsp = deceived_pkt_synthesis(proc, pkt, template_dict)
+                if rsp:
+                    logging.info(f'Sending deceptive {proc} packet.')
+                    self.conn.sock.send(rsp)
+
+def deceived_pkt_synthesis(proc: str, req: Packet, template: dict):
+    """Generate a deceptive packet based on the request and template."""
+    key, _ = gen_key(proc, req.packet)
+    try:
+        raw_template = template[proc][key]
+    except KeyError:
+        return None  # No deception data available
+
+    template_pkt = Packet(raw_template)
+    template_pkt.unpack()
+
+    if proc == 'tcp':
+        template_pkt.l2_field.update({'dMAC': req.l2_field['sMAC'], 'sMAC': req.l2_field['dMAC']})
+        template_pkt.l3_field.update({'src_IP': req.l3_field['dest_IP'], 'dest_IP': req.l3_field['src_IP']})
+        template_pkt.l4_field.update({'src_port': req.l4_field['dest_port'], 'dest_port': req.l4_field['src_port']})
+
+    elif proc == 'icmp':
+        template_pkt.l2_field.update({'dMAC': req.l2_field['sMAC'], 'sMAC': req.l2_field['dMAC']})
+        template_pkt.l3_field.update({'src_IP': req.l3_field['dest_IP'], 'dest_IP': req.l3_field['src_IP']})
+        template_pkt.l4_field.update({'ID': req.l4_field['ID'], 'seq': req.l4_field['seq']})
+
+    elif proc == 'udp':
+        template_pkt.l2_field.update({'dMAC': req.l2_field['sMAC'], 'sMAC': req.l2_field['dMAC']})
+        template_pkt.l3_field.update({'src_IP': req.l3_field['dest_IP'], 'dest_IP': req.l3_field['src_IP']})
+
+    elif proc == 'arp':
+        template_pkt.l2_field.update({'dMAC': req.l2_field['sMAC'], 'sMAC': settings.mac})
+        template_pkt.l3_field.update({
+            'sender_mac': settings.mac,
+            'sender_ip': socket.inet_aton(settings.host),
+            'recv_mac': req.l3_field['sender_mac'],
+            'recv_ip': req.l3_field['sender_ip']
+        })
+
+    else:
+        return None  # Unsupported packet type
+
+    template_pkt.pack()
+    return template_pkt.packet
+
+def gen_key(proc, packet):
+    """Generate a key based on protocol type."""
+    return {
+        'tcp': gen_tcp_key,
+        'udp': gen_udp_key,
+        'icmp': gen_icmp_key,
+        'arp': gen_arp_key
+    }.get(proc, lambda x: (None, None))(packet)
+   
