@@ -34,16 +34,17 @@ def set_promiscuous_mode(nic: str) -> None:
         sys.exit(1)
 
 def get_default_dest_path() -> str:
-    """Ensure the os_record directory exists inside /home/user/Camouflage-Cloak, not in root /."""
-    base_dir = os.path.abspath(os.path.expanduser("~/Camouflage-Cloak"))  # Ensures absolute path
+    """Ensure os_record/ is always created inside /home/user/Camouflage-Cloak/"""
+    base_dir = os.path.expanduser("~/Camouflage-Cloak")  # Use explicit home directory
     dest_path = os.path.join(base_dir, "os_record")
 
-    try:
-        os.makedirs(dest_path, exist_ok=True)
-        logging.info(f"✔ os_record directory created at: {dest_path}")
-    except Exception as e:
-        logging.error(f"❌ Failed to create os_record directory: {e}")
-        sys.exit(1)
+    if not os.path.exists(dest_path):
+        try:
+            os.makedirs(dest_path, exist_ok=True)  # Ensure directory exists
+            logging.info(f"✔ os_record directory created at: {dest_path}")
+        except Exception as e:
+            logging.error(f"❌ Failed to create os_record directory: {e}")
+            sys.exit(1)
 
     return dest_path
 
@@ -52,12 +53,13 @@ def get_os_record_path(os_name: str) -> str:
     base_path = get_default_dest_path()
     os_path = os.path.join(base_path, os_name)
 
-    try:
-        os.makedirs(os_path, exist_ok=True)
-        logging.info(f"✔ OS record directory set at: {os_path}")
-    except Exception as e:
-        logging.error(f"❌ Failed to create OS record directory: {e}")
-        sys.exit(1)
+    if not os.path.exists(os_path):
+        try:
+            os.makedirs(os_path, exist_ok=True)
+            logging.info(f"✔ OS record directory created at: {os_path}")
+        except Exception as e:
+            logging.error(f"❌ Failed to create OS record directory: {e}")
+            sys.exit(1)
     
     return os_path
 
