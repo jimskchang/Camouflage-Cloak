@@ -74,7 +74,7 @@ Edit **`settings.py`** to match your environment:
 
 ```python
 # Camouflage-Cloak Server Network Configuration
-# 🛠️ **Camouflage-Cloak Server Settings**
+**Camouflage-Cloak Server Settings**
 HOST = "192.168.23.206"  # Replace with the actual server IP
 NIC = "ens192"  # Replace with the correct network interface
 ```
@@ -83,8 +83,17 @@ NIC = "ens192"  # Replace with the correct network interface
 
 ---
 
-## Usage
-Prepare 3 hosts (or VMs), which include an attacker foothold (with Nmap), a protected server (Target Host), and a Camouflage Cloak server (at least contains 2 NICs). Make the traffic between the attacker foothold and the protected server can pass through the Camouflage Cloak server (make sure they all connect to the Camouflage Cloak server's 2 NIC respectively and then bridging the NICs)
+## Network Setup for Camouflage Cloak
+
+### Required Hosts (or VMs)
+1. **Attacker Foothold** – Runs **Nmap** for scanning.
+2. **Target Host** – The protected server.
+3. **Camouflage Cloak Server** – Intermediary system with **two NICs**.
+
+### Configuration Steps
+- Ensure traffic between the **attacker** and **target** passes through the **Camouflage Cloak Server**.
+- Connect the **attacker** and **target** to the **two NICs** of the **Camouflage Cloak Server**.
+- **Bridge the NICs** to allow seamless traffic flow.
 
 ### Run the Main Script
 Eg:
