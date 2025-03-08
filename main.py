@@ -115,7 +115,7 @@ def main():
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scanning technique for fingerprint collection")
     parser.add_argument("--dest", help="Directory to store OS fingerprints (Required for --scan ts)")
-    parser.add_argument("--os", help="OS to mimic (Required for --od)")
+    parser.add_argument("--os", help="OS to mimic (Required for --od")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
     args = parser.parse_args()
@@ -133,16 +133,15 @@ def main():
             return
         deceiver = OsDeceiver(args.host, args.os)
         deceiver.os_deceive()
-        threading.Timer(args.te * 60, deceiver.stop).start()
     elif args.scan == 'pd':
         if not args.status or not args.te:
             logging.error("Missing required arguments: --status and --te are required for --pd")
             return
         deceiver = PortDeceiver(args.host)
         deceiver.deceive_ps_hs(args.status)
-        threading.Timer(args.te * 60, deceiver.stop).start()
     else:
         logging.error("Invalid command. Specify --scan ts, --scan od, or --scan pd.")
 
 if __name__ == '__main__':
     main()
+
