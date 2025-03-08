@@ -24,21 +24,23 @@ def validate_nic(nic: str) -> None:
         sys.exit(1)
 
 def ensure_os_record_exists(dest: str = None) -> str:
-    """Ensure os_record directory exists and return its path."""
-    if dest:
-        dest_path = os.path.abspath(dest)
-    else:
-        base_dir = os.path.expanduser("~/Camouflage-Cloak")
-        dest_path = os.path.join(base_dir, "os_record")
+    """Ensure os_record directory exists and return its path, but allow manual folder creation."""
+    base_dir = os.path.expanduser("~/Camouflage-Cloak")
+    os_record_path = os.path.join(base_dir, "os_record")
 
-    if not os.path.exists(dest_path):
-        logging.info(f"⚠ os_record directory not found! Creating: {dest_path}")
+    if not os.path.exists(os_record_path):
+        logging.info(f"⚠ os_record directory not found! Creating: {os_record_path}")
         try:
-            os.makedirs(dest_path, exist_ok=True)
+            os.makedirs(os_record_path, exist_ok=True)
             logging.info(f"✔ os_record directory created successfully.")
         except Exception as e:
             logging.error(f"❌ Failed to create os_record directory: {e}")
             sys.exit(1)
+
+    if dest:
+        dest_path = os.path.abspath(dest)
+    else:
+        dest_path = os_record_path  # Default to ~/Camouflage-Cloak/os_record/
 
     return dest_path
 
@@ -79,28 +81,25 @@ def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
             proto_type = None
             packet_data = None
 
-            # **Live Debugging Output**
-            logging.debug(f"🛑 Raw Packet ({len(packet)} bytes): {packet.hex()[:100]}")
-
-            if eth_protocol == 0x0806:  # ARP Packet
+            if eth_protocol == 0x0806:
                 proto_type = "arp"
                 packet_data = f"ARP Packet: Raw={packet.hex()[:50]}"
                 logging.info(f"📥 Captured ARP Packet #{packet_count + 1}")
 
-            elif eth_protocol == 0x0800:  # IPv4 Packet
+            elif eth_protocol == 0x0800:
                 ip_proto = packet[23]
 
-                if ip_proto == 1:  # ICMP (Ping Scan)
+                if ip_proto == 1:
                     proto_type = "icmp"
                     packet_data = f"ICMP Packet: Raw={packet.hex()[:50]}"
                     logging.info(f"📥 Captured ICMP Packet #{packet_count + 1}")
 
-                elif ip_proto == 6:  # TCP Packet (SYN, SYN-ACK, etc.)
+                elif ip_proto == 6:
                     proto_type = "tcp"
                     packet_data = f"TCP Packet: Raw={packet.hex()[:50]}"
                     logging.info(f"📥 Captured TCP Packet #{packet_count + 1}")
 
-                elif ip_proto == 17:  # UDP Packet
+                elif ip_proto == 17:
                     proto_type = "udp"
                     packet_data = f"UDP Packet: Raw={packet.hex()[:50]}"
                     logging.info(f"📥 Captured UDP Packet #{packet_count + 1}")
@@ -141,7 +140,15 @@ def main():
         if not args.dest:
             logging.error("Missing required argument: --dest is required for --scan od to load OS fingerprints")
             sys.exit(1)
-        dest = ensure_os_record_exists(args.dest)  # Load pre-stored fingerprints
+
+        # Ensure --dest exists before running OS deception
+        if not os.path.exists(args.dest):
+            logging.error(f"❌ OS deception failed: {args.dest} does not exist! Create it manually.")
+            logging.info("🔹 Manually create the folder before running deception:")
+            logging.info(f"🔹 mkdir -p {args.dest}")
+            sys.exit(1)
+
+        dest = os.path.abspath(args.dest)  # Use provided OS fingerprint directory
         deceiver = OsDeceiver(args.host, args.os, dest)
         deceiver.os_deceive()
 
