@@ -38,8 +38,7 @@ def get_default_dest_path() -> str:
     base_dir = os.path.expanduser("~/Camouflage-Cloak")  # Explicit home directory
     dest_path = os.path.join(base_dir, "os_record")
 
-    # Check if the path is correctly under /home/user/
-    if not dest_path.startswith("/home/user/"):
+    if not dest_path.startswith(os.path.expanduser("~/")):
         logging.error(f"❌ Invalid path detected: {dest_path}")
         sys.exit(1)
 
@@ -48,17 +47,28 @@ def get_default_dest_path() -> str:
         logging.info(f"✔ os_record directory is set at: {dest_path}")
     except Exception as e:
         logging.error(f"❌ Failed to create os_record directory: {e}")
-        sys.exit(1)  # Exit if directory cannot be created
+        sys.exit(1)
 
     return dest_path
 
+def get_os_record_path(os_name: str) -> str:
+    """Ensure the specific OS fingerprint directory exists under os_record."""
+    base_path = get_default_dest_path()
+    os_path = os.path.join(base_path, os_name)
+
+    try:
+        os.makedirs(os_path, exist_ok=True)  # Ensure OS directory exists
+        logging.info(f"✔ OS record directory set at: {os_path}")
+    except Exception as e:
+        logging.error(f"❌ Failed to create OS record directory: {e}")
+        sys.exit(1)
+    
+    return os_path
+
 def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int = 100) -> None:
-    """
-    Captures fingerprinting packets for the target host only, including responses to malicious scans.
-    """
+    """Captures fingerprinting packets for the target host only, including responses to malicious scans."""
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
 
-    # Ensure destination directory exists
     if not dest:
         dest = get_default_dest_path()
     os.makedirs(dest, exist_ok=True)
@@ -72,7 +82,6 @@ def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int 
 
     validate_nic(nic)
     set_promiscuous_mode(nic)
-    
     time.sleep(2)  # Allow NIC to enter promiscuous mode
 
     try:
@@ -88,7 +97,7 @@ def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int 
     packet_count = 0
     logging.info(f"Storing fingerprint data in: {dest}")
 
-    timeout = time.time() + 300  # 5 minutes
+    timeout = time.time() + 300  # 5 minutes timeout
     while time.time() < timeout:
         try:
             packet, _ = sock.recvfrom(65565)
@@ -107,19 +116,13 @@ def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int 
                 if ip_proto == 1:
                     proto_type = "icmp"
                     icmp_header = packet[34:42]
-                    icmp_type, icmp_code, icmp_checksum = struct.unpack("!BBH", icmp_header[:4])
+                    icmp_type, icmp_code, _ = struct.unpack("!BBH", icmp_header[:4])
                     packet_data = f"ICMP Packet: Type={icmp_type}, Code={icmp_code}, Raw={packet.hex()[:50]}\n"
                 elif ip_proto == 6:
                     proto_type = "tcp"
-                    tcp_header = struct.unpack("!HHLLBBHHH", packet[34:54])
-                    src_port, dst_port, seq, ack, offset_reserved_flags, flags, window, checksum, urg_ptr = tcp_header
-                    packet_data = f"TCP Packet: SrcPort={src_port}, DstPort={dst_port}, Flags={flags}, Raw={packet.hex()[:50]}\n"
                 elif ip_proto == 17:
                     proto_type = "udp"
-                    udp_header = struct.unpack("!HHHH", packet[34:42])
-                    src_port, dst_port, length, checksum = udp_header
-                    packet_data = f"UDP Packet: SrcPort={src_port}, DstPort={dst_port}, Raw={packet.hex()[:50]}\n"
-
+                
             if proto_type and packet_data:
                 with open(packet_files[proto_type], "a") as f:
                     f.write(packet_data)
@@ -143,8 +146,7 @@ def main():
     args = parser.parse_args()
 
     validate_nic(args.nic)
-
-    dest = args.dest if args.dest else get_default_dest_path()
+    dest = os.path.abspath(args.dest) if args.dest else get_default_dest_path()
 
     if args.scan == 'ts':
         collect_fingerprint(args.host, dest, args.nic)
@@ -152,7 +154,8 @@ def main():
         if not args.os or not args.te:
             logging.error("Missing required arguments: --os and --te are required for --od")
             return
-        deceiver = OsDeceiver(args.host, args.os)
+        os_record_path = get_os_record_path(args.os)
+        deceiver = OsDeceiver(args.host, args.os, os_record_path)
         deceiver.os_deceive()
     elif args.scan == 'pd':
         if not args.status or not args.te:
