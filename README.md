@@ -113,6 +113,7 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <deceiv
 | `--od`        | Perform OS deception using pre-recorded fingerprints |
 | `--pd`        | Perform Port deception using pre-recorded fingerprints |
 | `--os`        | choose OS to mimic |
+| `--status`    | choose open or close to deceive port|
 | `--te`        | Timeout duration in minutes (Required for --od and --pd) |
 
 
@@ -120,12 +121,12 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <deceiv
 
 **Build Template Synthesis**
 
-***Step 1:***cd to the Camouflage-Cloak folder and execute the following instruction
+***Step 1:*** cd to the Camouflage-Cloak folder and execute the following instruction
 ```bash
 sudo python3 main.py --host <protected server IP> --nic <network interface> --scan ts --dest <host OS template you want to store e.g. "/os_record"> 
 ```
 
-***Step 2:***run Nmap OS detection on attacker host
+***Step 2:*** run Nmap OS detection on attacker host
 ```bash
 sudo nmap -O <Target Host IP>
 sudo nmap -A -p 1-65535 <Target Host IP>
@@ -134,38 +135,23 @@ sudo nmap --osscan-guess <Target Host IP>
 The time out set in the --scan ts (to build Template Synthesis) is 120 second.  Therefore, you should perfom the Nmap scan immediately after you execute the --scan ts command. After two minutes it will return to the command mode for you to execute deception.
 
 ***Step 3:*** Store the Template
-```bash
-Camouflage Cloak will intercept Nmap fingerprinting packets and generate the packetts template to /os_record/<"OS template name"> to deploy the template correctly.
-```
+Move the OS fingerprint packets from root dirextory to /Camouflage_Cloak/os_record/<OS Type> .
+You should maunally create the <OS Type> uder the /Camouflage_Cloak/os_record/ folder first.
 
 **OS deceiver test**
-
-***Step 1:***clone this repository to the Camouflage Cloak server
+***Step 1:*** cd to the Camouflage-Cloak folder and execute the following instruction
 ```bash
-git clone https:"//github.com/jimskchang/Camouflage-Cloak.git
+sudo python3 main.py --host <Target Host IP> --nic <Target Host NIC> --scan od --os <OS template e.g. win7/win10/centos> --te <deceive time out time e.g. 6 = 6 minutes>
 ```
 
-***Step 2:***cd to the Camouflage-Cloak folder and execute the following instruction
+***Step 2:*** run Nmap OS detection on attacker foothold and observe the result
 ```bash
-sudo python3 main.py --host <protected server IP> --nic <protected server NIC> --scan od --os <OS template e.g. win7/win10/centos> 
-```
-
-***Step 3:***run Nmap OS detection on attacker foothold and observe the result
-```bash
-sudo nmap -O <Protected Server IP>
-```
-
-
-
-
-**Deceive an OS Fingerprint Scan**
-```bash
-sudo python3 main.py --scan od --host 192.168.1.150 --os win10
+sudo nmap -O <Target Host IP>
 ```
 
 **Deceive Port Scan (Simulating Open/Closed Ports)**
 ```bash
-sudo python3 main.py --scan pd --host 192.168.1.150 --status open
+sudo python3 main.py --host <Target Host IP> --nic <Target Host NIC> --scan pd --status <e.g. open/close> --te <deceive time out time e.g. 6 = 6 minutes>
 ```
 
 ---
@@ -182,7 +168,7 @@ This tool is **for educational and security research purposes only**.
 
 ## Contributors
 
-- **Your Name** (Maintainer) - Shangkai Chang
+- **Main**  - Shangkai Chang
 - **Other Contributors** -  Zih-Siang Lin, Fany Yu
 ---
 
