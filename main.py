@@ -34,9 +34,14 @@ def set_promiscuous_mode(nic: str) -> None:
         sys.exit(1)
 
 def get_default_dest_path() -> str:
-    """Ensure the os_record directory exists inside /home/user/Camouflage-Cloak."""
-    base_dir = os.path.expanduser("~/Camouflage-Cloak")  # Explicit base directory
+    """Ensure the os_record directory exists inside /home/user/Camouflage-Cloak, not in root /."""
+    base_dir = os.path.expanduser("~/Camouflage-Cloak")  # Explicit home directory
     dest_path = os.path.join(base_dir, "os_record")
+
+    # Check if the path is correctly under /home/user/
+    if not dest_path.startswith("/home/user/"):
+        logging.error(f"❌ Invalid path detected: {dest_path}")
+        sys.exit(1)
 
     try:
         os.makedirs(dest_path, exist_ok=True)  # Ensure directory exists
