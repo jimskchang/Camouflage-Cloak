@@ -1,8 +1,21 @@
 import socket
 import binascii
-import struct
 import array
 import src.settings as settings
+import struct
+
+def getIPChecksum(packet: bytes) -> int:
+    """
+    Compute the IP checksum for a given packet header.
+    """
+    if len(packet) % 2:
+        packet += b'\0'  # Ensure even number of bytes
+
+    checksum = sum(struct.unpack("!"+("H"*(len(packet)//2)), packet))
+    checksum = (checksum >> 16) + (checksum & 0xFFFF)
+    checksum = ~checksum & 0xFFFF
+
+    return checksum
 
 class TcpConnect:
     def __init__(self, host: str):
