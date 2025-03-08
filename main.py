@@ -18,13 +18,13 @@ logging.basicConfig(
     level=logging.DEBUG  # Use DEBUG mode for live packet analysis
 )
 
-def validate_nic(nic):
+def validate_nic(nic: str) -> None:
     """Check if the network interface exists before use."""
     if not os.path.exists(f"/sys/class/net/{nic}"):
         logging.error(f"Network interface {nic} not found! Check your NIC name.")
         sys.exit(1)
 
-def set_promiscuous_mode(nic):
+def set_promiscuous_mode(nic: str) -> None:
     """Enable promiscuous mode securely using subprocess."""
     try:
         subprocess.run(["sudo", "ip", "link", "set", nic, "promisc", "on"], check=True)
@@ -33,21 +33,31 @@ def set_promiscuous_mode(nic):
         logging.error(f"Failed to set promiscuous mode: {e}")
         sys.exit(1)
 
-def collect_fingerprint(target_host, dest, nic, max_packets=100):
+def get_default_dest_path() -> str:
+    """Ensure the os_record directory exists inside the Camouflage-Cloak project folder."""
+    base_dir = os.path.abspath(os.getcwd())
+    dest_path = os.path.join(base_dir, "os_record")
+    os.makedirs(dest_path, exist_ok=True)
+    return dest_path
+
+def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int = 100) -> None:
     """
     Captures fingerprinting packets for the target host only, including responses to malicious scans.
     """
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
 
+    # Ensure destination directory exists
+    if not dest:
+        dest = get_default_dest_path()
     os.makedirs(dest, exist_ok=True)
-    
+
     packet_files = {
-        "arp": os.path.abspath(os.path.join(dest, "arp_record.txt")),
-        "icmp": os.path.abspath(os.path.join(dest, "icmp_record.txt")),
-        "tcp": os.path.abspath(os.path.join(dest, "tcp_record.txt")),
-        "udp": os.path.abspath(os.path.join(dest, "udp_record.txt")),
+        "arp": os.path.join(dest, "arp_record.txt"),
+        "icmp": os.path.join(dest, "icmp_record.txt"),
+        "tcp": os.path.join(dest, "tcp_record.txt"),
+        "udp": os.path.join(dest, "udp_record.txt"),
     }
-    
+
     validate_nic(nic)
     set_promiscuous_mode(nic)
     
@@ -97,7 +107,7 @@ def collect_fingerprint(target_host, dest, nic, max_packets=100):
                     udp_header = struct.unpack("!HHHH", packet[34:42])
                     src_port, dst_port, length, checksum = udp_header
                     packet_data = f"UDP Packet: SrcPort={src_port}, DstPort={dst_port}, Raw={packet.hex()[:50]}\n"
-                
+
             if proto_type and packet_data:
                 with open(packet_files[proto_type], "a") as f:
                     f.write(packet_data)
@@ -115,7 +125,7 @@ def main():
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scanning technique for fingerprint collection")
     parser.add_argument("--dest", help="Directory to store OS fingerprints (Required for --scan ts)")
-    parser.add_argument("--os", help="OS to mimic (Required for --od")
+    parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
     args = parser.parse_args()
@@ -123,9 +133,6 @@ def main():
     validate_nic(args.nic)
 
     if args.scan == 'ts':
-        if not args.dest:
-            logging.error("Missing required argument: --dest for --scan ts")
-            return
         collect_fingerprint(args.host, args.dest, args.nic)
     elif args.scan == 'od':
         if not args.os or not args.te:
