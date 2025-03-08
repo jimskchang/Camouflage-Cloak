@@ -2,11 +2,10 @@ import socket
 import binascii
 import struct
 import array
-import time
 import src.settings as settings
 
 class TcpConnect:
-    def __init__(self, host):
+    def __init__(self, host: str):
         """
         Initializes a raw socket connection for TCP packet manipulation.
         Reads the MAC address from the NIC settings and binds the socket.
@@ -14,16 +13,16 @@ class TcpConnect:
         self.dip = host
         
         try:
-            with open(settings.NICAddr) as f:
+            with open(settings.NIC_ADDR_PATH) as f:
                 mac = f.readline().strip()
                 self.mac = binascii.unhexlify(mac.replace(':', ''))  # Fixed MAC parsing
         except FileNotFoundError:
-            raise ValueError(f"Error: NIC address file {settings.NICAddr} not found.")
+            raise ValueError(f"Error: NIC address file {settings.NIC_ADDR_PATH} not found.")
 
         self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
         self.sock.bind((settings.NIC, 0))
 
-    def build_tcp_header_from_reply(self, tcp_len, seq, ack_num, src_port, dest_port, src_IP, dest_IP, flags):
+    def build_tcp_header_from_reply(self, tcp_len: int, seq: int, ack_num: int, src_port: int, dest_port: int, src_IP: bytes, dest_IP: bytes, flags: int) -> bytes:
         """
         Build a TCP header with a correct checksum for reply packets.
         """
@@ -32,14 +31,14 @@ class TcpConnect:
         
         # Construct Pseudo Header for Checksum
         pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(reply_tcp_header))
-        checksum = TcpConnect.getTCPChecksum(pseudo_hdr + reply_tcp_header)
+        checksum = TcpConnect.get_tcp_checksum(pseudo_hdr + reply_tcp_header)
         
         # Insert the computed checksum
         reply_tcp_header = reply_tcp_header[:16] + struct.pack('!H', checksum) + reply_tcp_header[18:]
         return reply_tcp_header
 
     @staticmethod
-    def getTCPChecksum(packet: bytes) -> int:
+    def get_tcp_checksum(packet: bytes) -> int:
         """
         Compute TCP checksum to ensure data integrity in TCP packets.
         """
@@ -50,8 +49,7 @@ class TcpConnect:
         res += res >> 16
         return (~res) & 0xffff
 
-
-def os_build_tcp_header_from_reply(tcp_len, seq, ack_num, src_port, dest_port, src_IP, dest_IP, flags, window, reply_tcp_option):
+def os_build_tcp_header_from_reply(tcp_len: int, seq: int, ack_num: int, src_port: int, dest_port: int, src_IP: bytes, dest_IP: bytes, flags: int, window: int, reply_tcp_option: bytes) -> bytes:
     """
     Build an OS deception TCP header with options and correct checksum.
     """
@@ -61,13 +59,12 @@ def os_build_tcp_header_from_reply(tcp_len, seq, ack_num, src_port, dest_port, s
 
     # Construct Pseudo Header for Checksum
     pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(reply_tcp_header_option))
-    checksum = TcpConnect.getTCPChecksum(pseudo_hdr + reply_tcp_header_option)
+    checksum = TcpConnect.get_tcp_checksum(pseudo_hdr + reply_tcp_header_option)
 
     reply_tcp_header_option = reply_tcp_header_option[:16] + struct.pack('!H', checksum) + reply_tcp_header_option[18:]
     return reply_tcp_header_option
 
-
-def unpack_tcp_option(tcp_option):
+def unpack_tcp_option(tcp_option: bytes):
     """
     Unpack TCP options and handle unexpected cases gracefully.
     """
@@ -103,13 +100,11 @@ def unpack_tcp_option(tcp_option):
     
     return option_val, kind_seq
 
-
 def byte2mac(mac_byte: bytes) -> str:
     """
     Convert a MAC address from byte format to human-readable string format.
     """
     return "%02x:%02x:%02x:%02x:%02x:%02x" % struct.unpack("BBBBBB", mac_byte)
-
 
 def byte2ip(ip_byte: bytes) -> str:
     """
