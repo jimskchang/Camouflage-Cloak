@@ -1,5 +1,5 @@
 # This __init__.py file makes the 'src' directory a Python package.
-# It allows us to import modules from 'src' such as settings, tcp, and port_deceiver.
+# It allows us to import modules from 'src' such as settings, tcp, port_deceiver, and os_deceiver.
 
 # Import relevant modules to make them accessible at the package level
 from . import settings
@@ -9,7 +9,7 @@ from . import os_deceiver
 from . import Packet
 
 # Expose key classes and functions for easier access
-from .tcp import TcpConnect, getTCPChecksum, getIPChecksum
+from .tcp import TcpConnect, getTCPChecksum, getIPChecksum, byte2mac, byte2ip
 from .port_deceiver import PortDeceiver
 from .os_deceiver import OsDeceiver
 from .Packet import Packet
