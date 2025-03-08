@@ -34,10 +34,17 @@ def set_promiscuous_mode(nic: str) -> None:
         sys.exit(1)
 
 def get_default_dest_path() -> str:
-    """Ensure the os_record directory exists inside the Camouflage-Cloak project folder under /home/user."""
-    base_dir = os.path.expanduser("~/Camouflage-Cloak")
+    """Ensure the os_record directory exists inside /home/user/Camouflage-Cloak."""
+    base_dir = os.path.expanduser("~/Camouflage-Cloak")  # Explicit base directory
     dest_path = os.path.join(base_dir, "os_record")
-    os.makedirs(dest_path, exist_ok=True)
+
+    try:
+        os.makedirs(dest_path, exist_ok=True)  # Ensure directory exists
+        logging.info(f"✔ os_record directory is set at: {dest_path}")
+    except Exception as e:
+        logging.error(f"❌ Failed to create os_record directory: {e}")
+        sys.exit(1)  # Exit if directory cannot be created
+
     return dest_path
 
 def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int = 100) -> None:
