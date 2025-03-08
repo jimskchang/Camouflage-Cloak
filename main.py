@@ -33,10 +33,13 @@ def set_promiscuous_mode(nic: str) -> None:
         logging.error(f"Failed to set promiscuous mode: {e}")
         sys.exit(1)
 
-def ensure_os_record_exists() -> str:
-    """Manually ensure os_record/ directory exists inside /home/user/Camouflage-Cloak/"""
-    base_dir = os.path.expanduser("~/Camouflage-Cloak")  # Use explicit home directory
-    dest_path = os.path.join(base_dir, "os_record")
+def ensure_os_record_exists(dest: str = None) -> str:
+    """Ensure os_record directory exists inside /home/user/Camouflage-Cloak/ or use the provided path."""
+    if dest:
+        dest_path = os.path.abspath(dest)
+    else:
+        base_dir = os.path.expanduser("~/Camouflage-Cloak")  # Use explicit home directory
+        dest_path = os.path.join(base_dir, "os_record")
 
     if not os.path.exists(dest_path):
         logging.info(f"⚠ os_record directory not found! Creating manually at: {dest_path}")
@@ -49,9 +52,9 @@ def ensure_os_record_exists() -> str:
     
     return dest_path
 
-def get_os_record_path(os_name: str) -> str:
+def get_os_record_path(os_name: str, dest: str = None) -> str:
     """Ensure the specific OS fingerprint directory exists under os_record."""
-    base_path = ensure_os_record_exists()
+    base_path = ensure_os_record_exists(dest)
     os_path = os.path.join(base_path, os_name)
 
     if not os.path.exists(os_path):
@@ -69,7 +72,7 @@ def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int 
     """Captures fingerprinting packets for the target host only, including responses to malicious scans."""
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
 
-    dest = ensure_os_record_exists()
+    dest = ensure_os_record_exists(dest)
     os.makedirs(dest, exist_ok=True)
 
     packet_files = {
@@ -127,20 +130,22 @@ def main():
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scanning technique for fingerprint collection")
+    parser.add_argument("--dest", help="Directory to store OS fingerprints (Default: os_record/)")
     parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
     args = parser.parse_args()
 
     validate_nic(args.nic)
+    dest = ensure_os_record_exists(args.dest)
 
     if args.scan == 'ts':
-        collect_fingerprint(args.host, ensure_os_record_exists(), args.nic)
+        collect_fingerprint(args.host, dest, args.nic)
     elif args.scan == 'od':
         if not args.os or not args.te:
             logging.error("Missing required arguments: --os and --te are required for --od")
             return
-        os_record_path = get_os_record_path(args.os)
+        os_record_path = get_os_record_path(args.os, dest)
         deceiver = OsDeceiver(args.host, args.os, os_record_path)
         deceiver.os_deceive()
     elif args.scan == 'pd':
