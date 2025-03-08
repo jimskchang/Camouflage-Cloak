@@ -4,7 +4,6 @@ import os
 import time
 import socket
 import struct
-import threading
 import sys
 import subprocess
 import src.settings as settings
@@ -15,12 +14,11 @@ from src.os_deceiver import OsDeceiver
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
     datefmt='%y-%m-%d %H:%M',
-    level=logging.DEBUG  # Use DEBUG mode for live packet analysis
+    level=logging.DEBUG  # DEBUG mode for packet capture analysis
 )
 
-# 🔹 Ensure the OS fingerprint directory exists
 def ensure_directory_exists(directory):
-    """Ensure the directory exists, create if not."""
+    """Ensure the directory exists and is accessible."""
     try:
         os.makedirs(directory, exist_ok=True)
         logging.info(f"Ensured directory exists: {directory}")
@@ -28,12 +26,12 @@ def ensure_directory_exists(directory):
         logging.error(f"Failed to create directory {directory}: {e}")
         sys.exit(1)
 
-# 🔹 Ensure OS fingerprint files are not locked
 def ensure_file_permissions(file_path):
-    """Ensure that the file has read and write permissions for all users."""
+    """Ensure OS fingerprint files are readable & writable for OS deception."""
     try:
-        os.chmod(file_path, 0o644)  # Read & Write for owner, Read for others
-        logging.info(f"Set correct permissions for {file_path}")
+        if os.path.exists(file_path):
+            os.chmod(file_path, 0o644)  # Read & Write for owner, Read for others
+            logging.info(f"Set correct permissions for {file_path}")
     except Exception as e:
         logging.error(f"Failed to set permissions for {file_path}: {e}")
 
@@ -54,12 +52,12 @@ def set_promiscuous_mode(nic):
 
 def collect_fingerprint(target_host, dest, nic):
     """
-    Captures fingerprinting packets for the target host only, including responses to malicious scans.
-    Ensures that captured files are readable for later OS deception.
+    Captures OS fingerprinting packets for the target host.
+    Ensures fingerprint files are writable for OS deception.
     """
     logging.info(f"Starting OS Fingerprinting on {target_host}")
 
-    # Default fingerprint storage directory
+    # 🔹 **Fix: Set Correct Path to Home Directory**
     if not dest:
         dest = os.path.expanduser("~/Camouflage-Cloak/os_record")
     ensure_directory_exists(dest)
@@ -119,8 +117,7 @@ def collect_fingerprint(target_host, dest, nic):
                 with open(file_path, "a") as f:
                     f.write(packet_data)
 
-                # 🔹 **Ensure file is not locked**
-                ensure_file_permissions(file_path)
+                ensure_file_permissions(file_path)  # Ensure no locked files
 
                 packet_count += 1
 
@@ -149,8 +146,14 @@ def main():
         if not args.os or not args.te:
             logging.error("Missing required arguments: --os and --te are required for --od")
             return
-        os_record_path = args.dest if args.dest else os.path.expanduser(f"~/Camouflage-Cloak/os_record/{args.os}")
+        
+        # 🔹 **Force Correct OS Record Path**
+        os_record_path = os.path.expanduser(f"~/Camouflage-Cloak/os_record/{args.os}")
         ensure_directory_exists(os_record_path)
+
+        # 🔹 **Ensure OS fingerprint files are accessible**
+        for file in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
+            ensure_file_permissions(os.path.join(os_record_path, file))
 
         deceiver = OsDeceiver(args.host, args.os, os_record_path)
         deceiver.os_deceive()
