@@ -1,101 +1,151 @@
-import struct
-import socket
 import logging
+import socket
+import struct
 import src.settings as settings
 
+
 class Packet:
-    """ Handles unpacking and storing network packet details. """
-
-    def __init__(self, packet):
+    def __init__(self, packet=b'', proc=None, l2_field=None, l3_field=None, l4_field=None, data=''):
         self.packet = packet
-        self.l2_field = {}
-        self.l3_field = {}
-        self.l4_field = {}
+        self.l3 = proc if proc in settings.L3_PROC else 'ip'
+        self.l4 = proc if proc in settings.L4_PROC else ''
+        self.l2_header = b''
+        self.l3_header = b''
+        self.l4_header = b''
+        self.l2_field = l2_field or {}
+        self.l3_field = l3_field or {}
+        self.l4_field = l4_field or {}
+        self.data = data
 
-    def unpack(self):
-        """ Unpack the Ethernet frame to determine the protocol. """
-        try:
-            eth_header = self.packet[:settings.ETH_HEADER_LEN]
-            eth = struct.unpack("!6s6sH", eth_header)
-            eth_protocol = socket.ntohs(eth[2])
+    def unpack(self) -> None:
+        self.unpack_l2_header()
+        self.unpack_l3_header(self.l3)
+        if self.l4:
+            self.unpack_l4_header(self.l4)
 
-            self.l2_field["sMAC"] = eth[1]  # Source MAC
-            self.l2_field["dMAC"] = eth[0]  # Destination MAC
-            self.l2_field["protocol"] = eth_protocol
+    def unpack_l2_header(self) -> None:
+        self.l2_header = self.packet[:settings.ETH_HEADER_LEN]
+        eth = struct.unpack('!6s6sH', self.l2_header)
+        eth_dMAC, eth_sMAC, eth_protocol = eth
 
-            if eth_protocol == 0x0800:  # IPv4
-                self.unpack_ip_header()
-            elif eth_protocol == 0x0806:  # ARP
-                self.unpack_arp_header()
-        except Exception as e:
-            logging.error(f"Error unpacking Ethernet frame: {e}")
+        self.l3 = 'ip' if eth_protocol == 0x0800 else 'arp' if eth_protocol == 0x0806 else 'others'
 
-    def unpack_ip_header(self):
-        """ Unpacks the IPv4 header. """
-        try:
-            ip_header = self.packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
-            unpacked = struct.unpack("!BBHHHBBH4s4s", ip_header)
+        self.l2_field = {
+            'dMAC': eth_dMAC,
+            'sMAC': eth_sMAC,
+            'protocol': eth_protocol,
+        }
 
-            self.l3_field["version"] = unpacked[0] >> 4
-            self.l3_field["src_IP"] = socket.inet_ntoa(unpacked[8])  # Convert bytes to string
-            self.l3_field["dest_IP"] = socket.inet_ntoa(unpacked[9])  # Convert bytes to string
+    def unpack_l3_header(self, l3) -> None:
+        if l3 == 'ip':
+            self.unpack_ip_header()
+        elif l3 == 'arp':
+            self.unpack_arp_header()
 
-            # Debugging logs
-            logging.info(f"Raw src_IP: {unpacked[8]} | Converted: {self.l3_field['src_IP']}")
-            logging.info(f"Raw dest_IP: {unpacked[9]} | Converted: {self.l3_field['dest_IP']}")
-            
-            self.l3_field["protocol"] = unpacked[6]
+    def unpack_l4_header(self, l4) -> None:
+        if l4 == 'tcp':
+            self.unpack_tcp_header()
+        elif l4 == 'udp':
+            self.unpack_udp_header()
+        elif l4 == 'icmp':
+            self.unpack_icmp_header()
 
-            if self.l3_field["protocol"] == 1:  # ICMP
-                self.unpack_icmp_header()
-            elif self.l3_field["protocol"] == 6:  # TCP
-                self.unpack_tcp_header()
-        except Exception as e:
-            logging.error(f"Error unpacking IP header: {e}")
+    def unpack_arp_header(self) -> None:
+        self.l3_header = self.packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
+        hw_type, proto_type, hw_size, proto_size, opcode, sender_mac, sender_ip, recv_mac, recv_ip = struct.unpack(
+            '!HHBBH6s4s6s4s', self.l3_header)
 
-    def unpack_tcp_header(self):
-        """ Unpacks the TCP header. """
-        try:
-            tcp_header = self.packet[
-                settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN
-            ]
-            unpacked = struct.unpack("!HHLLBBHHH", tcp_header)
+        self.l3_field = {
+            'hw_type': hw_type,
+            'proto_type': proto_type,
+            'hw_size': hw_size,
+            'proto_size': proto_size,
+            'opcode': opcode,
+            'sender_mac': sender_mac,
+            'sender_ip': sender_ip,
+            'recv_mac': recv_mac,
+            'recv_ip': recv_ip
+        }
 
-            self.l4_field["src_port"] = unpacked[0]
-            self.l4_field["dest_port"] = unpacked[1]
-            self.l4_field["seq"] = unpacked[2]
-            self.l4_field["ack"] = unpacked[3]
-            self.l4_field["flags"] = unpacked[5]
-        except Exception as e:
-            logging.error(f"Error unpacking TCP header: {e}")
+    def unpack_ip_header(self) -> None:
+        self.l3_header = self.packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+        fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header)
+        IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID, FRAGMENT_STATUS, TIME_TO_LIVE, PROTOCOL, check_sum_of_hdr, src_IP, dest_IP = fields
 
-    def unpack_icmp_header(self):
-        """ Unpacks the ICMP header. """
-        try:
-            icmp_header = self.packet[
-                settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN
-            ]
-            unpacked = struct.unpack("!BBH", icmp_header)
+        self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(PROTOCOL, 'others')
 
-            self.l4_field["icmp_type"] = unpacked[0]
-            self.l4_field["icmp_code"] = unpacked[1]
-        except Exception as e:
-            logging.error(f"Error unpacking ICMP header: {e}")
+        self.l3_field = {
+            'IHL_VERSION': IHL_VERSION,
+            'TYPE_OF_SERVICE': TYPE_OF_SERVICE,
+            'total_len': total_len,
+            'pktID': pktID,
+            'FRAGMENT_STATUS': FRAGMENT_STATUS,
+            'TIME_TO_LIVE': TIME_TO_LIVE,
+            'PROTOCOL': PROTOCOL,
+            'check_sum_of_hdr': check_sum_of_hdr,
+            'src_IP': src_IP,
+            'dest_IP': dest_IP
+        }
 
-    def unpack_arp_header(self):
-        """ Unpacks the ARP header. """
-        try:
-            arp_header = self.packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
-            unpacked = struct.unpack("!HHBBH6s4s6s4s", arp_header)
+    def unpack_tcp_header(self) -> None:
+        tcp_header_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
+        self.l4_header = self.packet[tcp_header_start:tcp_header_start + settings.TCP_HEADER_LEN]
 
-            self.l3_field["hw_type"] = unpacked[0]
-            self.l3_field["proto_type"] = unpacked[1]
-            self.l3_field["opcode"] = unpacked[4]
-            self.l3_field["sender_mac"] = unpacked[5]
-            self.l3_field["sender_ip"] = unpacked[6]
-            self.l3_field["target_mac"] = unpacked[7]
-            self.l3_field["target_ip"] = unpacked[8]
-        except Exception as e:
-            logging.error(f"Error unpacking ARP header: {e}")
+        tcp_fields = struct.unpack('!HHLLBBHHH', self.l4_header)
+        src_port, dest_port, seq, ack_num, offset_reserved, flags, window, checksum, urgent_ptr = tcp_fields
+
+        tcp_len = (offset_reserved >> 4) * 4  # Extract TCP header length
+
+        self.l4_field = {
+            'src_port': src_port,
+            'dest_port': dest_port,
+            'seq': seq,
+            'ack_num': ack_num,
+            'offset': offset_reserved,
+            'flags': flags,
+            'window': window,
+            'checksum': checksum,
+            'urgent_ptr': urgent_ptr,
+            'tcp_len': tcp_len
+        }
+
+    def unpack_icmp_header(self) -> None:
+        icmp_header_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
+        self.l4_header = self.packet[icmp_header_start:icmp_header_start + settings.ICMP_HEADER_LEN]
+        icmp_type, code, checksum, ID, seq = struct.unpack('!BBHHH', self.l4_header)
+
+        self.l4_field = {
+            'icmp_type': icmp_type,
+            'code': code,
+            'checksum': checksum,
+            'ID': ID,
+            'seq': seq
+        }
+
+    @staticmethod
+    def getTCPChecksum(packet):
+        import array
+        if len(packet) % 2 != 0:
+            packet += b'\0'
+
+        res = sum(array.array("H", packet))
+        res = (res >> 16) + (res & 0xffff)
+        res += res >> 16
+
+        return (~res) & 0xffff
+
+    @staticmethod
+    def getUDPChecksum(data):
+        checksum = 0
+        data_len = len(data)
+        if data_len % 2:
+            data_len += 1
+            data += struct.pack('!B', 0)
+
+        for i in range(0, data_len, 2):
+            w = (data[i] << 8) + (data[i + 1])
+            checksum += w
+
+        checksum = (checksum >> 16) + (checksum & 0xFFFF)
+        checksum = ~checksum & 0xFFFF
+        return checksum
