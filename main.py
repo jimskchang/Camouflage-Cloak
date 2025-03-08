@@ -71,6 +71,8 @@ def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int 
 
     if not dest:
         dest = get_default_dest_path()
+    else:
+        dest = os.path.join(get_default_dest_path(), os.path.basename(dest))
     os.makedirs(dest, exist_ok=True)
 
     packet_files = {
@@ -111,18 +113,7 @@ def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int 
                 proto_type = "arp"
                 packet_data = f"ARP Packet: Raw={packet.hex()[:50]}\n"
                 logging.info("Captured ARP Packet (Possible Malicious Scan)")
-            elif eth_protocol == 0x0800:
-                ip_proto = packet[23]
-                if ip_proto == 1:
-                    proto_type = "icmp"
-                    icmp_header = packet[34:42]
-                    icmp_type, icmp_code, _ = struct.unpack("!BBH", icmp_header[:4])
-                    packet_data = f"ICMP Packet: Type={icmp_type}, Code={icmp_code}, Raw={packet.hex()[:50]}\n"
-                elif ip_proto == 6:
-                    proto_type = "tcp"
-                elif ip_proto == 17:
-                    proto_type = "udp"
-                
+
             if proto_type and packet_data:
                 with open(packet_files[proto_type], "a") as f:
                     f.write(packet_data)
@@ -146,7 +137,7 @@ def main():
     args = parser.parse_args()
 
     validate_nic(args.nic)
-    dest = os.path.abspath(args.dest) if args.dest else get_default_dest_path()
+    dest = get_default_dest_path() if not args.dest else os.path.join(get_default_dest_path(), os.path.basename(args.dest))
 
     if args.scan == 'ts':
         collect_fingerprint(args.host, dest, args.nic)
