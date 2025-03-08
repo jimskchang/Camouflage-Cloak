@@ -121,25 +121,31 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <ts>] [
 
 **Build Template Synthesis**
 
-***Step 1:*** cd to the Camouflage-Cloak folder and execute the following instruction
+***Step 1:*** cd to the Camouflage-Cloak folder and create the os_record folder
 ```bash
-sudo python3 main.py --host <protected server IP> --nic <network interface> --scan ts --dest <host OS template you want to store e.g. "/os_record"> 
+sudo mkdir -p os_record
 ```
 
-***Step 2:*** run Nmap OS detection on attacker host
+***Step 2:*** cd to the Camouflage-Cloak folder and execute the following instruction
+```bash
+sudo python3 main.py --host <protected server IP> --nic <network interface> --scan ts --dest /home/user/Camouflage-Cloak/os_record
+```
+
+***Step 3:*** run Nmap OS detection on attacker host
 ```bash
 sudo nmap -O <Target Host IP>
 sudo nmap -A -p 1-65535 <Target Host IP>
 sudo nmap --osscan-guess <Target Host IP>
 ```
-The time out set in the --scan ts (to build Template Synthesis) is 120 second.  Therefore, you should perfom the Nmap scan immediately after you execute the --scan ts command. After two minutes it will return to the command mode for you to execute deception.
+The time out set in the --scan ts (to build Template Synthesis) is 300 second.  Therefore, you should perfom the Nmap scan immediately after you execute the --scan ts command. After two minutes it will return to the command mode for you to execute deception.
 
-***Step 3:*** Store the Template
-Move the OS fingerprint packets from root dirextory to /Camouflage_Cloak/os_record/<OS Type> .
-You should maunally create the <OS Type> uder the /Camouflage_Cloak/os_record/ folder first.
+***Step 4:*** cd to the Camouflage-Cloak/os_record folder Create the OS folder
+```bash
+sudo mkdir -p win10
+```
 
 **OS deceiver test**
-***Step 1:*** cd to the Camouflage-Cloak folder and execute the following instruction
+***Step 1:*** cd to the Camouflage-Cloak/os_record folder and execute the following instruction
 ```bash
 sudo python3 main.py --host <Target Host IP> --nic <Target Host NIC> --scan od --os <OS template e.g. win7/win10/centos> --te <deceive time out time e.g. 6 = 6 minutes>
 ```
