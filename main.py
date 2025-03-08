@@ -33,30 +33,32 @@ def set_promiscuous_mode(nic: str) -> None:
         logging.error(f"Failed to set promiscuous mode: {e}")
         sys.exit(1)
 
-def get_default_dest_path() -> str:
-    """Ensure os_record/ is always created inside /home/user/Camouflage-Cloak/"""
+def ensure_os_record_exists() -> str:
+    """Manually ensure os_record/ directory exists inside /home/user/Camouflage-Cloak/"""
     base_dir = os.path.expanduser("~/Camouflage-Cloak")  # Use explicit home directory
     dest_path = os.path.join(base_dir, "os_record")
 
     if not os.path.exists(dest_path):
+        logging.info(f"⚠ os_record directory not found! Creating manually at: {dest_path}")
         try:
-            os.makedirs(dest_path, exist_ok=True)  # Ensure directory exists
-            logging.info(f"✔ os_record directory created at: {dest_path}")
+            os.makedirs(dest_path, exist_ok=True)
+            logging.info(f"✔ os_record directory created successfully.")
         except Exception as e:
             logging.error(f"❌ Failed to create os_record directory: {e}")
             sys.exit(1)
-
+    
     return dest_path
 
 def get_os_record_path(os_name: str) -> str:
     """Ensure the specific OS fingerprint directory exists under os_record."""
-    base_path = get_default_dest_path()
+    base_path = ensure_os_record_exists()
     os_path = os.path.join(base_path, os_name)
 
     if not os.path.exists(os_path):
+        logging.info(f"⚠ OS record directory for {os_name} not found! Creating manually at: {os_path}")
         try:
             os.makedirs(os_path, exist_ok=True)
-            logging.info(f"✔ OS record directory created at: {os_path}")
+            logging.info(f"✔ OS record directory created successfully.")
         except Exception as e:
             logging.error(f"❌ Failed to create OS record directory: {e}")
             sys.exit(1)
@@ -67,10 +69,7 @@ def collect_fingerprint(target_host: str, dest: str, nic: str, max_packets: int 
     """Captures fingerprinting packets for the target host only, including responses to malicious scans."""
     logging.info(f"Starting OS Fingerprinting on {target_host} (Max: {max_packets} packets)")
 
-    if not dest:
-        dest = get_default_dest_path()
-    else:
-        dest = os.path.join(get_default_dest_path(), os.path.basename(dest))
+    dest = ensure_os_record_exists()
     os.makedirs(dest, exist_ok=True)
 
     packet_files = {
@@ -128,17 +127,15 @@ def main():
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scanning technique for fingerprint collection")
-    parser.add_argument("--dest", help="Directory to store OS fingerprints (Default: os_record/)")
     parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
     args = parser.parse_args()
 
     validate_nic(args.nic)
-    dest = get_default_dest_path() if not args.dest else os.path.join(get_default_dest_path(), os.path.basename(args.dest))
 
     if args.scan == 'ts':
-        collect_fingerprint(args.host, dest, args.nic)
+        collect_fingerprint(args.host, ensure_os_record_exists(), args.nic)
     elif args.scan == 'od':
         if not args.os or not args.te:
             logging.error("Missing required arguments: --os and --te are required for --od")
