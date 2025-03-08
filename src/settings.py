@@ -1,46 +1,38 @@
+# NOTE: Global Constants
+import socket
 import os
-import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
-
-**Global Constants**
 ETH_HEADER_LEN = 14
 IP_HEADER_LEN = 20
 ARP_HEADER_LEN = 28
 TCP_HEADER_LEN = 20
 UDP_HEADER_LEN = 8
 ICMP_HEADER_LEN = 8
-L3_PROC = ["ip", "arp"]
-L4_PROC = ["tcp", "udp", "icmp"]
+L3_PROC = ['ip', 'arp']
+L4_PROC = ['tcp', 'udp', 'icmp']
 
-**Camouflage-Cloak Settings**
-HOST = "192.168.23.206"  # Replace with the actual server IP
-NIC = "ens192"  # Replace with the correct network interface
+# NOTE: Settings
+NIC = 'ens192'
+NIC_ADDR_PATH = f'/sys/class/net/{NIC}/address'
+RECORD_PATH = 'pkt_record.txt'
 
-**Validate NIC existence before execute it**
-NICAddr = f"/sys/class/net/{NIC}/address" if os.path.exists(f"/sys/class/net/{NIC}/address") else None
+# Get Host IP Dynamically
+HOST = socket.gethostbyname(socket.gethostname())
 
-if NICAddr is None:
-    logging.error(f"Network interface '{NIC}' does not exist. Check your settings!")
-else:
-    logging.info(f"Using network interface: {NIC}")
+# Function to Get MAC Address
+def get_mac_address(nic):
+    try:
+        with open(f"/sys/class/net/{nic}/address", "r") as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return None  # Handle error if NIC does not exist
 
-**Get MAC Address Dynamically**
-try:
-    import netifaces
+# Retrieve MAC Address
+MAC = get_mac_address(NIC)
 
-    if NICAddr:
-        mac = netifaces.ifaddresses(NIC)[netifaces.AF_LINK][0]["addr"]
-        logging.info(f"MAC Address for {NIC}: {mac}")
-    else:
-        raise ValueError("NIC is not valid")
+# Validate NIC Existence
+def check_nic_exists(nic):
+    return os.path.exists(f"/sys/class/net/{nic}")
 
-except (ImportError, KeyError, ValueError) as e:
-    logging.error(f"Failed to retrieve MAC address: {e}")
-    mac = b"\x00\x50\x56\x8e\x35\x6f"  # Fallback MAC address
-
-**Packet Recording File**
-record_path = "pkt_record.txt"
-
-logging.info("Settings loaded successfully.")
+if not check_nic_exists(NIC):
+    raise ValueError(f"Error: Network interface {NIC} not found!")
