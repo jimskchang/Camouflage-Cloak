@@ -35,7 +35,7 @@ def set_promiscuous_mode(nic: str) -> None:
 
 def get_default_dest_path() -> str:
     """Ensure the os_record directory exists inside the Camouflage-Cloak project folder."""
-    base_dir = os.path.abspath(os.getcwd())
+    base_dir = os.path.abspath(os.path.dirname(__file__))
     dest_path = os.path.join(base_dir, "os_record")
     os.makedirs(dest_path, exist_ok=True)
     return dest_path
@@ -124,7 +124,7 @@ def main():
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scanning technique for fingerprint collection")
-    parser.add_argument("--dest", help="Directory to store OS fingerprints (Required for --scan ts)")
+    parser.add_argument("--dest", help="Directory to store OS fingerprints (Default: os_record/)")
     parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
@@ -132,8 +132,10 @@ def main():
 
     validate_nic(args.nic)
 
+    dest = args.dest if args.dest else get_default_dest_path()
+
     if args.scan == 'ts':
-        collect_fingerprint(args.host, args.dest, args.nic)
+        collect_fingerprint(args.host, dest, args.nic)
     elif args.scan == 'od':
         if not args.os or not args.te:
             logging.error("Missing required arguments: --os and --te are required for --od")
@@ -151,5 +153,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
-
