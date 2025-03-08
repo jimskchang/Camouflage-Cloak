@@ -34,8 +34,8 @@ def set_promiscuous_mode(nic: str) -> None:
         sys.exit(1)
 
 def get_default_dest_path() -> str:
-    """Ensure the os_record directory exists inside the Camouflage-Cloak project folder."""
-    base_dir = os.path.abspath(os.path.dirname(__file__))
+    """Ensure the os_record directory exists inside the Camouflage-Cloak project folder under /home/user."""
+    base_dir = os.path.expanduser("~/Camouflage-Cloak")
     dest_path = os.path.join(base_dir, "os_record")
     os.makedirs(dest_path, exist_ok=True)
     return dest_path
