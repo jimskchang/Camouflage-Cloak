@@ -4,7 +4,7 @@ import logging
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s]: %(message)s")
 
-# 🛠️ **Global Constants**
+**Global Constants**
 ETH_HEADER_LEN = 14
 IP_HEADER_LEN = 20
 ARP_HEADER_LEN = 28
@@ -14,11 +14,11 @@ ICMP_HEADER_LEN = 8
 L3_PROC = ["ip", "arp"]
 L4_PROC = ["tcp", "udp", "icmp"]
 
-# 🛠️ **Camouflage-Cloak Server Settings**
+**Camouflage-Cloak Server Settings**
 HOST = "192.168.23.206"  # Replace with the actual server IP
 NIC = "ens192"  # Replace with the correct network interface
 
-# ✅ **Validate NIC existence before using it**
+**Validate NIC existence before using it**
 NICAddr = f"/sys/class/net/{NIC}/address" if os.path.exists(f"/sys/class/net/{NIC}/address") else None
 
 if NICAddr is None:
@@ -26,7 +26,7 @@ if NICAddr is None:
 else:
     logging.info(f"Using network interface: {NIC}")
 
-# ✅ **Get MAC Address Dynamically**
+**Get MAC Address Dynamically**
 try:
     import netifaces
 
@@ -40,7 +40,7 @@ except (ImportError, KeyError, ValueError) as e:
     logging.error(f"Failed to retrieve MAC address: {e}")
     mac = b"\x00\x50\x56\x8e\x35\x6f"  # Fallback MAC address
 
-# ✅ **Packet Recording File**
+**Packet Recording File**
 record_path = "pkt_record.txt"
 
 logging.info("Settings loaded successfully.")
