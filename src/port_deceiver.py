@@ -3,7 +3,7 @@ import socket
 import struct
 import random
 import src.settings as settings
-from src.tcp import TcpConnect, getTCPChecksum
+from src.tcp import TcpConnect, getTCPChecksum, getIPChecksum
 from src.Packet import Packet  # Ensure Packet handles IP checksum calculation
 
 # Constants for readability
@@ -137,4 +137,3 @@ class PortDeceiver:
             except Exception as e:
                 logging.error(f"Error processing packet: {e}")
                 continue
-
