@@ -45,14 +45,14 @@ def ensure_os_record_exists(dest: str = None) -> str:
     return dest_path
 
 def fix_file_permissions(directory: str) -> None:
-    """Ensure that collected OS fingerprint files have the correct read permissions."""
+    """Ensure that OS fingerprint files are always **readable & writable**."""
     try:
         if os.path.exists(directory):
             for root, _, files in os.walk(directory):
                 for file in files:
                     file_path = os.path.join(root, file)
                     os.chmod(file_path, 0o644)  # Read & Write for owner, Read-only for others
-                    logging.info(f"✔ Fixed permissions for {file_path}")
+                    logging.info(f"✔ Fixed permissions for {file_path} (Readable for --scan od)")
     except Exception as e:
         logging.error(f"❌ Failed to set file permissions: {e}")
 
@@ -84,7 +84,7 @@ def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
     logging.info(f"📂 Storing fingerprint data in: {dest}")
 
     packet_count = 0
-    timeout = time.time() + 180  # **3 minutes**
+    timeout = time.time() + 180  # **✅ 3-minute timeout restored!**
 
     while time.time() < timeout:
         try:
