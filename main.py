@@ -18,6 +18,24 @@ logging.basicConfig(
     level=logging.DEBUG  # Use DEBUG mode for live packet analysis
 )
 
+# 🔹 Ensure the OS fingerprint directory exists
+def ensure_directory_exists(directory):
+    """Ensure the directory exists, create if not."""
+    try:
+        os.makedirs(directory, exist_ok=True)
+        logging.info(f"Ensured directory exists: {directory}")
+    except Exception as e:
+        logging.error(f"Failed to create directory {directory}: {e}")
+        sys.exit(1)
+
+# 🔹 Ensure OS fingerprint files are not locked
+def ensure_file_permissions(file_path):
+    """Ensure that the file has read and write permissions for all users."""
+    try:
+        os.chmod(file_path, 0o644)  # Read & Write for owner, Read for others
+        logging.info(f"Set correct permissions for {file_path}")
+    except Exception as e:
+        logging.error(f"Failed to set permissions for {file_path}: {e}")
 
 def validate_nic(nic):
     """Check if the network interface exists before use."""
@@ -25,34 +43,25 @@ def validate_nic(nic):
         logging.error(f"Network interface {nic} not found! Check your NIC name.")
         sys.exit(1)
 
-
 def set_promiscuous_mode(nic):
     """Enable promiscuous mode securely using subprocess."""
     try:
         subprocess.run(["sudo", "ip", "link", "set", nic, "promisc", "on"], check=True)
-        logging.info("Promiscuous mode enabled successfully.")
+        logging.info(f"Promiscuous mode enabled for {nic}")
     except subprocess.CalledProcessError as e:
         logging.error(f"Failed to set promiscuous mode: {e}")
         sys.exit(1)
 
-
-def ensure_directory_exists(directory):
-    """Ensure that the directory exists. If not, create it."""
-    try:
-        os.makedirs(directory, exist_ok=True)
-        logging.info(f"Directory verified: {directory}")
-    except Exception as e:
-        logging.error(f"Failed to create directory {directory}: {e}")
-        sys.exit(1)
-
-
 def collect_fingerprint(target_host, dest, nic):
     """
     Captures fingerprinting packets for the target host only, including responses to malicious scans.
+    Ensures that captured files are readable for later OS deception.
     """
     logging.info(f"Starting OS Fingerprinting on {target_host}")
 
-    # Ensure OS fingerprint directory exists
+    # Default fingerprint storage directory
+    if not dest:
+        dest = os.path.expanduser("~/Camouflage-Cloak/os_record")
     ensure_directory_exists(dest)
 
     packet_files = {
@@ -93,31 +102,25 @@ def collect_fingerprint(target_host, dest, nic):
             if eth_protocol == 0x0806:
                 proto_type = "arp"
                 packet_data = f"ARP Packet: Raw={packet.hex()[:50]}\n"
-                logging.info("Captured ARP Packet (Possible Malicious Scan)")
             elif eth_protocol == 0x0800:
                 ip_proto = packet[23]
                 if ip_proto == 1:
                     proto_type = "icmp"
-                    icmp_header = packet[34:42]
-                    icmp_type, icmp_code, icmp_checksum = struct.unpack("!BBH", icmp_header[:4])
-                    packet_data = f"ICMP Packet: Type={icmp_type}, Code={icmp_code}, Raw={packet.hex()[:50]}\n"
+                    packet_data = f"ICMP Packet: Raw={packet.hex()[:50]}\n"
                 elif ip_proto == 6:
                     proto_type = "tcp"
-                    tcp_header = struct.unpack("!HHLLBBHHH", packet[34:54])
-                    src_port, dst_port, seq, ack, offset_reserved_flags, flags, window, checksum, urg_ptr = tcp_header
-                    packet_data = f"TCP Packet: SrcPort={src_port}, DstPort={dst_port}, Flags={flags}, Raw={packet.hex()[:50]}\n"
+                    packet_data = f"TCP Packet: Raw={packet.hex()[:50]}\n"
                 elif ip_proto == 17:
                     proto_type = "udp"
-                    udp_header = struct.unpack("!HHHH", packet[34:42])
-                    src_port, dst_port, length, checksum = udp_header
-                    packet_data = f"UDP Packet: SrcPort={src_port}, DstPort={dst_port}, Raw={packet.hex()[:50]}\n"
-                
+                    packet_data = f"UDP Packet: Raw={packet.hex()[:50]}\n"
+
             if proto_type and packet_data:
-                with open(packet_files[proto_type], "a") as f:
+                file_path = packet_files[proto_type]
+                with open(file_path, "a") as f:
                     f.write(packet_data)
 
-                # Ensure the file is not locked
-                os.chmod(packet_files[proto_type], 0o644)
+                # 🔹 **Ensure file is not locked**
+                ensure_file_permissions(file_path)
 
                 packet_count += 1
 
@@ -127,13 +130,12 @@ def collect_fingerprint(target_host, dest, nic):
 
     logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
-
 def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception Against Malicious Scans")
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
-    parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scanning technique for fingerprint collection")
-    parser.add_argument("--dest", help="Directory to store OS fingerprints (Required for --scan ts)")
+    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scanning technique for fingerprint collection")
+    parser.add_argument("--dest", help="Directory to store OS fingerprints (Default: ~/Camouflage-Cloak/os_record)")
     parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
@@ -141,32 +143,25 @@ def main():
 
     validate_nic(args.nic)
 
-    # Default os_record directory inside Camouflage-Cloak
-    project_dir = os.path.expanduser("~/Camouflage-Cloak")
-    default_os_record = os.path.join(project_dir, "os_record")
-
-    if args.dest is None:
-        args.dest = default_os_record  # Use default os_record directory if --dest is not provided
-
-    ensure_directory_exists(args.dest)  # Ensure os_record directory exists
-
     if args.scan == 'ts':
         collect_fingerprint(args.host, args.dest, args.nic)
     elif args.scan == 'od':
         if not args.os or not args.te:
             logging.error("Missing required arguments: --os and --te are required for --od")
             return
-        os_deceiver = OsDeceiver(args.host, args.os, args.dest)
-        os_deceiver.os_deceive()
+        os_record_path = args.dest if args.dest else os.path.expanduser(f"~/Camouflage-Cloak/os_record/{args.os}")
+        ensure_directory_exists(os_record_path)
+
+        deceiver = OsDeceiver(args.host, args.os, os_record_path)
+        deceiver.os_deceive()
     elif args.scan == 'pd':
         if not args.status or not args.te:
             logging.error("Missing required arguments: --status and --te are required for --pd")
             return
-        port_deceiver = PortDeceiver(args.host)
-        port_deceiver.deceive_ps_hs(args.status)
+        deceiver = PortDeceiver(args.host)
+        deceiver.deceive_ps_hs(args.status)
     else:
         logging.error("Invalid command. Specify --scan ts, --scan od, or --scan pd.")
-
 
 if __name__ == '__main__':
     main()
