@@ -46,6 +46,7 @@ CamouflageCloak/
 │   ├── tcp.py               # TCP helper functions
 │   ├── os_deceiver.py       # OS deception logic (modularized)
 │   ├── port_deceiver.py     # Port deception logic (modularized)
+│   ├── __init__.py          # Makes the 'src' directory a Python package
 │── README.md                # Documentation
 │── main.py                  # Main execution script
 ```
