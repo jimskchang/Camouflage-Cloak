@@ -31,8 +31,7 @@ By integrating **OS deception** and **port deception**, **Camouflage Cloak** bui
 - **Deceive OS Fingerprinting** - Mimic responses of various OS types
 - **Port Deception** - Simulate open, closed, or filtered port states
 - **Network Packet Recording** - Capture and store TCP, ICMP, ARP, and UDP responses
-- **Customizable Configuration** - Easily configure IP, MAC, NIC, and OS settings
-- **Supports Template Synthesis (TS) Server** - Create and store OS fingerprint templates
+- **Customizable Configuration** - Easily configure IP and NIC settings
 
 ---
 
@@ -74,7 +73,6 @@ Edit **`settings.py`** to match your environment:
 
 ```python
 # Camouflage-Cloak Server Network Configuration
-**Camouflage-Cloak Server Settings**
 HOST = "192.168.23.206"  # Replace with the actual server IP
 NIC = "ens192"  # Replace with the correct network interface
 ```
@@ -83,7 +81,7 @@ NIC = "ens192"  # Replace with the correct network interface
 
 ---
 
-## Network Setup for Camouflage Cloak
+## Environment Setup
 
 ### Required Hosts (or VMs)
 1. **Attacker Foothold** – Runs **Nmap** for scanning.
@@ -93,13 +91,13 @@ NIC = "ens192"  # Replace with the correct network interface
 ### Configuration Steps
 - Ensure traffic between the **attacker** and **target** passes through the **Camouflage Cloak Server**.
 - Connect the **attacker** and **target** to the **two NICs** of the **Camouflage Cloak Server**.
-- **Bridge the NICs** to allow seamless traffic flow.
+- **Bridge the NICs** for seamless traffic flow.
 
-### Run the Main Script
-Eg:
-
+## Running Camouflage Cloak ##
+### Execute the Main Script
+e.g.:
 ```bash
-sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <deceiver>] [--ststus <status>]
+sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <ts>] [--dest </os_record>]
 ```
 
 ### Available Arguments
@@ -109,6 +107,7 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <deceiv
 | `--host`      | Target host IP to deceive or capture fingerprint |
 | `--nic`       | Target host Network interface to capture packets |
 | `--scan`      | Scanning technique for fingerprint collection |
+| `--ts`        | Building templeate synthese technique for OS fingerprint collection |
 | `--dest`      | Directory to store OS fingerprint files |
 | `--od`        | Perform OS deception using pre-recorded fingerprints |
 | `--pd`        | Perform Port deception using pre-recorded fingerprints |
