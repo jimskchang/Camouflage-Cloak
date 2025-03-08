@@ -1,8 +1,28 @@
-# Camouflage Cloak
+# Camouflage Cloak: OS & Port Deception Against Nmap Scans
 
-## Network Deception & OS Camouflage System
+**Camouflage Cloak** uses **OS deception** and **port deception** techniques to counteract malicious Nmap scans by providing false system information. By modifying **TCP/IP stack parameters**, it alters how the system responds to network probes, **disguising the OS** and **misleading port scans**.
 
-**Camouflage Cloak** is a network deception system designed to mislead adversaries by mimicking different OS fingerprinting responses and manipulating network traffic. This tool helps security researchers and defenders detect, analyze, and counter reconnaissance techniques used by attackers.
+## OS Deception Techniques
+To evade OS detection, **Camouflage Cloak**:
+
+1. **Modifies TCP window sizes** to mimic different OS behaviors.
+2. **Alters ICMP responses** to disrupt fingerprinting.
+3. **Blocks ICMP netmask requests** used in OS identification.
+4. **Modifies TCP RST behavior**, confusing scans since Windows and Linux handle RST packets differently.
+5. **Adjusts TTL (Time-To-Live) values** to imitate various OS defaults:
+   - **Linux**: `64`
+   - **Windows**: `128`
+   - **FreeBSD/Mac**: `255`
+
+## Port Deception Techniques
+To mislead port scans, **Camouflage Cloak**:
+
+1. **Modifies SYN-ACK behavior**, making closed ports appear open or vice versa.
+2. **Sends fake service banners**, misleading attackers about running services.
+3. **Alters UDP responses**, making all UDP ports appear open or closed.
+
+## Combining OS & Port Deception
+By integrating **OS deception** and **port deception**, **Camouflage Cloak** builds a **robust defense strategy** against reconnaissance tools like Nmap, effectively **misleading attackers** and **obscuring system details**.
 
 ---
 
@@ -37,14 +57,14 @@ CamouflageCloak/
 
 ### Prerequisites
 
-- **Python 3.6+**
+- **Python 3.11+**
 - **Linux-based OS** (Tested on Ubuntu, Kali Linux)
 - **Root/Sudo Privileges** (Required for raw socket manipulation)
 
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/CamouflageCloak.git
+git clone https://github.com/jimskchang/CamouflageCloak.git
 cd CamouflageCloak
 ```
 
