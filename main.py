@@ -20,7 +20,7 @@ logging.basicConfig(
 def validate_nic(nic: str) -> None:
     """Check if the network interface exists before use."""
     if not os.path.exists(f"/sys/class/net/{nic}"):
-        logging.error(f"Network interface {nic} not found! Check your NIC name.")
+        logging.error(f"❌ Network interface {nic} not found! Check your NIC name.")
         sys.exit(1)
 
 def ensure_os_record_exists(dest: str = None) -> str:
@@ -44,6 +44,18 @@ def ensure_os_record_exists(dest: str = None) -> str:
 
     return dest_path
 
+def fix_file_permissions(directory: str) -> None:
+    """Ensure that collected OS fingerprint files have the correct read permissions."""
+    try:
+        if os.path.exists(directory):
+            for root, _, files in os.walk(directory):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    os.chmod(file_path, 0o644)  # Read & Write for owner, Read-only for others
+                    logging.info(f"✔ Fixed permissions for {file_path}")
+    except Exception as e:
+        logging.error(f"❌ Failed to set file permissions: {e}")
+
 def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
     """Captures fingerprinting packets for the target host only."""
     logging.info(f"📡 Starting OS Fingerprinting on {target_host}")
@@ -63,16 +75,16 @@ def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
         sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
         sock.bind((nic, 0))
     except PermissionError:
-        logging.error("Root privileges required to open raw sockets. Run the script with sudo.")
+        logging.error("❌ Root privileges required to open raw sockets. Run the script with sudo.")
         sys.exit(1)
     except Exception as e:
-        logging.error(f"Error opening raw socket: {e}")
+        logging.error(f"❌ Error opening raw socket: {e}")
         sys.exit(1)
 
     logging.info(f"📂 Storing fingerprint data in: {dest}")
 
     packet_count = 0
-    timeout = time.time() + 300  # 5 minutes
+    timeout = time.time() + 180  # **3 minutes**
 
     while time.time() < timeout:
         try:
@@ -114,6 +126,9 @@ def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
             logging.error(f"Error while receiving packets: {e}")
             break
 
+    # Fix permissions after collection
+    fix_file_permissions(dest)
+
     logging.info(f"✅ OS Fingerprinting Completed. Captured {packet_count} packets.")
 
 def main():
@@ -135,10 +150,10 @@ def main():
 
     elif args.scan == 'od':
         if not args.os or not args.te:
-            logging.error("Missing required arguments: --os and --te are required for --scan od")
+            logging.error("❌ Missing required arguments: --os and --te are required for --scan od")
             sys.exit(1)
         if not args.dest:
-            logging.error("Missing required argument: --dest is required for --scan od to load OS fingerprints")
+            logging.error("❌ Missing required argument: --dest is required for --scan od to load OS fingerprints")
             sys.exit(1)
 
         # Ensure --dest exists before running OS deception
@@ -148,18 +163,21 @@ def main():
             logging.info(f"🔹 mkdir -p {args.dest}")
             sys.exit(1)
 
+        # **Fix file permissions before reading**
+        fix_file_permissions(args.dest)
+
         dest = os.path.abspath(args.dest)  # Use provided OS fingerprint directory
         deceiver = OsDeceiver(args.host, args.os, dest)
         deceiver.os_deceive()
 
     elif args.scan == 'pd':
         if not args.te:
-            logging.error("Missing required argument: --te is required for --scan pd")
+            logging.error("❌ Missing required argument: --te is required for --scan pd")
             sys.exit(1)
         deceiver = PortDeceiver(args.host)
         deceiver.deceive_ps_hs(args.te)
     else:
-        logging.error("Invalid command. Specify --scan ts, --scan od, or --scan pd.")
+        logging.error("❌ Invalid command. Specify --scan ts, --scan od, or --scan pd.")
 
 if __name__ == '__main__':
     main()
