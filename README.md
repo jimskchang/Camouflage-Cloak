@@ -106,34 +106,34 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <deceiv
 
 | Argument        | Description |
 |----------------|-------------|
-| `--scan ts`   | Run Template Synthesis (TS) scan to record OS fingerprints |
-| `--scan od`   | Perform OS deception using pre-recorded fingerprints |
-| `--scan rr`   | Record response packets |
-| `--scan pd`   | Perform port deception |
-| `--host IP`   | Specify the target IP |
-| `--output-dir PATH` | Directory to store OS record files |
+| `--host`      | Target host IP to deceive or capture fingerprint |
+| `--nic`       | Target host Network interface to capture packets |
+| `--scan`      | Scanning technique for fingerprint collection |
+| `--dest`      | Directory to store OS fingerprint files |
+| `--od`        | Perform OS deception using pre-recorded fingerprints |
+| `--pd`        | Perform Port deception using pre-recorded fingerprints |
+| `--os`        | choose OS to mimic |
+| `--te`        | Timeout duration in minutes (Required for --od and --pd) |
+
 
 #### Example Commands
 
 **Build Template Synthesis**
 
-***Step 1:***clone this repository to the Camouflage Cloak server
+***Step 1:***cd to the Camouflage-Cloak folder and execute the following instruction
 ```bash
-git clone https:"//github.com/jimskchang/Camouflage-Cloak.git
+sudo python3 main.py --host <protected server IP> --nic <network interface> --scan ts --dest <host OS template you want to store e.g. "/os_record"> 
 ```
 
-***Step 2:***cd to the Camouflage-Cloak folder and execute the following instruction
+***Step 2:***run Nmap OS detection on attacker host
 ```bash
-sudo python3 main.py --host <protected server IP> --scan ts --os <host OS template you want to synthesize e.g. "win10" or "centos"> 
-```
-
-***Step 3:***run Nmap OS detection on attacker 
-```bash
-sudo nmap -O <Protected Server IP>
+sudo nmap -O <Target Host IP>
+sudo nmap -A -p 1-65535 <Target Host IP>
+sudo nmap --osscan-guess <Target Host IP>
 ```
 The time out set in the --scan ts (to build Template Synthesis) is 120 second.  Therefore, you should perfom the Nmap scan immediately after you execute the --scan ts command. After two minutes it will return to the command mode for you to execute deception.
 
-***Step 4:*** Check the Template
+***Step 3:*** Store the Template
 ```bash
 Camouflage Cloak will intercept Nmap fingerprinting packets and generate the packetts template to /os_record/<"OS template name"> to deploy the template correctly.
 ```
