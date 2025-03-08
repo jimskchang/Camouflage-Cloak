@@ -7,3 +7,9 @@ from . import tcp
 from . import port_deceiver
 from . import os_deceiver
 from . import Packet
+
+# Expose key classes and functions for easier access
+from .tcp import TcpConnect, getTCPChecksum, getIPChecksum
+from .port_deceiver import PortDeceiver
+from .os_deceiver import OsDeceiver
+from .Packet import Packet
