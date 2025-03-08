@@ -85,6 +85,20 @@ class Packet:
         icmp_type, code, checksum, ID, seq = struct.unpack('!BBHHH', self.l4_header)
         self.l4_field = {'icmp_type': icmp_type, 'code': code, 'checksum': checksum, 'ID': ID, 'seq': seq}
 
+    def unpack_udp_header(self):
+    """Unpacks UDP headers and stores extracted fields."""
+    udp_header_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
+    self.l4_header = self.packet[udp_header_start:udp_header_start + settings.UDP_HEADER_LEN]
+
+    src_port, dest_port, length, checksum = struct.unpack('!HHHH', self.l4_header)
+
+    self.l4_field = {
+        'src_port': src_port,
+        'dest_port': dest_port,
+        'length': length,
+        'checksum': checksum
+    }
+
     @staticmethod
     def getTCPChecksum(packet: bytes) -> int:
         """Calculates TCP checksum for validation and response handling."""
