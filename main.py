@@ -44,7 +44,7 @@ def ensure_os_record_exists(dest: str = None) -> str:
 
 def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
     """Captures fingerprinting packets for the target host only."""
-    logging.info(f"Starting OS Fingerprinting on {target_host}")
+    logging.info(f"📡 Starting OS Fingerprinting on {target_host}")
 
     dest = ensure_os_record_exists(dest)
 
@@ -67,8 +67,11 @@ def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
         logging.error(f"Error opening raw socket: {e}")
         sys.exit(1)
 
-    logging.info(f"Storing fingerprint data in: {dest}")
+    logging.info(f"📂 Storing fingerprint data in: {dest}")
+
+    packet_count = 0
     timeout = time.time() + 300  # 5 minutes
+
     while time.time() < timeout:
         try:
             packet, _ = sock.recvfrom(65565)
@@ -76,30 +79,43 @@ def collect_fingerprint(target_host: str, dest: str, nic: str) -> None:
             proto_type = None
             packet_data = None
 
-            if eth_protocol == 0x0806:
+            # **Live Debugging Output**
+            logging.debug(f"🛑 Raw Packet ({len(packet)} bytes): {packet.hex()[:100]}")
+
+            if eth_protocol == 0x0806:  # ARP Packet
                 proto_type = "arp"
-                packet_data = f"ARP Packet: Raw={packet.hex()[:50]}\n"
-            elif eth_protocol == 0x0800:
+                packet_data = f"ARP Packet: Raw={packet.hex()[:50]}"
+                logging.info(f"📥 Captured ARP Packet #{packet_count + 1}")
+
+            elif eth_protocol == 0x0800:  # IPv4 Packet
                 ip_proto = packet[23]
-                if ip_proto == 1:
+
+                if ip_proto == 1:  # ICMP (Ping Scan)
                     proto_type = "icmp"
-                    packet_data = f"ICMP Packet: Raw={packet.hex()[:50]}\n"
-                elif ip_proto == 6:
+                    packet_data = f"ICMP Packet: Raw={packet.hex()[:50]}"
+                    logging.info(f"📥 Captured ICMP Packet #{packet_count + 1}")
+
+                elif ip_proto == 6:  # TCP Packet (SYN, SYN-ACK, etc.)
                     proto_type = "tcp"
-                    packet_data = f"TCP Packet: Raw={packet.hex()[:50]}\n"
-                elif ip_proto == 17:
+                    packet_data = f"TCP Packet: Raw={packet.hex()[:50]}"
+                    logging.info(f"📥 Captured TCP Packet #{packet_count + 1}")
+
+                elif ip_proto == 17:  # UDP Packet
                     proto_type = "udp"
-                    packet_data = f"UDP Packet: Raw={packet.hex()[:50]}\n"
+                    packet_data = f"UDP Packet: Raw={packet.hex()[:50]}"
+                    logging.info(f"📥 Captured UDP Packet #{packet_count + 1}")
 
             if proto_type and packet_data:
                 with open(packet_files[proto_type], "a") as f:
-                    f.write(packet_data)
+                    f.write(packet_data + "\n")
+
+                packet_count += 1
 
         except Exception as e:
             logging.error(f"Error while receiving packets: {e}")
             break
 
-    logging.info(f"OS Fingerprinting Completed.")
+    logging.info(f"✅ OS Fingerprinting Completed. Captured {packet_count} packets.")
 
 def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception Against Malicious Scans")
