@@ -14,11 +14,11 @@ ICMP_HEADER_LEN = 8
 L3_PROC = ["ip", "arp"]
 L4_PROC = ["tcp", "udp", "icmp"]
 
-**Camouflage-Cloak Server Settings**
+**Camouflage-Cloak Settings**
 HOST = "192.168.23.206"  # Replace with the actual server IP
 NIC = "ens192"  # Replace with the correct network interface
 
-**Validate NIC existence before using it**
+**Validate NIC existence before execute it**
 NICAddr = f"/sys/class/net/{NIC}/address" if os.path.exists(f"/sys/class/net/{NIC}/address") else None
 
 if NICAddr is None:
