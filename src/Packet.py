@@ -1,6 +1,7 @@
 import logging
 import socket
 import struct
+import array
 import src.settings as settings
 
 class Packet:
@@ -23,20 +24,26 @@ class Packet:
         """
         Unpacks Ethernet, IP, and transport layer headers.
         """
-        self.unpack_l2_header()
-        self.unpack_l3_header(self.l3)
-        if self.l4:
-            self.unpack_l4_header(self.l4)
+        try:
+            self.unpack_l2_header()
+            self.unpack_l3_header(self.l3)
+            if self.l4:
+                self.unpack_l4_header(self.l4)
+        except Exception as e:
+            logging.error(f"Error unpacking packet: {e}")
 
     def unpack_l2_header(self) -> None:
         """
         Unpacks Ethernet headers and determines the upper layer protocol.
         """
-        self.l2_header = self.packet[:settings.ETH_HEADER_LEN]
-        eth = struct.unpack('!6s6sH', self.l2_header)
-        eth_dMAC, eth_sMAC, eth_protocol = eth
+        if len(self.packet) < settings.ETH_HEADER_LEN:
+            logging.error("Packet too short for Ethernet header.")
+            return
 
-        self.l3 = 'ip' if eth_protocol == 0x0800 else 'arp' if eth_protocol == 0x0806 else 'others'
+        self.l2_header = self.packet[:settings.ETH_HEADER_LEN]
+        eth_dMAC, eth_sMAC, eth_protocol = struct.unpack('!6s6sH', self.l2_header)
+
+        self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(eth_protocol, 'others')
 
         self.l2_field = {
             'dMAC': eth_dMAC,
@@ -68,125 +75,135 @@ class Packet:
         """
         Unpacks ARP headers and extracts relevant fields.
         """
+        if len(self.packet) < settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN:
+            logging.error("Packet too short for ARP header.")
+            return
+
         self.l3_header = self.packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
-        hw_type, proto_type, hw_size, proto_size, opcode, sender_mac, sender_ip, recv_mac, recv_ip = struct.unpack(
-            '!HHBBH6s4s6s4s', self.l3_header)
+        fields = struct.unpack('!HHBBH6s4s6s4s', self.l3_header)
 
         self.l3_field = {
-            'hw_type': hw_type,
-            'proto_type': proto_type,
-            'hw_size': hw_size,
-            'proto_size': proto_size,
-            'opcode': opcode,
-            'sender_mac': sender_mac,
-            'sender_ip': sender_ip,
-            'recv_mac': recv_mac,
-            'recv_ip': recv_ip
+            'hw_type': fields[0],
+            'proto_type': fields[1],
+            'hw_size': fields[2],
+            'proto_size': fields[3],
+            'opcode': fields[4],
+            'sender_mac': fields[5],
+            'sender_ip': fields[6],
+            'recv_mac': fields[7],
+            'recv_ip': fields[8]
         }
 
     def unpack_ip_header(self) -> None:
         """
         Unpacks IP headers and determines the transport layer protocol.
         """
+        if len(self.packet) < settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
+            logging.error("Packet too short for IP header.")
+            return
+
         self.l3_header = self.packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
         fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header)
-        IHL_VERSION, TYPE_OF_SERVICE, total_len, pktID, FRAGMENT_STATUS, TIME_TO_LIVE, PROTOCOL, check_sum_of_hdr, src_IP, dest_IP = fields
 
-        self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(PROTOCOL, 'others')
+        self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(fields[6], 'others')
 
         self.l3_field = {
-            'IHL_VERSION': IHL_VERSION,
-            'TYPE_OF_SERVICE': TYPE_OF_SERVICE,
-            'total_len': total_len,
-            'pktID': pktID,
-            'FRAGMENT_STATUS': FRAGMENT_STATUS,
-            'TIME_TO_LIVE': TIME_TO_LIVE,
-            'PROTOCOL': PROTOCOL,
-            'check_sum_of_hdr': check_sum_of_hdr,
-            'src_IP': src_IP,
-            'dest_IP': dest_IP
+            'IHL_VERSION': fields[0],
+            'TYPE_OF_SERVICE': fields[1],
+            'total_len': fields[2],
+            'pktID': fields[3],
+            'FRAGMENT_STATUS': fields[4],
+            'TIME_TO_LIVE': fields[5],
+            'PROTOCOL': fields[6],
+            'check_sum_of_hdr': fields[7],
+            'src_IP': fields[8],
+            'dest_IP': fields[9]
         }
 
     def unpack_tcp_header(self) -> None:
         """
         Unpacks TCP headers and extracts relevant fields.
         """
+        if len(self.packet) < settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.TCP_HEADER_LEN:
+            logging.error("Packet too short for TCP header.")
+            return
+
         tcp_header_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
         self.l4_header = self.packet[tcp_header_start:tcp_header_start + settings.TCP_HEADER_LEN]
 
-        tcp_fields = struct.unpack('!HHLLBBHHH', self.l4_header)
-        src_port, dest_port, seq, ack_num, offset_reserved, flags, window, checksum, urgent_ptr = tcp_fields
-
-        tcp_len = (offset_reserved >> 4) * 4  # Extract TCP header length
+        fields = struct.unpack('!HHLLBBHHH', self.l4_header)
 
         self.l4_field = {
-            'src_port': src_port,
-            'dest_port': dest_port,
-            'seq': seq,
-            'ack_num': ack_num,
-            'offset': offset_reserved,
-            'flags': flags,
-            'window': window,
-            'checksum': checksum,
-            'urgent_ptr': urgent_ptr,
-            'tcp_len': tcp_len
+            'src_port': fields[0],
+            'dest_port': fields[1],
+            'seq': fields[2],
+            'ack_num': fields[3],
+            'offset': (fields[4] >> 4) * 4,
+            'flags': fields[5],
+            'window': fields[6],
+            'checksum': fields[7],
+            'urgent_ptr': fields[8]
         }
 
     def unpack_udp_header(self) -> None:
         """
         Unpacks UDP headers and extracts relevant fields.
         """
+        if len(self.packet) < settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.UDP_HEADER_LEN:
+            logging.error("Packet too short for UDP header.")
+            return
+
         udp_header_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
         self.l4_header = self.packet[udp_header_start:udp_header_start + settings.UDP_HEADER_LEN]
-        src_port, dest_port, length, checksum = struct.unpack('!HHHH', self.l4_header)
+        fields = struct.unpack('!HHHH', self.l4_header)
 
         self.l4_field = {
-            'src_port': src_port,
-            'dest_port': dest_port,
-            'length': length,
-            'checksum': checksum
+            'src_port': fields[0],
+            'dest_port': fields[1],
+            'length': fields[2],
+            'checksum': fields[3]
         }
 
     def unpack_icmp_header(self) -> None:
         """
         Unpacks ICMP headers and extracts relevant fields.
         """
+        if len(self.packet) < settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN + settings.ICMP_HEADER_LEN:
+            logging.error("Packet too short for ICMP header.")
+            return
+
         icmp_header_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
         self.l4_header = self.packet[icmp_header_start:icmp_header_start + settings.ICMP_HEADER_LEN]
-        icmp_type, code, checksum, ID, seq = struct.unpack('!BBHHH', self.l4_header)
+        fields = struct.unpack('!BBHHH', self.l4_header)
 
         self.l4_field = {
-            'icmp_type': icmp_type,
-            'code': code,
-            'checksum': checksum,
-            'ID': ID,
-            'seq': seq
+            'icmp_type': fields[0],
+            'code': fields[1],
+            'checksum': fields[2],
+            'ID': fields[3],
+            'seq': fields[4]
         }
 
     @staticmethod
-    def getTCPChecksum(packet):
+    def getTCPChecksum(packet: bytes) -> int:
         """
-        Computes TCP checksum.
+        Compute TCP checksum.
         """
-        import array
         if len(packet) % 2 != 0:
             packet += b'\0'
-
         res = sum(array.array("H", packet))
         res = (res >> 16) + (res & 0xffff)
         res += res >> 16
-
         return (~res) & 0xffff
 
     @staticmethod
-    def getUDPChecksum(data):
+    def getUDPChecksum(data: bytes) -> int:
         """
         Computes UDP checksum.
         """
         checksum = 0
         data_len = len(data)
         if data_len % 2:
-            data_len += 1
             data += struct.pack('!B', 0)
 
         for i in range(0, data_len, 2):
