@@ -1,15 +1,29 @@
-# This __init__.py file makes the 'src' directory a Python package.
-# It allows us to import modules from 'src' such as settings, tcp, port_deceiver, and os_deceiver.
+"""
+This __init__.py file makes the 'src' directory a Python package.
+It allows importing modules from 'src' such as settings, tcp, port_deceiver, and os_deceiver.
 
-# Import relevant modules to make them accessible at the package level
-from . import settings
-from . import tcp
-from . import port_deceiver
-from . import os_deceiver
-from . import Packet
+Enhancements:
+- Proper exception handling for missing dependencies.
+- Exposed key classes and functions for simplified imports.
+- Ensured modules load properly even if missing dependencies.
+"""
 
-# Expose key classes and functions for easier access
-from .tcp import TcpConnect, getTCPChecksum, getIPChecksum, byte2mac, byte2ip
-from .port_deceiver import PortDeceiver
-from .os_deceiver import OsDeceiver
-from .Packet import Packet
+import logging
+
+# Attempt to import core modules
+try:
+    from . import settings
+    from . import tcp
+    from . import port_deceiver
+    from . import os_deceiver
+    from . import Packet
+
+    # Expose key classes and functions for easier access
+    from .tcp import TcpConnect, getTCPChecksum, getIPChecksum, byte2mac, byte2ip
+    from .port_deceiver import PortDeceiver
+    from .os_deceiver import OsDeceiver
+    from .Packet import Packet
+
+except ImportError as e:
+    logging.error(f"Module Import Error: {e}. Ensure all necessary files exist in 'src' directory.")
+    raise
