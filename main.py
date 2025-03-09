@@ -1,80 +1,170 @@
+import logging
 import argparse
 import os
-import logging
+import time
+import socket
+import struct
+import sys
+import subprocess
 import src.settings as settings
-from src.PortDeceiver import PortDeceiver
-from src.OsDeceiver import OsDeceiver
+from src.port_deceiver import PortDeceiver
+from src.os_deceiver import OsDeceiver
+
+# Configure logging
+logging.basicConfig(
+    format='%(asctime)s [%(levelname)s]: %(message)s',
+    datefmt='%y-%m-%d %H:%M',
+    level=logging.DEBUG  # DEBUG mode for packet capture analysis
+)
+
+def ensure_directory_exists(directory):
+    """Ensure the directory exists and is accessible."""
+    try:
+        os.makedirs(directory, exist_ok=True)
+        logging.info(f"Ensured directory exists: {directory}")
+    except Exception as e:
+        logging.error(f"Failed to create directory {directory}: {e}")
+        sys.exit(1)
+
+def ensure_file_permissions(file_path):
+    """Ensure OS fingerprint files are readable & writable for OS deception."""
+    try:
+        if os.path.exists(file_path):
+            os.chmod(file_path, 0o644)  # Read & Write for owner, Read for others
+            logging.info(f"Set correct permissions for {file_path}")
+    except Exception as e:
+        logging.error(f"Failed to set permissions for {file_path}: {e}")
+
+def validate_nic(nic):
+    """Check if the network interface exists before use."""
+    if not os.path.exists(f"/sys/class/net/{nic}"):
+        logging.error(f"Network interface {nic} not found! Check your NIC name.")
+        sys.exit(1)
+
+def set_promiscuous_mode(nic):
+    """Enable promiscuous mode securely using subprocess."""
+    try:
+        subprocess.run(["sudo", "ip", "link", "set", nic, "promisc", "on"], check=True)
+        logging.info(f"Promiscuous mode enabled for {nic}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to set promiscuous mode: {e}")
+        sys.exit(1)
+
+def collect_fingerprint(target_host, dest, nic):
+    """
+    Captures OS fingerprinting packets for the target host.
+    Ensures fingerprint files are writable for OS deception.
+    """
+    logging.info(f"Starting OS Fingerprinting on {target_host}")
+
+    # 🔹 **Fix: Set Correct Path to Home Directory**
+    if not dest:
+        dest = os.path.expanduser("~/Camouflage-Cloak/os_record")
+    ensure_directory_exists(dest)
+
+    packet_files = {
+        "arp": os.path.join(dest, "arp_record.txt"),
+        "icmp": os.path.join(dest, "icmp_record.txt"),
+        "tcp": os.path.join(dest, "tcp_record.txt"),
+        "udp": os.path.join(dest, "udp_record.txt"),
+    }
+
+    validate_nic(nic)
+    set_promiscuous_mode(nic)
+
+    time.sleep(2)  # Allow NIC to enter promiscuous mode
+
+    try:
+        sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+        sock.bind((nic, 0))
+    except PermissionError:
+        logging.error("Root privileges required to open raw sockets. Run the script with sudo.")
+        sys.exit(1)
+    except Exception as e:
+        logging.error(f"Error opening raw socket: {e}")
+        sys.exit(1)
+
+    packet_count = 0
+    logging.info(f"Storing fingerprint data in: {dest}")
+
+    timeout = time.time() + 180  # 3 minutes timeout
+    while time.time() < timeout:
+        try:
+            packet, _ = sock.recvfrom(65565)
+            eth_protocol = struct.unpack("!H", packet[12:14])[0]
+            proto_type = None
+            packet_data = None
+
+            logging.debug(f"Captured raw packet ({len(packet)} bytes): {packet.hex()[:100]}")
+
+            if eth_protocol == 0x0806:
+                proto_type = "arp"
+                packet_data = f"ARP Packet: Raw={packet.hex()[:50]}\n"
+            elif eth_protocol == 0x0800:
+                ip_proto = packet[23]
+                if ip_proto == 1:
+                    proto_type = "icmp"
+                    packet_data = f"ICMP Packet: Raw={packet.hex()[:50]}\n"
+                elif ip_proto == 6:
+                    proto_type = "tcp"
+                    packet_data = f"TCP Packet: Raw={packet.hex()[:50]}\n"
+                elif ip_proto == 17:
+                    proto_type = "udp"
+                    packet_data = f"UDP Packet: Raw={packet.hex()[:50]}\n"
+
+            if proto_type and packet_data:
+                file_path = packet_files[proto_type]
+                with open(file_path, "a") as f:
+                    f.write(packet_data)
+
+                ensure_file_permissions(file_path)  # Ensure no locked files
+
+                packet_count += 1
+
+        except Exception as e:
+            logging.error(f"Error while receiving packets: {e}")
+            break
+
+    logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
 def main():
-    # Set up argument parser
-    parser = argparse.ArgumentParser(description="Camouflage-Cloak main program")
-    parser.add_argument("-s", "--scan", choices=["od", "pd", "ts"], required=True,
-                        help="Scan mode: 'od' (OS deception), 'pd' (Port deception), 'ts' (template synthesis)")
-    parser.add_argument("-t", "--te", help="Target environment identifier/IP (required for 'od' or 'pd' modes)")
-    parser.add_argument("-d", "--dest", default="/home/user/Camouflage-Cloak/os_record/",
-                        help="Destination directory for OS fingerprint records")
+    parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception Against Malicious Scans")
+    parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
+    parser.add_argument("--nic", required=True, help="Network interface to capture packets")
+    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scanning technique for fingerprint collection")
+    parser.add_argument("--dest", help="Directory to store OS fingerprints (Default: ~/Camouflage-Cloak/os_record)")
+    parser.add_argument("--os", help="OS to mimic (Required for --od)")
+    parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
+    parser.add_argument("--status", help="Port status (Required for --pd)")
     args = parser.parse_args()
 
-    # Enforce that --te is provided when using --scan od or pd
-    if args.scan in ["od", "pd"] and args.te is None:
-        parser.error("--te is a required argument when using --scan 'od' or 'pd'")
+    validate_nic(args.nic)
 
-    # Load NIC, HOST, and MAC settings from settings.py
-    NIC = settings.NIC
-    HOST = settings.HOST
-    MAC = settings.MAC
+    if args.scan == 'ts':
+        collect_fingerprint(args.host, args.dest, args.nic)
+    elif args.scan == 'od':
+        if not args.os or not args.te:
+            logging.error("Missing required arguments: --os and --te are required for --od")
+            return
+        
+        # 🔹 **Force Correct OS Record Path**
+        os_record_path = os.path.expanduser(f"~/Camouflage-Cloak/os_record/{args.os}")
+        ensure_directory_exists(os_record_path)
 
-    # Ensure destination directory exists
-    dest_dir = args.dest
-    try:
-        os.makedirs(dest_dir, exist_ok=True)
-    except Exception as e:
-        logging.error(f"Could not create destination directory '{dest_dir}': {e}")
-        return
+        # 🔹 **Ensure OS fingerprint files are accessible**
+        for file in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
+            ensure_file_permissions(os.path.join(os_record_path, file))
 
-    # Handle each scan mode
-    if args.scan == "ts":
-        # Maintain a 180-second timeout for template synthesis
-        TIMEOUT = 180
-        logging.info(f"Starting template synthesis for target environment '{args.te}' with {TIMEOUT}s timeout")
+        deceiver = OsDeceiver(args.host, args.os, os_record_path)
+        deceiver.os_deceive()
+    elif args.scan == 'pd':
+        if not args.status or not args.te:
+            logging.error("Missing required arguments: --status and --te are required for --pd")
+            return
+        deceiver = PortDeceiver(args.host)
+        deceiver.deceive_ps_hs(args.status)
+    else:
+        logging.error("Invalid command. Specify --scan ts, --scan od, or --scan pd.")
 
-        # Open OS fingerprint record files (prevent locking by closing them after writing)
-        arp_file = open(os.path.join(dest_dir, "arp_record.txt"), "w")
-        icmp_file = open(os.path.join(dest_dir, "icmp_record.txt"), "w")
-        tcp_file = open(os.path.join(dest_dir, "tcp_record.txt"), "w")
-        udp_file = open(os.path.join(dest_dir, "udp_record.txt"), "w")
-        try:
-            # --- Existing template synthesis logic to gather OS fingerprint data (ARP, ICMP, TCP, UDP) goes here ---
-            # For example:
-            # arp_file.write(... data from ARP probe on target environment ...)
-            # icmp_file.write(... data from ICMP probe on target environment ...)
-            # tcp_file.write(... data from TCP probes on target environment ...)
-            # udp_file.write(... data from UDP probe on target environment ...)
-            pass  # (Placeholder for the existing scanning implementation)
-        finally:
-            # Close all files after writing to release any locks
-            arp_file.close()
-            icmp_file.close()
-            tcp_file.close()
-            udp_file.close()
-            logging.info("Template synthesis complete. OS fingerprint records saved.")
-    elif args.scan == "od":
-        # Start OS deception mode (requires target environment template)
-        logging.info(f"Starting OS deception using template for target environment '{args.te}'")
-        try:
-            od = OsDeceiver(NIC=NIC, host_ip=HOST, host_mac=MAC, dest=dest_dir, target_env=args.te)
-        except TypeError:
-            # Fallback if OsDeceiver expects positional arguments
-            od = OsDeceiver(NIC, HOST, MAC, dest_dir, args.te)
-        od.start()  # Begin OS deception (listening and responding to scans)
-    elif args.scan == "pd":
-        # Start Port deception mode (requires target environment template)
-        logging.info(f"Starting Port deception using template for target environment '{args.te}'")
-        try:
-            pd = PortDeceiver(NIC=NIC, host_ip=HOST, host_mac=MAC, dest=dest_dir, target_env=args.te)
-        except TypeError:
-            pd = PortDeceiver(NIC, HOST, MAC, dest_dir, args.te)
-        pd.start()  # Begin Port deception (listening and responding to port scans)
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
