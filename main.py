@@ -57,7 +57,6 @@ def collect_fingerprint(target_host, dest, nic):
     """
     logging.info(f"Starting OS Fingerprinting on {target_host}")
 
-    # 🔹 **Fix: Set Correct Path to Home Directory**
     if not dest:
         dest = os.path.expanduser("~/Camouflage-Cloak/os_record")
     ensure_directory_exists(dest)
@@ -132,7 +131,8 @@ def main():
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scanning technique for fingerprint collection")
-    parser.add_argument("--dest", help="Directory to store OS fingerprints (Default: ~/Camouflage-Cloak/os_record)")
+    parser.add_argument("--dest", default=os.path.expanduser("~/Camouflage-Cloak/os_record"), 
+                        help="Directory to store OS fingerprints (Default: ~/Camouflage-Cloak/os_record)")
     parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
@@ -148,7 +148,7 @@ def main():
             return
         
         # 🔹 **Force Correct OS Record Path**
-        os_record_path = os.path.expanduser(f"~/Camouflage-Cloak/os_record/{args.os}")
+        os_record_path = os.path.join(args.dest, args.os)
         ensure_directory_exists(os_record_path)
 
         # 🔹 **Ensure OS fingerprint files are accessible**
@@ -156,13 +156,13 @@ def main():
             ensure_file_permissions(os.path.join(os_record_path, file))
 
         deceiver = OsDeceiver(args.host, args.os, os_record_path)
-        deceiver.os_deceive()
+        deceiver.os_deceive(args.te)
     elif args.scan == 'pd':
         if not args.status or not args.te:
             logging.error("Missing required arguments: --status and --te are required for --pd")
             return
         deceiver = PortDeceiver(args.host)
-        deceiver.deceive_ps_hs(args.status)
+        deceiver.deceive_ps_hs(args.status, args.te)
     else:
         logging.error("Invalid command. Specify --scan ts, --scan od, or --scan pd.")
 
