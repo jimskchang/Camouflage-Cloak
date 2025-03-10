@@ -41,15 +41,6 @@ def validate_nic(nic):
         logging.error(f"❌ Network interface {nic} not found! Check your NIC name.")
         sys.exit(1)
 
-def set_promiscuous_mode(nic):
-    """Enable promiscuous mode securely using subprocess."""
-    try:
-        subprocess.run(["sudo", "ip", "link", "set", nic, "promisc", "on"], check=True)
-        logging.info(f"✔ Promiscuous mode enabled for {nic}")
-    except subprocess.CalledProcessError as e:
-        logging.error(f"❌ Failed to set promiscuous mode: {e}")
-        sys.exit(1)
-
 def collect_fingerprint(target_host, dest, nic):
     """
     Captures OS fingerprinting packets for the target host.
@@ -57,10 +48,10 @@ def collect_fingerprint(target_host, dest, nic):
     """
     logging.info(f"📌 Starting OS Fingerprinting on {target_host}")
 
-    # 🔹 **Fix: Always Set Correct Path to Home Directory**
+    # 🔹 **Fix: Always Use User's Home Directory**
     if not dest:
-        dest = os.path.expanduser("~/Camouflage-Cloak/os_record")
-    
+        dest = settings.OS_RECORD_PATH  # Ensures it saves under user, not root
+
     ensure_directory_exists(dest)
 
     packet_files = {
@@ -71,7 +62,6 @@ def collect_fingerprint(target_host, dest, nic):
     }
 
     validate_nic(nic)
-    set_promiscuous_mode(nic)
 
     time.sleep(2)  # Allow NIC to enter promiscuous mode
 
@@ -96,8 +86,6 @@ def collect_fingerprint(target_host, dest, nic):
             proto_type = None
             packet_data = None
 
-            logging.debug(f"📥 Captured raw packet ({len(packet)} bytes): {packet.hex()[:100]}")
-
             if eth_protocol == 0x0806:
                 proto_type = "arp"
                 packet_data = f"ARP Packet: Raw={packet.hex()[:50]}\n"
@@ -118,7 +106,7 @@ def collect_fingerprint(target_host, dest, nic):
                 with open(file_path, "a") as f:
                     f.write(packet_data)
 
-                ensure_file_permissions(file_path)  # **Fix locked files**
+                ensure_file_permissions(file_path)  # Fix locked files issue
 
                 packet_count += 1
 
@@ -132,8 +120,7 @@ def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception Against Malicious Scans")
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
-    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scanning technique for fingerprint collection")
-    parser.add_argument("--dest", help="Directory to store OS fingerprints (Default: ~/Camouflage-Cloak/os_record)")
+    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scanning technique")
     parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
@@ -142,32 +129,19 @@ def main():
     validate_nic(args.nic)
 
     if args.scan == 'ts':
-        collect_fingerprint(args.host, args.dest, args.nic)
+        collect_fingerprint(args.host, settings.OS_RECORD_PATH, args.nic)
     elif args.scan == 'od':
         if not args.os or not args.te:
             logging.error("❌ Missing required arguments: --os and --te are required for --od")
             return
-        
-        # 🔹 **Force Correct OS Record Path - Fix /root Issue**
-        os_record_path = os.path.expanduser(f"~/Camouflage-Cloak/os_record/{args.os}")
+
+        os_record_path = os.path.join(settings.OS_RECORD_PATH, args.os)
         ensure_directory_exists(os_record_path)
 
-        # 🔹 **Ensure OS fingerprint files are accessible**
-        for file in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
-            ensure_file_permissions(os.path.join(os_record_path, file))
-
-        logging.info(f"📌 OS Deception Initialized for {args.os}. OS Record Path: {os_record_path}")
-
         deceiver = OsDeceiver(args.host, args.os, os_record_path)
-        deceiver.os_deceive()  # ✅ **Fix: Removed Extra Argument**
-    elif args.scan == 'pd':
-        if not args.status or not args.te:
-            logging.error("❌ Missing required arguments: --status and --te are required for --pd")
-            return
-        deceiver = PortDeceiver(args.host)
-        deceiver.deceive_ps_hs(args.status)
+        deceiver.os_deceive()  # ✅ Fix: Removed Extra Argument
     else:
-        logging.error("❌ Invalid command. Specify --scan ts, --scan od, or --scan pd.")
+        logging.error("❌ Invalid command.")
 
 if __name__ == '__main__':
     main()
