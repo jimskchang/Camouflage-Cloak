@@ -51,11 +51,15 @@ def set_promiscuous_mode(nic):
         sys.exit(1)
 
 def collect_fingerprint(target_host, dest, nic):
-    """Captures OS fingerprinting packets for the target host."""
+    """
+    Captures OS fingerprinting packets for the target host.
+    Ensures fingerprint files are writable for OS deception.
+    """
     logging.info(f"Starting OS Fingerprinting on {target_host}")
-    
+
+    # If no destination is provided, default to os_record under user home
     if not dest:
-        dest = settings.OS_RECORD_PATH  # Use global OS record path
+        dest = settings.OS_RECORD_PATH  # Always points to /home/user/Camouflage-Cloak/os_record
     ensure_directory_exists(dest)
 
     packet_files = {
@@ -67,6 +71,7 @@ def collect_fingerprint(target_host, dest, nic):
 
     validate_nic(nic)
     set_promiscuous_mode(nic)
+
     time.sleep(2)  # Allow NIC to enter promiscuous mode
 
     try:
@@ -111,7 +116,9 @@ def collect_fingerprint(target_host, dest, nic):
                 file_path = packet_files[proto_type]
                 with open(file_path, "a") as f:
                     f.write(packet_data)
-                ensure_file_permissions(file_path)
+
+                ensure_file_permissions(file_path)  # Ensure no locked files
+
                 packet_count += 1
 
         except Exception as e:
@@ -125,6 +132,7 @@ def main():
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scanning technique for fingerprint collection")
+    parser.add_argument("--dest", default=settings.OS_RECORD_PATH, help="Directory to store OS fingerprints (Default: ~/Camouflage-Cloak/os_record)")
     parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
@@ -133,14 +141,21 @@ def main():
     validate_nic(args.nic)
 
     if args.scan == 'ts':
-        collect_fingerprint(args.host, settings.OS_RECORD_PATH, args.nic)
+        collect_fingerprint(args.host, args.dest, args.nic)
     elif args.scan == 'od':
         if not args.os or not args.te:
             logging.error("Missing required arguments: --os and --te are required for --od")
             return
+        
+        # 🔹 Ensure OS record path is correctly set
         os_record_path = os.path.join(settings.OS_RECORD_PATH, args.os)
         ensure_directory_exists(os_record_path)
-        deceiver = OsDeceiver(args.host, args.os)
+
+        # 🔹 Ensure OS fingerprint files are accessible
+        for file in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
+            ensure_file_permissions(os.path.join(os_record_path, file))
+
+        deceiver = OsDeceiver(args.host, args.os, os_record_path)
         deceiver.os_deceive()
     elif args.scan == 'pd':
         if not args.status or not args.te:
