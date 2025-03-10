@@ -48,7 +48,7 @@ def collect_fingerprint(target_host, dest, nic):
     """
     logging.info(f"📌 Starting OS Fingerprinting on {target_host}")
 
-    # 🔹 **Fix: Always Use User's Home Directory**
+    # 🔹 **Fix: Always Use User's Home Directory if --dest is Not Provided**
     if not dest:
         dest = settings.OS_RECORD_PATH  # Ensures it saves under user, not root
 
@@ -121,15 +121,16 @@ def main():
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scanning technique")
-    parser.add_argument("--os", help="OS to mimic (Required for --od)")
+    parser.add_argument("--dest", type=str, help="Directory to store OS fingerprints (Default: ~/Camouflage-Cloak/os_record)")
+    parser.add_argument("--os", type=str, help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
-    parser.add_argument("--status", help="Port status (Required for --pd)")
+    parser.add_argument("--status", type=str, help="Port status (Required for --pd)")
     args = parser.parse_args()
 
     validate_nic(args.nic)
 
     if args.scan == 'ts':
-        collect_fingerprint(args.host, settings.OS_RECORD_PATH, args.nic)
+        collect_fingerprint(args.host, args.dest, args.nic)
     elif args.scan == 'od':
         if not args.os or not args.te:
             logging.error("❌ Missing required arguments: --os and --te are required for --od")
@@ -140,6 +141,12 @@ def main():
 
         deceiver = OsDeceiver(args.host, args.os, os_record_path)
         deceiver.os_deceive()  # ✅ Fix: Removed Extra Argument
+    elif args.scan == 'pd':
+        if not args.status or not args.te:
+            logging.error("❌ Missing required arguments: --status and --te are required for --pd")
+            return
+        deceiver = PortDeceiver(args.host)
+        deceiver.deceive_ps_hs(args.status)
     else:
         logging.error("❌ Invalid command.")
 
