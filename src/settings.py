@@ -1,12 +1,13 @@
 import os
 import socket
+import getpass  # ✅ Auto-detects the user running the script
 
-# 🔹 User Credentials for Camouflage Cloak Server
-CC_USER = "user"  # Change to your actual username
-CC_PASS = "1qaz!QAZ"  # Change to Camouflage Cloak Server password
+# 🔹 Get the Username Running the Script
+CC_USER = getpass.getuser()  # Automatically gets the username
+CC_HOME = f"/home/{CC_USER}/Camouflage-Cloak"  # Uses the correct user home directory
 
-# 🔹 Ensure all files are stored in the user's home directory
-CC_HOME = f"/home/{CC_USER}/Camouflage-Cloak"
+# 🔹 Always store OS fingerprints under user, not root
+OS_RECORD_PATH = os.path.join(CC_HOME, "os_record")
 
 # Header Lengths
 ETH_HEADER_LEN = 14
@@ -20,15 +21,12 @@ ICMP_HEADER_LEN = 8
 L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
 
-# 🔹 Ensure fingerprint files & OS records are saved under user, not root
-OS_RECORD_PATH = os.path.join(CC_HOME, "os_record")
-
-# Manually Input: Set the correct network interface
+# Set correct network interface
 NIC = 'ens192'
 NIC_ADDR_PATH = f'/sys/class/net/{NIC}/address'
 
-# Manually Set Host IP
-HOST = "192.168.1.100"  # Change to the actual Camouflage Cloak Host IP
+# Set Host IP
+HOST = "192.168.1.100"
 
 # Function to Get MAC Address
 def get_mac_address(nic: str) -> str:
