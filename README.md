@@ -130,6 +130,7 @@ cd Camouflage-Cloak
 ```bash
 sudo python3 main.py --host <protected server IP> --nic <network interface> --scan ts --dest /home/user/Camouflage-Cloak/os_record
 ```
+The time out set in the --scan ts (to build Template Synthesis) is 300 second.  Therefore, you should perfom the Nmap scan immediately after you execute the --scan ts command. After two minutes it will return to the command mode for you to execute deception.
 
 ***Step 3:*** run Nmap OS detection on attacker host
 ```bash
@@ -137,9 +138,8 @@ sudo nmap -O <Target Host IP>
 sudo nmap -A -p 1-65535 <Target Host IP>
 sudo nmap --osscan-guess <Target Host IP>
 ```
-The time out set in the --scan ts (to build Template Synthesis) is 300 second.  Therefore, you should perfom the Nmap scan immediately after you execute the --scan ts command. After two minutes it will return to the command mode for you to execute deception.
 
-***Step 4:*** cd
+***Step 4:*** Move back to Camouflage-Cloak host and execute cd
 ```bash
 cd
 ```
@@ -151,7 +151,7 @@ sudo chown -R $USER:$USER ~/Camouflage-Cloak/os_record
 
 ***Step 6:*** create the os folder (use win10 as example)
 ```bash
-mkdir -p /Camouflage-Cloak/os_record/win10
+mkdir -p /home/user/Camouflage-Cloak/os_record/win10
 ```
 ***Step 7:*** move arp_record.txt, icmp_record.txt, txp_record.txt, and udp_record.txt to the os folder (use win10 as example)
 ```bash
