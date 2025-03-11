@@ -39,7 +39,7 @@ class PortDeceiver:
         """
         self.host = host
         self.conn = TcpConnect(host)
-        logging.info(f"Port deception initialized for host: {self.host}")
+        logging.info(f"✅ Port deception initialized for host: {self.host}")
 
     def send_packet(self, recv_flags: list, reply_flags: list) -> bool:
         """
@@ -55,7 +55,7 @@ class PortDeceiver:
 
                 ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
                 fields = struct.unpack('!BBHHHBBH4s4s', ip_header)
-                dest_IP, src_IP, protocol = fields[8], fields[9], fields[6]
+                src_IP, dest_IP, protocol = fields[8], fields[9], fields[6]
 
                 if dest_IP != socket.inet_aton(self.conn.dip) or protocol != PROTOCOL_TCP:
                     continue
@@ -67,7 +67,7 @@ class PortDeceiver:
                 if flags not in recv_flags:
                     continue
 
-                logging.info(f"Received TCP packet from {socket.inet_ntoa(src_IP)} to {socket.inet_ntoa(dest_IP)} with flags {flags}")
+                logging.info(f"📥 Received TCP packet from {socket.inet_ntoa(src_IP)} to {socket.inet_ntoa(dest_IP)} with flags {flags}")
 
                 reply_seq, reply_ack_num = ack_num, seq + 1
                 reply_src_port, reply_dest_port = dest_port, src_port
@@ -80,10 +80,10 @@ class PortDeceiver:
                         )
                         packet = packet[:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN] + reply_tcp_header
                         self.conn.sock.send(packet)
-                        logging.info(f"Sent deceptive reply with flag {reply_flags[i]}")
+                        logging.info(f"📤 Sent deceptive reply with flag {reply_flags[i]} to {socket.inet_ntoa(src_IP)}")
                 return True
             except Exception as e:
-                logging.error(f"Error processing packet: {e}")
+                logging.error(f"❌ Error processing packet: {e}")
                 continue
 
     def deceive_ps_hs(self, port_status: str) -> None:
@@ -91,7 +91,7 @@ class PortDeceiver:
         Deceives port scans by making ports appear open or closed.
         """
         port_flag = TCP_FLAG_SYN_ACK if port_status == 'open' else TCP_FLAG_RST_ACK
-        logging.info(f"Deceiving port scan: Simulating {'open' if port_status == 'open' else 'closed'} ports")
+        logging.info(f"🛑 Deceiving port scan: Simulating {'open' if port_status == 'open' else 'closed'} ports")
 
         while True:
             try:
@@ -103,7 +103,7 @@ class PortDeceiver:
 
                 ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
                 fields = struct.unpack('!BBHHHBBH4s4s', ip_header)
-                dest_IP, src_IP, protocol = fields[8], fields[9], fields[6]
+                src_IP, dest_IP, protocol = fields[8], fields[9], fields[6]
 
                 if dest_IP != socket.inet_aton(self.conn.dip) or protocol != PROTOCOL_TCP:
                     continue
@@ -117,13 +117,13 @@ class PortDeceiver:
                 reply_src_port, reply_dest_port = dest_port, src_port
 
                 if flags == TCP_FLAG_SYN:
-                    logging.info(f"Received SYN from {socket.inet_ntoa(src_IP)}, responding with deception")
+                    logging.info(f"📥 Received SYN from {socket.inet_ntoa(src_IP)}, responding with deception")
                     reply_tcp_header = self.conn.build_tcp_header_from_reply(
                         5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port,
                         src_IP, dest_IP, port_flag
                     )
                 elif flags == TCP_FLAG_ACK:
-                    logging.info(f"Received ACK from {socket.inet_ntoa(src_IP)}, responding with RST")
+                    logging.info(f"📥 Received ACK from {socket.inet_ntoa(src_IP)}, responding with RST")
                     reply_tcp_header = self.conn.build_tcp_header_from_reply(
                         5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port,
                         src_IP, dest_IP, TCP_FLAG_RST
@@ -133,8 +133,8 @@ class PortDeceiver:
 
                 packet = packet[:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN] + reply_tcp_header
                 self.conn.sock.send(packet)
-                logging.info(f"Sent deceptive packet to {socket.inet_ntoa(src_IP)}")
+                logging.info(f"📤 Sent deceptive packet to {socket.inet_ntoa(src_IP)}")
 
             except Exception as e:
-                logging.error(f"Error processing packet: {e}")
+                logging.error(f"❌ Error processing packet: {e}")
                 continue
