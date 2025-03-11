@@ -121,12 +121,12 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <ts>] [
 
 **Build Template Synthesis**
 
-***Step 1:*** cd to the Camouflage-Cloak folder and create the os_record folder
+***Step 1:*** cd to the Camouflage-Cloak
 ```bash
-sudo mkdir -p os_record
+cd Camouflage-Cloak
 ```
 
-***Step 2:*** cd to the Camouflage-Cloak folder and execute the following instruction
+***Step 2:*** execute the following instruction
 ```bash
 sudo python3 main.py --host <protected server IP> --nic <network interface> --scan ts --dest /home/user/Camouflage-Cloak/os_record
 ```
@@ -139,10 +139,49 @@ sudo nmap --osscan-guess <Target Host IP>
 ```
 The time out set in the --scan ts (to build Template Synthesis) is 300 second.  Therefore, you should perfom the Nmap scan immediately after you execute the --scan ts command. After two minutes it will return to the command mode for you to execute deception.
 
-***Step 4:*** cd to the Camouflage-Cloak/os_record folder Create the OS folder
+***Step 4:*** cd
 ```bash
-sudo mkdir -p win10
+cd
 ```
+
+***Step 5:*** change arp_record.txt, icmp_record.txt, txp_record.txt, and udp_record.txt to readable and writable
+```bash
+sudo chown -R $USER:$USER ~/Camouflage-Cloak/os_record
+```
+
+***Step 6:*** create the os folder (use win10 as example)
+```bash
+mkdir -p /Camouflage-Cloak/os_record/win10
+```
+***Step 7:*** move arp_record.txt, icmp_record.txt, txp_record.txt, and udp_record.txt to the os folder (use win10 as example)
+```bash
+cd Camouflage-Cloak
+```
+
+```bash
+cd os_record
+```
+
+```bash
+mv arp_record.txt win10/
+```
+
+```bash
+mv icmp_record.txt win10/
+```
+
+```bash
+mv tcp_record.txt win10/
+```
+
+```bash
+mv udp_record.txt win10/
+```
+
+```bash
+cd
+```
+
 
 **OS deceiver test**
 ***Step 1:*** cd to the Camouflage-Cloak/os_record folder and execute the following instruction
