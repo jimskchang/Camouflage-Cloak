@@ -121,7 +121,7 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <ts>] [
 
 **Build Template Synthesis**
 
-***Step 1:*** cd to the Camouflage-Cloak
+***Step 1:*** Navigate to the Camouflage-Cloak
 ```bash
 cd Camouflage-Cloak
 ```
@@ -184,7 +184,13 @@ cd
 
 
 **OS deceiver test**
-***Step 1:*** cd to the Camouflage-Cloak/os_record folder and execute the following instruction
+
+***Step 1:*** Navigate to the Camouflage-Cloak
+```bash
+cd Camouflage-Cloak
+```
+
+***Step 2:*** execute the following instruction
 ```bash
 sudo python3 main.py --host <Target Host IP> --nic <Target Host NIC> --scan od --os <OS template e.g. win7/win10/centos> --te <deceive time out time e.g. 6 = 6 minutes>
 ```
