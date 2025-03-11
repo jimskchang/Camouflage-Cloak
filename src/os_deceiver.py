@@ -22,7 +22,7 @@ class OsDeceiver:
 
         # 🔹 Ensure OS Record Path Always Uses the Correct User Directory
         self.os_record_path = dest if dest else os.path.join(settings.OS_RECORD_PATH, self.os)
-        logging.info(f"OS Deception Initialized for {self.os}. OS Record Path: {self.os_record_path}")
+        logging.info(f"✅ OS Deception Initialized for {self.os}. OS Record Path: {self.os_record_path}")
 
         # 🔹 Ensure the OS record directory exists
         os.makedirs(self.os_record_path, exist_ok=True)
@@ -55,14 +55,17 @@ class OsDeceiver:
             logging.error(f"❌ Error loading {file_path}: {e}")
             return {}
 
-    def os_deceive(self) -> None:
+    def os_deceive(self, timeout: int) -> None:
         """
         Perform OS deception based on template packets.
         """
         logging.info(f'📌 Loading OS deception template for {self.os} from {self.os_record_path}')
         template_dict = {p: self.load_file(p) for p in ['arp', 'tcp', 'udp', 'icmp']}
 
-        while True:
+        # 🔹 Set a timeout for deception (in minutes)
+        end_time = datetime.now() + timedelta(minutes=timeout)
+
+        while datetime.now() < end_time:
             try:
                 raw_pkt, _ = self.conn.sock.recvfrom(65565)
                 pkt = Packet(packet=raw_pkt)
@@ -77,6 +80,8 @@ class OsDeceiver:
             except Exception as e:
                 logging.error(f"❌ Error in OS deception process: {e}")
                 continue
+
+        logging.info(f"✅ OS Deception for {self.os} completed. Exiting...")
 
 def deceived_pkt_synthesis(req: Packet, template: Dict[str, Any]) -> bytes:
     """
