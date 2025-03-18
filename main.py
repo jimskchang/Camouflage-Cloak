@@ -17,6 +17,9 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
+# Explicitly set the correct OS_RECORD_PATH to avoid /root issue
+DEFAULT_OS_RECORD_PATH = "/home/user/Camouflage-Cloak/os_record"
+
 def ensure_directory_exists(directory):
     """Ensure the directory exists and is accessible."""
     try:
@@ -57,9 +60,10 @@ def collect_fingerprint(target_host, dest, nic):
     """
     logging.info(f"Starting OS Fingerprinting on {target_host}")
 
-    # If no destination is provided, default to os_record under user home
-    if not dest:
-        dest = settings.OS_RECORD_PATH  # Always points to /home/user/Camouflage-Cloak/os_record
+    # Ensure destination path is set correctly
+    if not dest or dest == settings.OS_RECORD_PATH:
+        dest = DEFAULT_OS_RECORD_PATH  # Use explicit /home/user path
+
     ensure_directory_exists(dest)
 
     packet_files = {
@@ -132,7 +136,7 @@ def main():
     parser.add_argument("--host", required=True, help="Target host IP to deceive or fingerprint")
     parser.add_argument("--nic", required=True, help="Network interface to capture packets")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scanning technique for fingerprint collection")
-    parser.add_argument("--dest", default=settings.OS_RECORD_PATH, help="Directory to store OS fingerprints (Default: ~/Camouflage-Cloak/os_record)")
+    parser.add_argument("--dest", default=DEFAULT_OS_RECORD_PATH, help="Directory to store OS fingerprints")
     parser.add_argument("--os", help="OS to mimic (Required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes (Required for --od and --pd)")
     parser.add_argument("--status", help="Port status (Required for --pd)")
@@ -147,11 +151,11 @@ def main():
             logging.error("Missing required arguments: --os and --te are required for --od")
             return
         
-        # 🔹 Ensure OS record path is correctly set
-        os_record_path = os.path.join(settings.OS_RECORD_PATH, args.os)
+        # Ensure OS record path is correctly set to /home/user
+        os_record_path = os.path.join(DEFAULT_OS_RECORD_PATH, args.os)
         ensure_directory_exists(os_record_path)
 
-        # 🔹 Ensure OS fingerprint files are accessible
+        # Ensure OS fingerprint files are accessible
         for file in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
             ensure_file_permissions(os.path.join(os_record_path, file))
 
