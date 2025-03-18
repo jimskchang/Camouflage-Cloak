@@ -72,6 +72,7 @@ CamouflageCloak/
 ```bash
 git clone https://github.com/jimskchang/Camouflage-Cloak.git
 cd Camouflage-Cloak
+```
 
 ## **Usage**
 ### **Edit settings.py** to match your environment:
