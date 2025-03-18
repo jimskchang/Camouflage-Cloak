@@ -1,18 +1,27 @@
-# Camouflage Cloak: OS & Port Deception Against Nmap Scans
+# **Camouflage Cloak: OS & Port Deception Against Nmap Scans**
 
-**Camouflage Cloak** uses **OS deception** and **port deception** techniques to counteract malicious Nmap scans by providing false system information. By modifying **TCP/IP stack parameters**, it alters how the system responds to network probes, **disguising the OS** and **misleading port scans**.
+**Camouflage Cloak** manipulates **TCP/IP stack parameters** to deceive **Nmap scans**, disguising the OS and misleading port scans.
 
-## OS Deception Techniques
-To evade OS detection, **Camouflage Cloak**:
+## **How It Works**
+1. **OS Deception:** Modifies TTL, TCP window sizes, RST behavior, and ICMP responses.
+2. **Port Deception:** Alters SYN-ACK behavior, UDP responses, and service banners.
+3. **Packet Manipulation:** Uses network traffic interception to fake OS fingerprints.
 
-1. **Modifies TCP window sizes** to mimic different OS behaviors.
-2. **Alters ICMP responses** to disrupt fingerprinting.
-3. **Blocks ICMP netmask requests** used in OS identification.
-4. **Modifies TCP RST behavior**, confusing scans since Windows and Linux handle RST packets differently.
-5. **Adjusts TTL (Time-To-Live) values** to imitate various OS defaults:
-   - **Linux**: `64`
-   - **Windows**: `128`
-   - **FreeBSD/Mac**: `255`
+---
+
+## **Features**
+✅ **OS Fingerprinting Deception** – Mimic Windows, Linux, Mac, FreeBSD  
+✅ **Port Scan Evasion** – Fake open/closed ports  
+✅ **Traffic Capture** – Logs TCP, ICMP, UDP, and ARP responses  
+✅ **Custom Configurations** – Supports various OS templates  
+
+---
+
+## **Installation**
+### **Requirements**
+- **Python 3.11+**
+- **Linux OS** (Tested on Ubuntu, Kali)
+- **Root Privileges** (For raw packet manipulation)
 
 ## Port Deception Techniques
 To mislead port scans, **Camouflage Cloak**:
@@ -53,34 +62,21 @@ CamouflageCloak/
 
 ---
 
-## Installation
-
-### Prerequisites
-
+## **Installation**
+### **Requirements**
 - **Python 3.11+**
-- **Linux-based OS** (Tested on Ubuntu, Kali Linux)
-- **Root/Sudo Privileges** (Required for raw socket manipulation)
+- **Linux OS** (Tested on Ubuntu, Kali)
+- **Root Privileges** (For raw packet manipulation)
 
-### Clone the Repository
-
+### **Clone & Set Up**
 ```bash
 git clone https://github.com/jimskchang/Camouflage-Cloak.git
-cd CamouflageCloak
-```
+cd Camouflage-Cloak
 
-## Configuration
-
-Edit **`settings.py`** to match your environment:
-
-```python
-# Camouflage-Cloak Server Network Configuration
-HOST = "192.168.23.206"  # Replace with the actual server IP
-NIC = "ens192"  # Replace with the correct network interface
-```
-
-> Ensure these values are set correctly before running the tool.
-
----
+## **Usage**
+### **Edit settings.py** to match your environment:
+- HOST = "192.168.X.X"  # Camouflage-Cloak Host IP # Replace with the actual server IP
+- NIC = "eth0"  # Camouflage-Cloak Host to Target Host Network Interface
 
 ## Environment Setup
 
@@ -101,23 +97,19 @@ e.g.:
 sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <ts>] [--dest </os_record>]
 ```
 
-### Available Arguments
+### **Available Modes**
+| Mode         | Description |
+|---------------|-------------|
+| `--scan ts`   | Capture OS fingerprint for deception. |
+| `--scan od`   | Perform OS deception (mimic a different OS). |
+| `--scan pd`   | Deceive port scans by simulating open/closed ports. |
+| `--os <OS>`   | Specify the OS template to mimic (e.g., `win10`, `linux5`). |
+| `--status`    | Choose whether to simulate open or closed ports. |
+| `--te <time>` | Set timeout duration for deception in minutes. |
 
-| Argument        | Description |
-|----------------|-------------|
-| `--host`      | Target host IP to deceive or capture fingerprint |
-| `--nic`       | Target host Network interface to capture packets |
-| `--scan`      | Scanning technique for fingerprint collection |
-| `--ts`        | Building templeate synthese technique for OS fingerprint collection |
-| `--dest`      | Directory to store OS fingerprint files |
-| `--od`        | Perform OS deception using pre-recorded fingerprints |
-| `--pd`        | Perform Port deception using pre-recorded fingerprints |
-| `--os`        | choose OS to mimic |
-| `--status`    | choose open or close to deceive port|
-| `--te`        | Timeout duration in minutes (Required for --od and --pd) |
+## **Example Commands**
 
-
-#### Example Commands
+### **Step 1: Build OS Fingerprint**
 
 **Build Template Synthesis**
 
