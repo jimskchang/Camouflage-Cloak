@@ -6,6 +6,7 @@ import socket
 import struct
 import sys
 import subprocess
+import json
 import src.settings as settings
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
@@ -17,7 +18,7 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
-# Explicitly set the correct OS_RECORD_PATH to avoid /root issue
+# Explicitly set correct path to prevent /root issues when using sudo
 DEFAULT_OS_RECORD_PATH = "/home/user/Camouflage-Cloak/os_record"
 
 def ensure_directory_exists(directory):
@@ -30,7 +31,7 @@ def ensure_directory_exists(directory):
         sys.exit(1)
 
 def ensure_file_permissions(file_path):
-    """Ensure OS fingerprint files are readable & writable for OS deception."""
+    """Ensure OS fingerprint files are readable & writable."""
     try:
         if os.path.exists(file_path):
             os.chmod(file_path, 0o644)  # Read & Write for owner, Read for others
@@ -60,9 +61,8 @@ def collect_fingerprint(target_host, dest, nic):
     """
     logging.info(f"Starting OS Fingerprinting on {target_host}")
 
-    # Ensure destination path is set correctly
     if not dest or dest == settings.OS_RECORD_PATH:
-        dest = DEFAULT_OS_RECORD_PATH  # Use explicit /home/user path
+        dest = DEFAULT_OS_RECORD_PATH
 
     ensure_directory_exists(dest)
 
@@ -121,7 +121,7 @@ def collect_fingerprint(target_host, dest, nic):
                 with open(file_path, "a") as f:
                     f.write(packet_data)
 
-                ensure_file_permissions(file_path)  # Ensure no locked files
+                ensure_file_permissions(file_path)
 
                 packet_count += 1
 
@@ -130,6 +130,32 @@ def collect_fingerprint(target_host, dest, nic):
             break
 
     logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
+
+def convert_to_json(file_path):
+    """
+    Reads a fingerprint file, detects if it's plain text, and converts it into JSON format.
+    """
+    try:
+        with open(file_path, "r") as f:
+            content = f.read().strip()
+
+        logging.debug(f"Checking file: {file_path} - Content: {content[:100]}")
+
+        if not content:
+            json_content = {}
+        elif content.startswith("{"):
+            json_content = json.loads(content)
+        else:
+            json_content = {"raw_data": content.split("\n")}
+
+        with open(file_path, "w") as f:
+            json.dump(json_content, f, indent=4)
+
+        logging.info(f"Converted {file_path} to JSON format successfully.")
+
+    except Exception as e:
+        logging.error(f"Error converting {file_path} to JSON: {e}")
+        sys.exit(1)
 
 def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception Against Malicious Scans")
@@ -146,22 +172,22 @@ def main():
 
     if args.scan == 'ts':
         collect_fingerprint(args.host, args.dest, args.nic)
+
     elif args.scan == 'od':
         if not args.os or args.te is None:
             logging.error("Missing required arguments: --os and --te are required for --od")
             return
-        
-        # Ensure OS record path is correctly set to /home/user
+
         os_record_path = os.path.join(DEFAULT_OS_RECORD_PATH, args.os)
         ensure_directory_exists(os_record_path)
 
-        # Ensure OS fingerprint files are accessible
         for file in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
-            ensure_file_permissions(os.path.join(os_record_path, file))
+            file_path = os.path.join(os_record_path, file)
+            ensure_file_permissions(file_path)
+            convert_to_json(file_path)
 
-        # ✅ Fixed: Pass timeout to `os_deceive()`
         deceiver = OsDeceiver(args.host, args.os, os_record_path)
-        deceiver.os_deceive(args.te)  # 🛠️ Now correctly passing `time_out_minutes`
+        deceiver.os_deceive(args.te)
 
     elif args.scan == 'pd':
         if not args.status or args.te is None:
@@ -169,8 +195,6 @@ def main():
             return
         deceiver = PortDeceiver(args.host)
         deceiver.deceive_ps_hs(args.status)
-    else:
-        logging.error("Invalid command. Specify --scan ts, --scan od, or --scan pd.")
 
 if __name__ == '__main__':
     main()
