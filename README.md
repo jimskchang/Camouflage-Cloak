@@ -92,12 +92,6 @@ cd Camouflage-Cloak
 - **Bridge the NICs** for seamless traffic flow.
 
 ## Running Camouflage Cloak ##
-### Execute the Main Script
-e.g.:
-```bash
-sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <ts>] [--dest </os_record>]
-```
-
 ### **Available Modes**
 | Mode         | Description |
 |---------------|-------------|
@@ -108,7 +102,6 @@ sudo python3 main.py [--host <192.168.1.200>] [--nic <nic_Name>] [--scan <ts>] [
 | `--status`    | Choose whether to simulate open or closed ports. |
 | `--te <time>` | Set timeout duration for deception in minutes. |
 
-## **Example Commands**
 
 ### **Step 1: Build OS Fingerprint**
 
@@ -132,7 +125,7 @@ sudo nmap -A -p 1-65535 <Target Host IP>
 sudo nmap --osscan-guess <Target Host IP>
 ```
 
-***Step 4:*** Move back to Camouflage-Cloak host and execute cd
+***Step 4:*** Move back to User@Camouflage-Cloak host
 ```bash
 cd
 ```
@@ -156,19 +149,19 @@ cd os_record
 ```
 
 ```bash
-mv arp_record.txt win10/
+mv arp_record.txt win10
 ```
 
 ```bash
-mv icmp_record.txt win10/
+mv icmp_record.txt win10
 ```
 
 ```bash
-mv tcp_record.txt win10/
+mv tcp_record.txt win10
 ```
 
 ```bash
-mv udp_record.txt win10/
+mv udp_record.txt win10
 ```
 
 ```bash
