@@ -143,7 +143,7 @@ def main():
     if args.scan == 'ts':
         collect_fingerprint(args.host, args.dest, args.nic)
     elif args.scan == 'od':
-        if not args.os or not args.te:
+        if not args.os or args.te is None:
             logging.error("Missing required arguments: --os and --te are required for --od")
             return
         
@@ -155,10 +155,12 @@ def main():
         for file in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
             ensure_file_permissions(os.path.join(os_record_path, file))
 
+        # ✅ Fixed: Pass timeout to `os_deceive()`
         deceiver = OsDeceiver(args.host, args.os, os_record_path)
-        deceiver.os_deceive()
+        deceiver.os_deceive(args.te)  # 🛠️ Now correctly passing `time_out_minutes`
+
     elif args.scan == 'pd':
-        if not args.status or not args.te:
+        if not args.status or args.te is None:
             logging.error("Missing required arguments: --status and --te are required for --pd")
             return
         deceiver = PortDeceiver(args.host)
