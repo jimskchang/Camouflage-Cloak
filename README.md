@@ -90,6 +90,33 @@ OS_PRESETS = {
   "linux":  {"ttl": 64, "tcp_window": 5840},
   "mac":    {"ttl": 64, "tcp_window": 65535}
 }
+```
 
 ## Usage
+### Build Template Synthesis
+```python
+sudo -E python3 main.py --host <target_ip> --nic <NIC_TARGET> --scan ts --dest ./os_record
+```
+
+**Then run Nmap from the attacker machine during the 3-min capture window:**
+```python
+sudo nmap -O <target_ip>
+```
+**Move captured files:**
+```python
+mkdir -p os_record/win10
+mv os_record/*.txt os_record/win10/
+```
+
+## Run OS Deception
+```python
+sudo -E python3 main.py --host <target_ip> --nic <NIC_TARGET> --scan od --os win10 --te 6
+```
+
+Then run Nmap again from attacker. It should detect the spoofed OS.
+
+##  Run Port Deception
+```python
+sudo -E python3 main.py --host <target_ip> --nic <NIC_TARGET> --scan pd --status open --te 6
+```
 
