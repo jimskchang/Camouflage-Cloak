@@ -56,30 +56,20 @@ if not check_nic_exists(NIC_PROBE):
 # 🔹 Define which TCP ports should be ignored as "free"
 FREE_PORT = [4441, 5551, 6661]
 
-# 🔹 OS Template-specific TTL and TCP window values (used for deception responses)
+# 🔹 OS Fingerprint Presets (TTL + TCP Window Sizes)
 OS_TEMPLATES = {
-    "win10": {
-        "ttl": 128,
-        "tcp_window": 8192
-    },
-    "linux": {
-        "ttl": 64,
-        "tcp_window": 5840
-    },
-    "macos": {
-        "ttl": 64,
-        "tcp_window": 65535
-    },
-    "freebsd": {
-        "ttl": 64,
-        "tcp_window": 65535
-    },
-    "centos": {
-        "ttl": 64,
-        "tcp_window": 14600
-    },
-    "default": {
-        "ttl": 64,
-        "tcp_window": 8192
-    }
+    "linux": {"ttl": 64, "window": 5840},
+    "linux5": {"ttl": 64, "window": 29200},
+    "win7": {"ttl": 128, "window": 8192},
+    "win10": {"ttl": 128, "window": 65535},
+    "win11": {"ttl": 128, "window": 64240},
+    "windows2022": {"ttl": 128, "window": 65535},
+    "windows2025": {"ttl": 128, "window": 65535},
+    "mac": {"ttl": 64, "window": 65535},
+    "freebsd": {"ttl": 64, "window": 65535},
+    "centos": {"ttl": 64, "window": 5840}
 }
+
+def get_os_fingerprint(os_name: str) -> dict:
+    """Return TTL and TCP window size for a given OS name."""
+    return OS_TEMPLATES.get(os_name.lower(), {"ttl": 64, "window": 8192})
