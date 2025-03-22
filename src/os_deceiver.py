@@ -10,6 +10,7 @@ from typing import Dict
 import src.settings as settings
 from src.Packet import Packet
 from src.tcp import TcpConnect
+from src.utils import validate_nic_and_log
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -19,6 +20,10 @@ class OsDeceiver:
         self.host = target_host
         self.os = target_os
         self.nic = nic or settings.NIC_PROBE
+
+        # Validate NIC and print MAC used
+        self.mac = validate_nic_and_log(self.nic)
+
         self.conn = TcpConnect(self.host, nic=self.nic)
         self.dest = dest
         self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
@@ -58,7 +63,6 @@ class OsDeceiver:
         while datetime.now() < timeout:
             try:
                 packet, _ = self.conn.sock.recvfrom(65565)
-                logging.info(f"📥 Captured packet: {len(packet)} bytes")
                 eth_type = struct.unpack("!H", packet[12:14])[0]
 
                 if eth_type == 0x0800:  # IPv4
@@ -98,6 +102,7 @@ class OsDeceiver:
             try:
                 raw, _ = self.conn.sock.recvfrom(65565)
                 logging.info(f"📥 Raw packet received: {len(raw)} bytes")
+
                 pkt = Packet(raw)
                 pkt.unpack()
 
