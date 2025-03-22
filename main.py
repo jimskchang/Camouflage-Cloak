@@ -7,6 +7,8 @@ import struct
 import sys
 import subprocess
 import json
+import base64
+import ast
 import src.settings as settings
 from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
@@ -133,28 +135,44 @@ def collect_fingerprint(target_host, dest, nic):
 
 def convert_to_json(file_path):
     """
-    Reads a fingerprint file, detects if it's plain text, and converts it into JSON format.
+    Converts legacy fingerprint str(dict) files to base64-encoded JSON format.
+    Compatible with hybrid os_deceiver.py.
     """
     try:
         with open(file_path, "r") as f:
             content = f.read().strip()
 
-        logging.debug(f"Checking file: {file_path} - Content: {content[:100]}")
-
         if not content:
-            json_content = {}
-        elif content.startswith("{"):
-            json_content = json.loads(content)
-        else:
-            json_content = {"raw_data": content.split("\n")}
+            logging.warning(f"⚠ Skipping empty file: {file_path}")
+            return
+
+        try:
+            # Safely evaluate legacy str(dict) format
+            record_dict = ast.literal_eval(content)
+        except Exception as e:
+            logging.error(f"❌ Could not parse legacy dict from {file_path}: {e}")
+            return
+
+        json_base64 = {}
+        for k, v in record_dict.items():
+            if v is None:
+                continue
+
+            # Ensure both key and value are bytes
+            key_bytes = k.encode("latin1") if isinstance(k, str) else k
+            val_bytes = v.encode("latin1") if isinstance(v, str) else v
+
+            key_b64 = base64.b64encode(key_bytes).decode("utf-8")
+            val_b64 = base64.b64encode(val_bytes).decode("utf-8")
+            json_base64[key_b64] = val_b64
 
         with open(file_path, "w") as f:
-            json.dump(json_content, f, indent=4)
+            json.dump(json_base64, f, indent=2)
 
-        logging.info(f"Converted {file_path} to JSON format successfully.")
+        logging.info(f"✅ Converted {file_path} to base64-encoded JSON format.")
 
     except Exception as e:
-        logging.error(f"Error converting {file_path} to JSON: {e}")
+        logging.error(f"❌ Error converting {file_path} to JSON: {e}")
         sys.exit(1)
 
 def main():
