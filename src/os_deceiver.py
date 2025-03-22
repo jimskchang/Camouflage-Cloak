@@ -15,16 +15,16 @@ DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
 
 class OsDeceiver:
-    def __init__(self, target_host: str, target_os: str, dest=None, nic=None):
+    def __init__(self, target_host: str, target_os: str, dest=None, nic: str = None):
         self.host = target_host
         self.os = target_os
         self.nic = nic or settings.NIC_PROBE
+        self.conn = TcpConnect(self.host, nic=self.nic)
         self.dest = dest
         self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
 
         os.makedirs(self.os_record_path, exist_ok=True)
-        self.conn = TcpConnect(self.host, nic=self.nic)
-        logging.info(f"OS Deception ready for {self.os} using path: {self.os_record_path} on NIC: {self.nic}")
+        logging.info(f"OS Deception ready for {self.os} using NIC: {self.nic} and path: {self.os_record_path}")
 
     def save_record(self, pkt_type: str, record: Dict[bytes, bytes]):
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
@@ -49,6 +49,40 @@ class OsDeceiver:
             logging.error(f"❌ Fail to load {file_path}, {e}")
             return {}
 
+    def os_record(self, timeout_minutes: int = 3):
+        logging.info("📅 Starting OS fingerprint collection...")
+        timeout = datetime.now() + timedelta(minutes=timeout_minutes)
+
+        tcp, udp, icmp, arp = {}, {}, {}, {}
+
+        while datetime.now() < timeout:
+            try:
+                packet, _ = self.conn.sock.recvfrom(65565)
+                eth_type = struct.unpack("!H", packet[12:14])[0]
+
+                if eth_type == 0x0800:  # IPv4
+                    proto = packet[23]
+                    if proto == 6:
+                        key, _ = gen_tcp_key(packet)
+                        tcp[key] = packet
+                    elif proto == 1:
+                        key, _ = gen_icmp_key(packet)
+                        icmp[key] = packet
+                    elif proto == 17:
+                        key, _ = gen_udp_key(packet)
+                        udp[key] = packet
+                elif eth_type == 0x0806:  # ARP
+                    key, _ = gen_arp_key(packet)
+                    arp[key] = packet
+            except Exception as e:
+                logging.error(f"❌ Error capturing packet: {e}")
+
+        self.save_record("tcp", tcp)
+        self.save_record("udp", udp)
+        self.save_record("icmp", icmp)
+        self.save_record("arp", arp)
+        logging.info("✅ Fingerprint collection complete.")
+
     def os_deceive(self, timeout_minutes: int = 5):
         templates = {
             'tcp': self.load_file('tcp'),
@@ -67,11 +101,11 @@ class OsDeceiver:
 
                 proto = pkt.l4 if pkt.l4 else pkt.l3
 
-                if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
+                if proto == 'tcp' and pkt.l4_field['dest_port'] in settings.FREE_PORT:
                     continue
 
-                if (pkt.l3 == 'ip' and pkt.l3_field.get('dest_IP') == socket.inet_aton(self.host)) or \
-                   (pkt.l3 == 'arp' and pkt.l3_field.get('recv_ip') == socket.inet_aton(self.host)):
+                if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == socket.inet_aton(self.host)) or \
+                   (pkt.l3 == 'arp' and pkt.l3_field['recv_ip'] == socket.inet_aton(self.host)):
 
                     key, _ = gen_key(proto, pkt.packet)
                     template = templates.get(proto, {}).get(key)
@@ -141,17 +175,15 @@ def gen_key(proto: str, packet: bytes):
         return gen_arp_key(packet)
     return b'', None
 
-
 def gen_tcp_key(packet: bytes):
     ip_header = packet[14:34]
     tcp_header = packet[34:54]
     src_port, dest_port, seq, ack_num, offset_flags = struct.unpack('!HHLLH', tcp_header[:14])
     offset = (offset_flags >> 12) * 4
-    payload = packet[54:54 + offset - 20]
+    payload = packet[54:54+offset-20]
     ip_key = ip_header[:8] + b'\x00' * 8
     tcp_key = struct.pack('!HHLLH', 0, dest_port, 0, 0, offset_flags) + tcp_header[14:20]
     return ip_key + tcp_key + payload, None
-
 
 def gen_udp_key(packet: bytes):
     ip_header = packet[14:34]
@@ -161,7 +193,6 @@ def gen_udp_key(packet: bytes):
     udp_key = struct.pack('!HHH', 0, 0, 8) + b'\x00\x00'
     return ip_key + udp_key + payload, None
 
-
 def gen_icmp_key(packet: bytes):
     ip_header = packet[14:34]
     icmp_header = packet[34:42]
@@ -170,10 +201,9 @@ def gen_icmp_key(packet: bytes):
     icmp_key = struct.pack('!BBHHH', icmp_type, code, 0, 0, 0)
     return ip_key + icmp_key, None
 
-
 def gen_arp_key(packet: bytes):
     arp_header = packet[14:42]
     hw_type, proto_type, hw_size, proto_size, opcode, s_mac, s_ip, t_mac, t_ip = struct.unpack('!HHBBH6s4s6s4s', arp_header)
     key = struct.pack('!HHBBH6s4s6s4s', hw_type, proto_type, hw_size, proto_size, opcode,
-                      b'\x00' * 6, b'\x00' * 4, b'\x00' * 6, b'\x00' * 4)
+                      b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
     return key, None
