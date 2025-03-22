@@ -10,7 +10,6 @@ from typing import Dict
 import src.settings as settings
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.utils import validate_nic_and_log
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -20,16 +19,27 @@ class OsDeceiver:
         self.host = target_host
         self.os = target_os
         self.nic = nic or settings.NIC_PROBE
-
-        # Validate NIC and print MAC used
-        self.mac = validate_nic_and_log(self.nic)
-
-        self.conn = TcpConnect(self.host, nic=self.nic)
         self.dest = dest
         self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
 
+        # --- Check NIC existence and log MAC ---
+        if not os.path.exists(f"/sys/class/net/{self.nic}"):
+            logging.error(f"❌ NIC '{self.nic}' not found. Check your interface name.")
+            raise ValueError(f"NIC '{self.nic}' does not exist.")
+
+        mac_path = f"/sys/class/net/{self.nic}/address"
+        try:
+            with open(mac_path, "r") as f:
+                mac = f.read().strip()
+                logging.info(f"✅ Using MAC address {mac} for NIC '{self.nic}'")
+        except Exception as e:
+            logging.warning(f"⚠ Unable to read MAC address for {self.nic}: {e}")
+
         os.makedirs(self.os_record_path, exist_ok=True)
-        logging.info(f"OS Deception ready for {self.os} using NIC: {self.nic} and path: {self.os_record_path}")
+        self.conn = TcpConnect(self.host, nic=self.nic)
+
+        logging.info(f"🛡️ OS Deception ready for {self.os} using NIC: {self.nic}")
+        logging.info(f"📁 Fingerprint path: {self.os_record_path}")
 
     def save_record(self, pkt_type: str, record: Dict[bytes, bytes]):
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
@@ -39,7 +49,7 @@ class OsDeceiver:
                 for k, v in record.items() if v
             }
             json.dump(encoded, f, indent=2)
-        logging.info(f"Saved {pkt_type} record to {file_path}")
+        logging.info(f"✅ Saved {pkt_type} record to {file_path}")
 
     def load_file(self, pkt_type: str) -> Dict[bytes, bytes]:
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
@@ -55,7 +65,7 @@ class OsDeceiver:
             return {}
 
     def os_record(self, timeout_minutes: int = 3):
-        logging.info("📅 Starting OS fingerprint collection...")
+        logging.info("📡 Capturing OS fingerprint packets...")
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
 
         tcp, udp, icmp, arp = {}, {}, {}, {}
@@ -65,7 +75,7 @@ class OsDeceiver:
                 packet, _ = self.conn.sock.recvfrom(65565)
                 eth_type = struct.unpack("!H", packet[12:14])[0]
 
-                if eth_type == 0x0800:  # IPv4
+                if eth_type == 0x0800:
                     proto = packet[23]
                     if proto == 6:
                         key, _ = gen_tcp_key(packet)
@@ -76,7 +86,7 @@ class OsDeceiver:
                     elif proto == 17:
                         key, _ = gen_udp_key(packet)
                         udp[key] = packet
-                elif eth_type == 0x0806:  # ARP
+                elif eth_type == 0x0806:
                     key, _ = gen_arp_key(packet)
                     arp[key] = packet
             except Exception as e:
@@ -95,8 +105,11 @@ class OsDeceiver:
             'udp': self.load_file('udp'),
             'arp': self.load_file('arp')
         }
+
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
         counter = 0
+
+        logging.info("🌀 Starting OS deception loop...")
 
         while datetime.now() < timeout:
             try:
@@ -110,7 +123,7 @@ class OsDeceiver:
 
                 proto = pkt.l4 if pkt.l4 else pkt.l3
 
-                if proto == 'tcp' and pkt.l4_field['dest_port'] in settings.FREE_PORT:
+                if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
                     continue
 
                 if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == socket.inet_aton(self.host)) or \
