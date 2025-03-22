@@ -25,14 +25,14 @@ ICMP_HEADER_LEN = 8
 L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
 
-# 🔹 Define network interface roles (manually configured)
-NIC_TARGET = 'ens192'  # 🔹 NIC connected to the target host
-NIC_PROBE  = 'ens224'  # 🔹 NIC exposed to the scanning attacker (Nmap, etc.)
+# 🔹 Manually defined network interfaces
+NIC_TARGET = 'ens192'  # NIC connected to the target host
+NIC_PROBE  = 'ens224'  # NIC exposed to scanning attacker (Nmap, etc.)
 
-# 🔹 Set the Camouflage Cloak server's IP address (must match NIC_TARGET IP)
+# 🔹 IP of Camouflage Cloak device (should match NIC_TARGET IP)
 HOST = "192.168.23.206"
 
-# 🔹 MAC address of NIC_TARGET
+# 🔹 MAC address of NIC_TARGET (used in ARP response spoofing)
 def get_mac_address(nic: str) -> str:
     try:
         with open(f"/sys/class/net/{nic}/address", "r") as f:
@@ -44,7 +44,7 @@ def get_mac_address(nic: str) -> str:
 
 MAC = get_mac_address(NIC_TARGET)
 
-# 🔹 Verify NIC existence
+# 🔹 Interface validation logic
 def check_nic_exists(nic: str) -> bool:
     return os.path.exists(f"/sys/class/net/{nic}")
 
@@ -53,5 +53,5 @@ if not check_nic_exists(NIC_TARGET):
 if not check_nic_exists(NIC_PROBE):
     raise ValueError(f"❌ Error: NIC_PROBE '{NIC_PROBE}' not found!")
 
-# 🔹 Define "free" ports to ignore for TCP deception
+# 🔹 Define which TCP ports should be ignored as "free"
 FREE_PORT = [4441, 5551, 6661]
