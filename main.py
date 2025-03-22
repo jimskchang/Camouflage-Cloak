@@ -115,16 +115,22 @@ def collect_fingerprint(target_host, dest, nic):
     logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
 def convert_to_json(file_path):
+    """
+    Converts legacy fingerprint str(dict) files to base64-encoded JSON format.
+    Handles binary content (e.g., null bytes).
+    """
     try:
         with open(file_path, "rb") as f:
-            content = f.read().strip()
+            raw_bytes = f.read()
 
-        if not content:
+        if not raw_bytes:
             logging.warning(f"⚠ Skipping empty file: {file_path}")
             return
 
+        # Try to decode raw content to str using latin1 (preserves binary)
         try:
-            record_dict = ast.literal_eval(content.decode("latin1"))
+            raw_text = raw_bytes.decode("latin1")
+            record_dict = eval(raw_text)  # Fallback to eval due to legacy format
         except Exception as e:
             logging.error(f"❌ Could not parse legacy dict from {file_path}: {e}")
             return
@@ -133,8 +139,13 @@ def convert_to_json(file_path):
         for k, v in record_dict.items():
             if v is None:
                 continue
-            key_b64 = base64.b64encode(k if isinstance(k, bytes) else k.encode("latin1")).decode("utf-8")
-            val_b64 = base64.b64encode(v if isinstance(v, bytes) else v.encode("latin1")).decode("utf-8")
+
+            # Support binary key-value pairs
+            key_bytes = k.encode("latin1") if isinstance(k, str) else k
+            val_bytes = v.encode("latin1") if isinstance(v, str) else v
+
+            key_b64 = base64.b64encode(key_bytes).decode("utf-8")
+            val_b64 = base64.b64encode(val_bytes).decode("utf-8")
             json_base64[key_b64] = val_b64
 
         with open(file_path, "w") as f:
