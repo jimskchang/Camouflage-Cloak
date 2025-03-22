@@ -185,7 +185,7 @@ cd Camouflage-Cloak
 
 ***Step 2:*** execute the following instruction
 ```bash
-sudo python3 main.py --host <Target Host IP> --nic <Target Host NIC> --scan od --os <OS template e.g. win7/win10/centos> --te <deceive time out time e.g. 6 = 6 minutes>
+sudo -E python3 main.py --host <Target Host IP> --nic <Target Host NIC> --scan od --os <OS template e.g. win7/win10/centos> --te <deceive time out time e.g. 6 = 6 minutes>
 ```
 
 ***Step 2:*** run Nmap OS detection on attacker foothold and observe the result
