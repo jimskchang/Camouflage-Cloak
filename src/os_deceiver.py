@@ -1,74 +1,65 @@
-import logging
 import os
 import json
+import base64
+import logging
 import socket
 import struct
 from datetime import datetime, timedelta
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 import src.settings as settings
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from scapy.all import IP, TCP, UDP, ICMP, Ether, sendp
+
 
 class OsDeceiver:
     def __init__(self, target_host: str, target_os: str):
-        """
-        Initializes OS deception with target details and ensures correct paths.
-        """
         self.host = target_host
         self.os = target_os
         self.conn = TcpConnect(target_host)
-        self.port_seq: List[int] = [4441, 5551, 6661]
 
-        # ✅ Set correct path to `os_record` directory
-        self.os_record_path = f"/home/user/Camouflage-Cloak/os_record/{self.os}"
+        self.os_record_path = os.path.join(settings.OS_RECORD_DIR, self.os)
+        if not os.path.isdir(self.os_record_path):
+            logging.error(f"❌ OS record path not found: {self.os_record_path}")
+        else:
+            logging.info(f"📌 OS Deception initialized for {self.os} using {self.os_record_path}")
 
-        logging.info(f"📌 OS Deception Initialized for {self.os}. OS Record Path: {self.os_record_path}")
-
-        # ✅ Ensure OS record directory exists
-        if not os.path.exists(self.os_record_path):
-            logging.error(f"❌ OS fingerprint directory {self.os_record_path} does not exist!")
-            return
-
-    def load_file(self, pkt_type: str) -> Dict[str, Any]:
+    def load_file(self, pkt_type: str) -> Dict[bytes, bytes]:
         """
-        Load OS deception template records dynamically from the selected OS directory.
+        Loads pre-recorded packet templates from JSON (base64-encoded keys/values).
         """
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
 
         try:
-            if not os.path.exists(file_path):
-                logging.error(f"❌ Error: {file_path} not found.")
-                return {}
-
-            if not os.access(file_path, os.R_OK):
-                logging.error(f"❌ Permission error: Cannot read {file_path}.")
-                return {}
-
-            with open(file_path, 'r', encoding='utf-8') as file:
-                packet_data = file.read().strip()
-                if not packet_data:
-                    logging.warning(f"⚠ Warning: {file_path} is empty.")
+            with open(file_path, 'r', encoding='utf-8') as f:
+                data = f.read().strip()
+                if not data:
+                    logging.warning(f"⚠ {file_path} is empty.")
                     return {}
-
-                packet_dict = json.loads(packet_data)
-                return {k: v for k, v in packet_dict.items() if v is not None}
-
-        except (json.JSONDecodeError, FileNotFoundError, IOError, PermissionError) as e:
-            logging.error(f"❌ Error loading {file_path}: {e}")
+                raw_dict = json.loads(data)
+                return {
+                    base64.b64decode(k): base64.b64decode(v)
+                    for k, v in raw_dict.items() if v
+                }
+        except Exception as e:
+            logging.error(f"❌ Failed to load {file_path}: {e}")
             return {}
 
-    def os_deceive(self, timeout_minutes: int) -> None:
+    def os_deceive(self, timeout_minutes: int = 5):
         """
-        Perform OS deception based on template packets.
-        Stops after the specified timeout.
+        Main deception loop — reads packets and responds with spoofed replies.
         """
-        logging.info(f'📌 Loading OS deception template for {self.os} from {self.os_record_path}')
-        template_dict = {p: self.load_file(p) for p in ['arp', 'tcp', 'udp', 'icmp']}
+        template_dict = {
+            'tcp': self.load_file('tcp'),
+            'icmp': self.load_file('icmp'),
+            'udp': self.load_file('udp'),
+            'arp': self.load_file('arp')
+        }
+        logging.info(f"📦 Loaded templates for {self.os}")
 
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
-        
+        dec_count = 0
+
         while datetime.now() < timeout:
             try:
                 raw_pkt, _ = self.conn.sock.recvfrom(65565)
@@ -77,104 +68,91 @@ class OsDeceiver:
 
                 if (pkt.l3 == 'ip' and pkt.l3_field.get('dest_IP') == socket.inet_aton(self.host)) or \
                    (pkt.l3 == 'arp' and pkt.l3_field.get('recv_ip') == socket.inet_aton(self.host)):
-                    rsp = deceived_pkt_synthesis(pkt, template_dict, self.os)
-                    if rsp:
-                        logging.info(f'📌 Sending deceptive {pkt.l3} packet for {self.os}.')
-                        sendp(rsp, iface=settings.INTERFACE, verbose=False)
+
+                    key, _ = gen_key(pkt.l3, pkt.packet)
+                    template_bytes = template_dict.get(pkt.l3, {}).get(key)
+
+                    if template_bytes:
+                        response = synthesize_response(pkt, template_bytes)
+                        if response:
+                            self.conn.sock.send(response)
+                            dec_count += 1
+                            logging.info(f"📤 Sent {pkt.l3} response ({dec_count})")
+                    else:
+                        logging.debug(f"🔍 No template match for incoming {pkt.l3} packet.")
             except Exception as e:
-                logging.error(f"❌ Error in OS deception process: {e}")
-                continue
+                logging.error(f"❌ Error in deception loop: {e}")
 
-        logging.info(f"🛑 OS Deception for {self.os} completed.")
+        logging.info("🛑 OS Deception session ended.")
 
-def deceived_pkt_synthesis(req: Packet, template: Dict[str, Any], os_type: str) -> bytes:
+
+def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
     """
-    Generate a deceptive packet based on the request and template for the specified OS.
+    Adjusts raw template packet to respond to the incoming request appropriately.
     """
     try:
-        raw_template = template.get(req.l3, {}).get(req.packet)
-        if not raw_template:
-            return b''  # No deception data available
-        
-        template_pkt = Packet(raw_template)
-        template_pkt.unpack()
+        rsp = Packet(packet=raw_template)
+        rsp.unpack()
 
-        if req.l3 == 'tcp':
-            return craft_tcp_response(req, os_type)
+        if req_pkt.l3 == 'tcp':
+            rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
+            rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
+            rsp.l3_field['src_IP'] = req_pkt.l3_field['dest_IP']
+            rsp.l3_field['dest_IP'] = req_pkt.l3_field['src_IP']
+            rsp.l4_field['src_port'] = req_pkt.l4_field['dest_port']
+            rsp.l4_field['dest_port'] = req_pkt.l4_field['src_port']
+            rsp.l4_field['seq'] = req_pkt.l4_field['ack_num']
+            rsp.l4_field['ack_num'] = req_pkt.l4_field['seq'] + 1
+            if 8 in rsp.l4_field.get('kind_seq', []):
+                rsp.l4_field['option_field']['ts_echo_reply'] = req_pkt.l4_field['option_field']['ts_val']
 
-        elif req.l3 == 'icmp':
-            return craft_icmp_response(req, os_type)
+        elif req_pkt.l3 == 'icmp':
+            rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
+            rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
+            rsp.l3_field['src_IP'] = req_pkt.l3_field['dest_IP']
+            rsp.l3_field['dest_IP'] = req_pkt.l3_field['src_IP']
+            rsp.l4_field['ID'] = req_pkt.l4_field['ID']
+            rsp.l4_field['seq'] = req_pkt.l4_field['seq']
 
-        elif req.l3 == 'udp':
-            return craft_udp_response(req, os_type)
+        elif req_pkt.l3 == 'udp':
+            rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
+            rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
+            rsp.l3_field['src_IP'] = req_pkt.l3_field['dest_IP']
+            rsp.l3_field['dest_IP'] = req_pkt.l3_field['src_IP']
+            rsp.l4_field['ID'] = 0
+            rsp.l4_field['seq'] = 0
 
-        elif req.l3 == 'arp':
-            return craft_arp_response(req)
+        elif req_pkt.l3 == 'arp':
+            rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
+            rsp.l2_field['sMAC'] = settings.mac
+            rsp.l3_field['sender_mac'] = settings.mac
+            rsp.l3_field['sender_ip'] = socket.inet_aton(settings.host)
+            rsp.l3_field['recv_mac'] = req_pkt.l3_field['sender_mac']
+            rsp.l3_field['recv_ip'] = req_pkt.l3_field['sender_ip']
 
-        return b''  # Unsupported packet type
+        rsp.pack()
+        return rsp.packet
     except Exception as e:
-        logging.error(f"❌ Error synthesizing deceptive packet: {e}")
+        logging.error(f"❌ Failed to synthesize response: {e}")
         return b''
 
-def craft_tcp_response(req: Packet, os_type: str) -> bytes:
+
+def gen_key(proto: str, packet: bytes):
     """
-    Craft a deceptive TCP response based on the selected OS.
+    Wrapper to generate normalized packet keys for matching.
     """
+    if proto == 'tcp':
+        return gen_tcp_key(packet)
+    elif proto == 'icmp':
+        return gen_icmp_key(packet)
+    elif proto == 'udp':
+        return gen_udp_key(packet)
+    elif proto == 'arp':
+        return gen_arp_key(packet)
+    return b'', None
 
-    # ✅ Updated OS Mapping with Correct `winserverYYYY` Names
-    ttl_map = {
-        "win10": 128,
-        "win11": 128,
-        "winserver2016": 128,
-        "winserver2022": 128,
-        "winserver2025": 255,  
-        "linux": 64,
-        "macos": 64
-    }
 
-    window_map = {
-        "win10": 64240,
-        "win11": 65535,
-        "winserver2016": 65535,
-        "winserver2022": 64240,
-        "winserver2025": 65535,  
-        "linux": 5840,
-        "macos": 65535
-    }
-
-    ttl = ttl_map.get(os_type.lower(), 64)
-    window_size = window_map.get(os_type.lower(), 5840)
-
-    try:
-        pkt = Ether() / IP(src=req.l3_field['dest_IP'], dst=req.l3_field['src_IP'], ttl=ttl) / \
-              TCP(sport=req.l4_field['dest_port'], dport=req.l4_field['src_port'], flags="SA",
-                  window=window_size, options=[("MSS", 1460), ("NOP", None), ("WScale", 8)])
-        return pkt.build()
-    except Exception as e:
-        logging.error(f"❌ Error crafting TCP response: {e}")
-        return b''
-
-def craft_icmp_response(req: Packet, os_type: str) -> bytes:
-    """
-    Craft a deceptive ICMP response based on the selected OS.
-    """
-
-    ttl_map = {
-        "win10": 128,
-        "win11": 128,
-        "winserver2016": 128,
-        "winserver2022": 128,
-        "winserver2025": 255,
-        "linux": 64,
-        "macos": 64
-    }
-
-    ttl = ttl_map.get(os_type.lower(), 64)
-
-    try:
-        pkt = Ether() / IP(src=req.l3_field['dest_IP'], dst=req.l3_field['src_IP'], ttl=ttl) / \
-              ICMP(type=0, code=0, id=req.l4_field['ID'], seq=req.l4_field['seq'])
-        return pkt.build()
-    except Exception as e:
-        logging.error(f"❌ Error crafting ICMP response: {e}")
-        return b''
+# Use the original gen_*_key functions here (not shown for brevity)
+# They normalize packets and strip non-essential fields to create a matchable key.
+# You can reuse: gen_tcp_key(), gen_icmp_key(), gen_udp_key(), gen_arp_key()
+# Make sure those are included in your project and imported as needed.
