@@ -23,10 +23,15 @@ class OsDeceiver:
         os.makedirs(self.os_record_path, exist_ok=True)
         logging.info(f"OS Deception ready for {self.os} using path: {self.os_record_path}")
 
-        # Bind deception socket to NIC_PROBE
-        self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-        self.sock.bind((settings.NIC_PROBE, 0))
-        logging.info(f"Listening for packets on NIC_PROBE: {settings.NIC_PROBE}")
+        # Deception socket (uses NIC_PROBE)
+        self.deception_sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+        self.deception_sock.bind((settings.NIC_PROBE, 0))
+        logging.info(f"Deception socket bound to NIC_PROBE: {settings.NIC_PROBE}")
+
+        # Recording socket (uses NIC_TARGET)
+        self.record_sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+        self.record_sock.bind((settings.NIC_TARGET, 0))
+        logging.info(f"Recording socket bound to NIC_TARGET: {settings.NIC_TARGET}")
 
     def save_record(self, pkt_type: str, record: Dict[bytes, bytes]):
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
@@ -51,6 +56,40 @@ class OsDeceiver:
             logging.error(f"❌ Fail to load {file_path}, {e}")
             return {}
 
+    def os_record(self, timeout_minutes: int = 3):
+        logging.info("📅 Starting OS fingerprint collection...")
+        timeout = datetime.now() + timedelta(minutes=timeout_minutes)
+
+        tcp, udp, icmp, arp = {}, {}, {}, {}
+
+        while datetime.now() < timeout:
+            try:
+                packet, _ = self.record_sock.recvfrom(65565)
+                eth_type = struct.unpack("!H", packet[12:14])[0]
+
+                if eth_type == 0x0800:  # IPv4
+                    proto = packet[23]
+                    if proto == 6:
+                        key, _ = gen_tcp_key(packet)
+                        tcp[key] = packet
+                    elif proto == 1:
+                        key, _ = gen_icmp_key(packet)
+                        icmp[key] = packet
+                    elif proto == 17:
+                        key, _ = gen_udp_key(packet)
+                        udp[key] = packet
+                elif eth_type == 0x0806:  # ARP
+                    key, _ = gen_arp_key(packet)
+                    arp[key] = packet
+            except Exception as e:
+                logging.error(f"❌ Error capturing packet: {e}")
+
+        self.save_record("tcp", tcp)
+        self.save_record("udp", udp)
+        self.save_record("icmp", icmp)
+        self.save_record("arp", arp)
+        logging.info("✅ Fingerprint collection complete.")
+
     def os_deceive(self, timeout_minutes: int = 5):
         templates = {
             'tcp': self.load_file('tcp'),
@@ -63,7 +102,7 @@ class OsDeceiver:
 
         while datetime.now() < timeout:
             try:
-                raw, _ = self.sock.recvfrom(65565)
+                raw, _ = self.deception_sock.recvfrom(65565)
                 pkt = Packet(raw)
                 pkt.unpack()
 
@@ -81,7 +120,7 @@ class OsDeceiver:
                     if template:
                         response = synthesize_response(pkt, template)
                         if response:
-                            self.sock.send(response)
+                            self.deception_sock.send(response)
                             counter += 1
                             logging.info(f"📤 Sent {proto} response #{counter}")
                     elif DEBUG_MODE:
