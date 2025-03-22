@@ -1,3 +1,4 @@
+# --------------------------- main.py ---------------------------
 import logging
 import argparse
 import os
@@ -13,8 +14,8 @@ from collections import defaultdict
 
 import src.settings as settings
 from src.port_deceiver import PortDeceiver
-from src.os_deceiver import OsDeceiver
-from src.settings import MAC  # Use the correct MAC address
+from src.os_deceiver import OsDeceiver, gen_key
+from src.settings import get_mac_address
 
 # Configure logging
 logging.basicConfig(
@@ -23,7 +24,6 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
-# Use the consistent record path from settings
 DEFAULT_OS_RECORD_PATH = settings.OS_RECORD_PATH
 
 def ensure_directory_exists(directory):
@@ -56,8 +56,10 @@ def set_promiscuous_mode(nic):
         sys.exit(1)
 
 def collect_fingerprint(target_host, dest, nic):
-    logging.info(f"📡 Starting OS Fingerprinting on {target_host} via {nic}")
-    dest = dest or DEFAULT_OS_RECORD_PATH
+    logging.info(f"Starting OS Fingerprinting on {target_host} via {nic}")
+    if not dest or dest == settings.OS_RECORD_PATH:
+        dest = DEFAULT_OS_RECORD_PATH
+
     ensure_directory_exists(dest)
 
     packet_files = {
@@ -82,8 +84,8 @@ def collect_fingerprint(target_host, dest, nic):
         sys.exit(1)
 
     packet_count = 0
+    logging.info(f"Storing fingerprint data in: {dest}")
     timeout = time.time() + 180
-    logging.info(f"📥 Capturing packets to: {dest}")
 
     while time.time() < timeout:
         try:
@@ -113,23 +115,19 @@ def collect_fingerprint(target_host, dest, nic):
             logging.error(f"Error while receiving packets: {e}")
             break
 
-    logging.info(f"✅ Fingerprinting complete. Captured {packet_count} packets.")
+    logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
 def convert_to_json(file_path):
-    """
-    Converts legacy fingerprint str(dict) files to base64-encoded JSON format.
-    Handles binary content (e.g., null bytes).
-    """
     try:
         with open(file_path, "rb") as f:
-            raw_bytes = f.read()
+            content = f.read().strip()
 
-        if not raw_bytes:
+        if not content:
             logging.warning(f"⚠ Skipping empty file: {file_path}")
             return
 
         try:
-            record_dict = ast.literal_eval(raw_bytes.decode("latin1"))
+            record_dict = ast.literal_eval(content.decode("latin1"))
         except Exception as e:
             logging.error(f"❌ Could not parse legacy dict from {file_path}: {e}")
             return
@@ -154,15 +152,20 @@ def convert_to_json(file_path):
 def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception")
     parser.add_argument("--host", required=True, help="Target IP")
-    parser.add_argument("--nic", required=True, help="Network interface to use (usually NIC_TARGET)")
+    parser.add_argument("--nic", required=True, help="NIC to use for scanning/fingerprinting")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scan mode")
-    parser.add_argument("--dest", default=DEFAULT_OS_RECORD_PATH, help="Path to store or load OS fingerprint records")
-    parser.add_argument("--os", help="OS to mimic (used with --od)")
+    parser.add_argument("--dest", default=DEFAULT_OS_RECORD_PATH, help="Directory to save OS fingerprints")
+    parser.add_argument("--os", help="OS to mimic (required for --od)")
     parser.add_argument("--te", type=int, help="Timeout duration in minutes")
-    parser.add_argument("--status", help="Port status to fake (used with --pd)")
+    parser.add_argument("--status", help="Port status (for --pd)")
+    parser.add_argument("--mac", help="Override MAC address for ARP spoofing (optional)")
     args = parser.parse_args()
 
     validate_nic(args.nic)
+
+    if args.mac:
+        settings.MAC = args.mac
+        logging.info(f"🔧 Overriding MAC address: {settings.MAC}")
 
     if args.scan == 'ts':
         collect_fingerprint(args.host, args.dest, args.nic)
@@ -175,8 +178,8 @@ def main():
         os_record_path = os.path.join(DEFAULT_OS_RECORD_PATH, args.os)
         ensure_directory_exists(os_record_path)
 
-        for proto in ["arp", "tcp", "udp", "icmp"]:
-            file_path = os.path.join(os_record_path, f"{proto}_record.txt")
+        for fname in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
+            file_path = os.path.join(os_record_path, fname)
             ensure_file_permissions(file_path)
             convert_to_json(file_path)
 
