@@ -66,6 +66,7 @@ class OsDeceiver:
                     parsed[base64.b64decode(k)] = base64.b64decode(v)
                 except Exception as decode_error:
                     logging.warning(f"⚠️ Skipping malformed entry in {pkt_type}: {decode_error}")
+            logging.info(f"📦 Loaded {len(parsed)} entries from {file_path}")
             return parsed
         except Exception as e:
             logging.error(f"❌ Fail to load {file_path}: {e}")
@@ -113,7 +114,7 @@ class OsDeceiver:
         while datetime.now() < timeout:
             try:
                 raw, _ = self.conn.sock.recvfrom(65565)
-                logging.info(f"📥 Raw packet received: {len(raw)} bytes")
+                logging.debug(f"📥 Raw packet received: {len(raw)} bytes")
 
                 pkt = Packet(raw)
                 pkt.unpack()
@@ -138,7 +139,7 @@ class OsDeceiver:
                         if response:
                             self.conn.sock.send(response)
                             counter += 1
-                            logging.info(f"📤 Sent {proto} response #{counter}")
+                            logging.info(f"📤 Sent {proto.upper()} response #{counter}")
                     elif DEBUG_MODE:
                         with open(UNMATCHED_LOG, "a") as f:
                             f.write(f"[{proto}] {key.hex()}\n")
