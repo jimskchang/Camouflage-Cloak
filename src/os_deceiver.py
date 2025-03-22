@@ -12,7 +12,7 @@ from src.Packet import Packet
 from src.tcp import TcpConnect
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
-UNMATCHED_LOG = os.path.join(settings.OS_RECORD_DIR, "unmatched_keys.log")
+UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
 
 class OsDeceiver:
     def __init__(self, target_host: str, target_os: str, dest=None):
@@ -20,7 +20,7 @@ class OsDeceiver:
         self.os = target_os
         self.conn = TcpConnect(target_host)
         self.dest = dest
-        self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_DIR, self.os)
+        self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
 
         os.makedirs(self.os_record_path, exist_ok=True)
         logging.info(f"OS Deception ready for {self.os} using path: {self.os_record_path}")
@@ -173,5 +173,4 @@ def gen_key(proto: str, packet: bytes):
         return gen_arp_key(packet)
     return b'', None
 
-# Include your original gen_tcp_key, gen_icmp_key, gen_udp_key, gen_arp_key functions here...
-# For brevity, they're omitted from this snippet unless you want them re-pasted.
+# ⬇️ Add your original gen_tcp_key, gen_icmp_key, gen_udp_key, gen_arp_key functions below...
