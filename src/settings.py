@@ -54,3 +54,6 @@ def check_nic_exists(nic: str) -> bool:
 
 if not check_nic_exists(NIC):
     raise ValueError(f"Error: Network interface {NIC} not found!")
+
+# FREE PORT
+FREE_PORT = [4441, 5551, 6661]  # or whatever ports are considered 'free' for deception
