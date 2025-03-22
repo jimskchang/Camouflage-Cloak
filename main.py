@@ -21,6 +21,7 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
+# Default OS record path
 DEFAULT_OS_RECORD_PATH = "/home/user/Camouflage-Cloak/os_record"
 
 def ensure_directory_exists(directory):
