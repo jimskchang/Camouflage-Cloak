@@ -8,6 +8,7 @@ import sys
 import subprocess
 import json
 import base64
+import ast
 from collections import defaultdict
 
 import src.settings as settings
@@ -21,7 +22,8 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
-DEFAULT_OS_RECORD_PATH = os.path.join(settings.PROJECT_PATH, "os_record")
+DEFAULT_OS_RECORD_PATH = settings.OS_RECORD_PATH
+
 
 def ensure_directory_exists(directory):
     try:
@@ -31,6 +33,7 @@ def ensure_directory_exists(directory):
         logging.error(f"Failed to create directory {directory}: {e}")
         sys.exit(1)
 
+
 def ensure_file_permissions(file_path):
     try:
         if os.path.exists(file_path):
@@ -39,10 +42,12 @@ def ensure_file_permissions(file_path):
     except Exception as e:
         logging.error(f"Failed to set permissions for {file_path}: {e}")
 
+
 def validate_nic(nic):
     if not os.path.exists(f"/sys/class/net/{nic}"):
         logging.error(f"Network interface {nic} not found! Check your NIC name.")
         sys.exit(1)
+
 
 def set_promiscuous_mode(nic):
     try:
@@ -52,9 +57,10 @@ def set_promiscuous_mode(nic):
         logging.error(f"Failed to set promiscuous mode: {e}")
         sys.exit(1)
 
+
 def collect_fingerprint(target_host, dest, nic):
     logging.info(f"Starting OS Fingerprinting on {target_host}")
-    if not dest or dest == settings.OS_RECORD_PATH:
+    if not dest:
         dest = DEFAULT_OS_RECORD_PATH
 
     ensure_directory_exists(dest)
@@ -114,40 +120,47 @@ def collect_fingerprint(target_host, dest, nic):
 
     logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
-def regenerate_record_json(os_record_path):
-    raw_records = defaultdict(dict)
-    for proto in ["tcp", "udp", "icmp", "arp"]:
-        file_path = os.path.join(os_record_path, f"{proto}_record.txt")
-        if not os.path.exists(file_path):
-            continue
 
-        try:
-            with open(file_path, "rb") as f:
-                lines = f.read().split(b"\n")
+def convert_to_json_and_filter(file_path, proto):
+    try:
+        with open(file_path, "rb") as f:
+            lines = f.read().split(b"\n")
 
-            for pkt in lines:
-                if not pkt.strip():
-                    continue
+        filtered = defaultdict(dict)
+        for pkt in lines:
+            if not pkt.strip():
+                continue
+            if proto == "tcp" and len(pkt) < 54:
+                continue
+            if proto == "icmp" and len(pkt) < 42:
+                continue
+            if proto == "arp" and len(pkt) < 42:
+                continue
+            try:
                 key, _ = gen_key(proto, pkt)
-                raw_records[proto][key] = pkt
+                filtered[proto][key] = pkt
+            except Exception as e:
+                logging.warning(f"Skipping malformed {proto} packet: {e}")
+                continue
 
-            with open(file_path, "w") as f:
-                encoded = {
-                    base64.b64encode(k).decode(): base64.b64encode(v).decode()
-                    for k, v in raw_records[proto].items()
-                }
-                json.dump(encoded, f, indent=2)
+        with open(file_path, "w") as f:
+            encoded = {
+                base64.b64encode(k).decode(): base64.b64encode(v).decode()
+                for k, v in filtered[proto].items()
+            }
+            json.dump(encoded, f, indent=2)
+        logging.info(f"✅ Converted {file_path} to base64-encoded JSON format.")
 
-            print(f"✅ Regenerated and converted {proto}_record.txt")
-        except Exception as e:
-            print(f"❌ Error processing {proto}_record.txt: {e}")
+    except Exception as e:
+        logging.error(f"❌ Error converting {file_path} to JSON: {e}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception")
     parser.add_argument("--host", required=True, help="Target IP")
     parser.add_argument("--nic", required=True, help="Network interface")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scan mode")
-    parser.add_argument("--dest", default=DEFAULT_OS_RECORD_PATH, help="OS fingerprint save dir")
+    parser.add_argument("--dest", help="OS fingerprint save dir")
     parser.add_argument("--os", help="OS to mimic for deception (for --od)")
     parser.add_argument("--te", type=int, help="Timeout in minutes (for --od or --pd)")
     parser.add_argument("--status", help="Port status (for --pd)")
@@ -166,15 +179,14 @@ def main():
         os_record_path = os.path.join(DEFAULT_OS_RECORD_PATH, args.os)
         ensure_directory_exists(os_record_path)
 
-        regenerate_record_json(os_record_path)
+        for proto in ["tcp", "udp", "icmp", "arp"]:
+            file_path = os.path.join(os_record_path, f"{proto}_record.txt")
+            if os.path.exists(file_path):
+                ensure_file_permissions(file_path)
+                convert_to_json_and_filter(file_path, proto)
 
-        deceiver = OsDeceiver(
-            target_host=args.host,
-            target_os=args.os,
-            dest=os_record_path,
-            nic=args.nic
-        )
-        deceiver.os_deceive(timeout_minutes=args.te)
+        deceiver = OsDeceiver(target_host=args.host, target_os=args.os, dest=os_record_path, nic=args.nic)
+        deceiver.os_deceive(args.te)
 
     elif args.scan == 'pd':
         if not args.status or args.te is None:
@@ -182,6 +194,7 @@ def main():
             return
         deceiver = PortDeceiver(args.host)
         deceiver.deceive_ps_hs(args.status)
+
 
 if __name__ == '__main__':
     main()
