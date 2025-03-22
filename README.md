@@ -94,7 +94,8 @@ sudo nmap -O <target_ip>
 ```
 **Move captured files:**
 ```python
-$sudo chown -R $USER:$USER ~/Camouflage-Cloak/os_record
+cd
+sudo chown -R $USER:$USER ~/Camouflage-Cloak/os_record
 mkdir -p os_record/win10
 mv os_record/*.txt os_record/win10/
 ```
