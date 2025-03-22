@@ -1,40 +1,40 @@
-# 🛡️ Camouflage Cloak: OS & Port Deception Against Nmap Scans
+# 🛡 Camouflage Cloak: OS & Port Deception Against Nmap Scans
 
 **Camouflage Cloak** is a Python-based deception system that manipulates low-level packet behavior to **defeat OS fingerprinting** and **mislead port scans** (especially from tools like **Nmap**). It uses **raw sockets**, **custom packet crafting**, and **fingerprint emulation**.
 
 ---
 
-## 🚀 How It Works
+##  How It Works
 
-### ✅ OS Deception
+###  OS Deception
 - Mimics real OS stack behaviors like:
   - TTL values
   - TCP window sizes
   - TCP options (e.g., timestamps)
   - ICMP & ARP replies
 
-### ✅ Port Deception
+###  Port Deception
 - Makes **closed ports appear open**, or vice versa
 - Simulates **SYN-ACK**, **RST**, **UDP responses**, and **fake service banners**
 
-### ✅ Fingerprint Capture
+###  Fingerprint Capture
 - Captures packets during an Nmap scan and converts them into reusable templates
 
 ---
 
 ## 🔧 Features
 
-- 🖥️ OS Deception (Windows, Linux, Mac, FreeBSD, Windows Server)
-- 🎭 Port Scan Simulation (open, closed, filtered)
-- 🧠 Dynamic dual NIC handling: NIC_PROBE vs NIC_TARGET
-- 📦 Base64 packet serialization + ARP/IP/TCP/ICMP unpacking
-- 📚 Auto-routing deceptive replies out NIC_PROBE
-- 💡 CLI + settings.py hybrid configuration
-- 🧰 TTL / TCP window presets based on target OS
+-  OS Deception (Windows, Linux, Mac, FreeBSD, Windows Server)
+-  Port Scan Simulation (open, closed, filtered)
+-  Dynamic dual NIC handling: NIC_PROBE vs NIC_TARGET
+-  Base64 packet serialization + ARP/IP/TCP/ICMP unpacking
+-  Auto-routing deceptive replies out NIC_PROBE
+-  CLI + settings.py hybrid configuration
+-  TTL / TCP window presets based on target OS
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 Camouflage-Cloak/
 ├── os_record/               # Stores OS fingerprint templates
 ├── src/
@@ -51,9 +51,9 @@ Camouflage-Cloak/
 
 ## ⚙️ Requirements
 
-- ✅ Linux (Tested on Ubuntu/Kali)
-- ✅ Python **3.11+**
-- ✅ `sudo` privileges (for raw sockets)
+-  Linux (Tested on Ubuntu/Kali)
+-  Python **3.11+**
+-  `sudo` privileges (for raw sockets)
 
 ---
 
