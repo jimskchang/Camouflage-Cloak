@@ -77,7 +77,8 @@ cd Camouflage-Cloak
 ## **Usage**
 ### **Edit settings.py** to match your environment:
 - HOST = "192.168.X.X"  # Camouflage-Cloak Host IP # Replace with the actual server IP
-- NIC = "eth0"  # Camouflage-Cloak Host to Target Host Network Interface
+- NIC_TARGET= "eth92"  # Target Host Network Interface
+- NIC_PROBE= "eth224"  # Probe Host Network Interface
 
 ## Environment Setup
 
