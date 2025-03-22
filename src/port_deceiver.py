@@ -2,9 +2,10 @@ import logging
 import socket
 import struct
 import random
+
 import src.settings as settings
 from src.tcp import TcpConnect, getTCPChecksum, getIPChecksum
-from src.Packet import Packet  # Ensure Packet handles IP checksum calculation
+from src.Packet import Packet
 
 # Constants for readability
 ETHERNET_PROTOCOL_IP = 0x0800
@@ -25,26 +26,22 @@ TCP_WINDOW_SIZES = [8192, 16384, 32768]  # Common TCP window sizes
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def get_random_ttl() -> int:
-    """Returns a random TTL value based on common OS defaults."""
     return random.choice(TTL_VALUES)
 
 def get_random_tcp_window() -> int:
-    """Returns a random TCP window size to evade fingerprinting."""
     return random.choice(TCP_WINDOW_SIZES)
 
 class PortDeceiver:
-    def __init__(self, host: str):
+    def __init__(self, host: str, nic: str = settings.NIC_TARGET):
         """
         Initializes the PortDeceiver for misleading port scans.
         """
         self.host = host
-        self.conn = TcpConnect(host)
-        logging.info(f"✅ Port deception initialized for host: {self.host}")
+        self.nic = nic
+        self.conn = TcpConnect(host, nic)
+        logging.info(f"✅ Port deception initialized for host: {self.host} on NIC: {self.nic}")
 
     def send_packet(self, recv_flags: list, reply_flags: list) -> bool:
-        """
-        Listens for incoming TCP packets and sends deceptive responses.
-        """
         while True:
             try:
                 packet, _ = self.conn.sock.recvfrom(65565)
@@ -87,9 +84,6 @@ class PortDeceiver:
                 continue
 
     def deceive_ps_hs(self, port_status: str) -> None:
-        """
-        Deceives port scans by making ports appear open or closed.
-        """
         port_flag = TCP_FLAG_SYN_ACK if port_status == 'open' else TCP_FLAG_RST_ACK
         logging.info(f"🛑 Deceiving port scan: Simulating {'open' if port_status == 'open' else 'closed'} ports")
 
