@@ -6,22 +6,34 @@ import logging
 import src.settings as settings
 
 class TcpConnect:
-    def __init__(self, host: str):
+    def __init__(self, host: str, nic: str = None):
         """
         Initializes a raw socket connection for TCP packet manipulation.
         """
         self.dip = host
-        self.mac = settings.MAC
+        self.nic = nic or settings.NIC_PROBE  # Default to NIC_PROBE if not provided
+
+        mac_path = f"/sys/class/net/{self.nic}/address"
+        try:
+            with open(mac_path, 'r') as f:
+                mac = f.readline().strip()
+                if not mac:
+                    raise ValueError(f"MAC address file {mac_path} is empty.")
+                self.mac = binascii.unhexlify(mac.replace(':', ''))  # Convert to binary
+        except FileNotFoundError:
+            raise ValueError(f"❌ Error: MAC address file not found for NIC: {self.nic}")
+        except Exception as e:
+            raise RuntimeError(f"❌ Unexpected error reading MAC address: {e}")
 
         try:
-            self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-            self.sock.bind((settings.NIC_PROBE, 0))
-            logging.info(f"✅ Raw socket bound to {settings.NIC_PROBE} for deception")
+            self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
+            self.sock.bind((self.nic, 0))
+            logging.info(f"✅ Bound raw socket to NIC: {self.nic}")
         except PermissionError:
-            logging.error("Root privileges are required to create raw sockets. Run with sudo.")
+            logging.error("❌ Root privileges are required to create raw sockets.")
             raise
         except socket.error as e:
-            logging.error(f"Failed to create raw socket: {e}")
+            logging.error(f"❌ Failed to create or bind socket: {e}")
             raise
 
     def build_tcp_header_from_reply(
@@ -30,48 +42,60 @@ class TcpConnect:
         dest_IP: bytes, flags: int
     ) -> bytes:
         """
-        Build a TCP header with a correct checksum for reply packets.
+        Builds a TCP header with proper checksum for spoofed replies.
         """
         try:
-            offset = (tcp_len // 4) << 4  # Ensure proper 4-bit shifting
-            reply_tcp_header = struct.pack('!HHIIBBHHH', src_port, dest_port, seq, ack_num, offset, flags, 0, 0, 0)
+            offset = (tcp_len // 4) << 4  # TCP header offset (data offset field)
+            reply_tcp_header = struct.pack('!HHIIBBHHH',
+                                           src_port, dest_port, seq, ack_num,
+                                           offset, flags, 0, 0, 0)
 
-            # Construct Pseudo Header for Checksum
             pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(reply_tcp_header))
             checksum = getTCPChecksum(pseudo_hdr + reply_tcp_header)
 
-            # Insert the computed checksum
             reply_tcp_header = reply_tcp_header[:16] + struct.pack('!H', checksum) + reply_tcp_header[18:]
             return reply_tcp_header
         except struct.error as e:
-            logging.error(f"Error building TCP header: {e}")
+            logging.error(f"❌ TCP Header build error: {e}")
             return b''
 
+
+# --- Utility Functions ---
+
 def getTCPChecksum(packet: bytes) -> int:
+    """Computes TCP checksum."""
     if len(packet) % 2 != 0:
         packet += b'\0'
+
     res = sum(array.array("H", packet))
     res = (res >> 16) + (res & 0xffff)
     res += res >> 16
     return (~res) & 0xffff
 
+
 def getIPChecksum(packet: bytes) -> int:
+    """Computes IP header checksum."""
     if len(packet) % 2:
         packet += b'\0'
+
     checksum = sum(struct.unpack("!" + "H" * (len(packet) // 2), packet))
     checksum = (checksum >> 16) + (checksum & 0xFFFF)
     checksum = ~checksum & 0xFFFF
     return checksum
 
+
 def byte2mac(mac_byte: bytes) -> str:
+    """Converts MAC in bytes to readable MAC string."""
     if len(mac_byte) != 6:
-        logging.error("Invalid MAC address length.")
+        logging.error("Invalid MAC length.")
         return "00:00:00:00:00:00"
     return ":".join(f"{b:02x}" for b in mac_byte)
 
+
 def byte2ip(ip_byte: bytes) -> str:
+    """Converts IP in bytes to dotted format."""
     try:
         return socket.inet_ntoa(ip_byte)
     except socket.error as e:
-        logging.error(f"Invalid IP address conversion: {e}")
+        logging.error(f"Invalid IP bytes: {e}")
         return "0.0.0.0"
