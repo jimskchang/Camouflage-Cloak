@@ -11,94 +11,130 @@ import src.settings as settings
 from src.Packet import Packet
 from src.tcp import TcpConnect
 
+DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
+UNMATCHED_LOG = os.path.join(settings.OS_RECORD_DIR, "unmatched_keys.log")
 
 class OsDeceiver:
-    def __init__(self, target_host: str, target_os: str):
+    def __init__(self, target_host: str, target_os: str, dest=None):
         self.host = target_host
         self.os = target_os
         self.conn = TcpConnect(target_host)
+        self.dest = dest
+        self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_DIR, self.os)
 
-        self.os_record_path = os.path.join(settings.OS_RECORD_DIR, self.os)
-        if not os.path.isdir(self.os_record_path):
-            logging.error(f"❌ OS record path not found: {self.os_record_path}")
-        else:
-            logging.info(f"📌 OS Deception initialized for {self.os} using {self.os_record_path}")
+        os.makedirs(self.os_record_path, exist_ok=True)
+        logging.info(f"OS Deception ready for {self.os} using path: {self.os_record_path}")
+
+    def save_record(self, pkt_type: str, record: Dict[bytes, bytes]):
+        file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
+        with open(file_path, "w") as f:
+            encoded = {
+                base64.b64encode(k).decode(): base64.b64encode(v).decode()
+                for k, v in record.items() if v
+            }
+            json.dump(encoded, f, indent=2)
+        logging.info(f"Saved {pkt_type} record to {file_path}")
 
     def load_file(self, pkt_type: str) -> Dict[bytes, bytes]:
-        """
-        Loads pre-recorded packet templates from JSON (base64-encoded keys/values).
-        """
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
-
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                data = f.read().strip()
-                if not data:
-                    logging.warning(f"⚠ {file_path} is empty.")
-                    return {}
-                raw_dict = json.loads(data)
+            with open(file_path, "r") as f:
+                raw = json.load(f)
                 return {
                     base64.b64decode(k): base64.b64decode(v)
-                    for k, v in raw_dict.items() if v
+                    for k, v in raw.items()
                 }
         except Exception as e:
-            logging.error(f"❌ Failed to load {file_path}: {e}")
+            logging.error(f"Failed to load {file_path}: {e}")
             return {}
 
+    def os_record(self, timeout_minutes: int = 3):
+        logging.info("Starting OS fingerprint collection...")
+        timeout = datetime.now() + timedelta(minutes=timeout_minutes)
+
+        tcp, udp, icmp, arp = {}, {}, {}, {}
+
+        while datetime.now() < timeout:
+            try:
+                packet, _ = self.conn.sock.recvfrom(65565)
+                eth_type = struct.unpack("!H", packet[12:14])[0]
+
+                if eth_type == 0x0800:  # IPv4
+                    proto = packet[23]
+                    if proto == 6:
+                        key, _ = gen_tcp_key(packet)
+                        tcp[key] = packet
+                    elif proto == 1:
+                        key, _ = gen_icmp_key(packet)
+                        icmp[key] = packet
+                    elif proto == 17:
+                        key, _ = gen_udp_key(packet)
+                        udp[key] = packet
+                elif eth_type == 0x0806:
+                    key, _ = gen_arp_key(packet)
+                    arp[key] = packet
+            except Exception as e:
+                logging.error(f"Error capturing packet: {e}")
+
+        self.save_record("tcp", tcp)
+        self.save_record("udp", udp)
+        self.save_record("icmp", icmp)
+        self.save_record("arp", arp)
+        logging.info("Fingerprint collection complete.")
+
     def os_deceive(self, timeout_minutes: int = 5):
-        """
-        Main deception loop — reads packets and responds with spoofed replies.
-        """
-        template_dict = {
+        templates = {
             'tcp': self.load_file('tcp'),
             'icmp': self.load_file('icmp'),
             'udp': self.load_file('udp'),
             'arp': self.load_file('arp')
         }
-        logging.info(f"📦 Loaded templates for {self.os}")
-
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
-        dec_count = 0
+        counter = 0
 
         while datetime.now() < timeout:
             try:
-                raw_pkt, _ = self.conn.sock.recvfrom(65565)
-                pkt = Packet(packet=raw_pkt)
+                raw, _ = self.conn.sock.recvfrom(65565)
+                pkt = Packet(raw)
                 pkt.unpack()
+                proto = pkt.get_proc()
 
-                if (pkt.l3 == 'ip' and pkt.l3_field.get('dest_IP') == socket.inet_aton(self.host)) or \
-                   (pkt.l3 == 'arp' and pkt.l3_field.get('recv_ip') == socket.inet_aton(self.host)):
+                if proto == 'tcp' and pkt.l4_field['dest_port'] in settings.FREE_PORT:
+                    continue
 
-                    key, _ = gen_key(pkt.l3, pkt.packet)
-                    template_bytes = template_dict.get(pkt.l3, {}).get(key)
+                if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == socket.inet_aton(self.host)) or \
+                   (pkt.l3 == 'arp' and pkt.l3_field['recv_ip'] == socket.inet_aton(self.host)):
 
-                    if template_bytes:
-                        response = synthesize_response(pkt, template_bytes)
+                    key, _ = gen_key(proto, pkt.packet)
+                    template = templates.get(proto, {}).get(key)
+
+                    if template:
+                        response = synthesize_response(pkt, template)
                         if response:
                             self.conn.sock.send(response)
-                            dec_count += 1
-                            logging.info(f"📤 Sent {pkt.l3} response ({dec_count})")
-                    else:
-                        logging.debug(f"🔍 No template match for incoming {pkt.l3} packet.")
+                            counter += 1
+                            logging.info(f"Sent {proto} response #{counter}")
+                    elif DEBUG_MODE:
+                        with open(UNMATCHED_LOG, "a") as f:
+                            f.write(f"[{proto}] {key.hex()}\n")
             except Exception as e:
-                logging.error(f"❌ Error in deception loop: {e}")
+                logging.error(f"Error in deception loop: {e}")
 
-        logging.info("🛑 OS Deception session ended.")
-
-
+# --- Synthesis & Key Helpers ---
 def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
-    """
-    Adjusts raw template packet to respond to the incoming request appropriately.
-    """
     try:
-        rsp = Packet(packet=raw_template)
+        rsp = Packet(raw_template)
         rsp.unpack()
 
-        if req_pkt.l3 == 'tcp':
-            rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
-            rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
+        # Swap fields
+        rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
+        rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
+
+        if req_pkt.l3 == 'ip':
             rsp.l3_field['src_IP'] = req_pkt.l3_field['dest_IP']
             rsp.l3_field['dest_IP'] = req_pkt.l3_field['src_IP']
+
+        if req_pkt.l3 == 'tcp':
             rsp.l4_field['src_port'] = req_pkt.l4_field['dest_port']
             rsp.l4_field['dest_port'] = req_pkt.l4_field['src_port']
             rsp.l4_field['seq'] = req_pkt.l4_field['ack_num']
@@ -107,24 +143,14 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
                 rsp.l4_field['option_field']['ts_echo_reply'] = req_pkt.l4_field['option_field']['ts_val']
 
         elif req_pkt.l3 == 'icmp':
-            rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
-            rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
-            rsp.l3_field['src_IP'] = req_pkt.l3_field['dest_IP']
-            rsp.l3_field['dest_IP'] = req_pkt.l3_field['src_IP']
             rsp.l4_field['ID'] = req_pkt.l4_field['ID']
             rsp.l4_field['seq'] = req_pkt.l4_field['seq']
 
         elif req_pkt.l3 == 'udp':
-            rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
-            rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
-            rsp.l3_field['src_IP'] = req_pkt.l3_field['dest_IP']
-            rsp.l3_field['dest_IP'] = req_pkt.l3_field['src_IP']
             rsp.l4_field['ID'] = 0
             rsp.l4_field['seq'] = 0
 
         elif req_pkt.l3 == 'arp':
-            rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
-            rsp.l2_field['sMAC'] = settings.mac
             rsp.l3_field['sender_mac'] = settings.mac
             rsp.l3_field['sender_ip'] = socket.inet_aton(settings.host)
             rsp.l3_field['recv_mac'] = req_pkt.l3_field['sender_mac']
@@ -133,14 +159,10 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
         rsp.pack()
         return rsp.packet
     except Exception as e:
-        logging.error(f"❌ Failed to synthesize response: {e}")
+        logging.error(f"Synthesis error: {e}")
         return b''
 
-
 def gen_key(proto: str, packet: bytes):
-    """
-    Wrapper to generate normalized packet keys for matching.
-    """
     if proto == 'tcp':
         return gen_tcp_key(packet)
     elif proto == 'icmp':
@@ -151,8 +173,5 @@ def gen_key(proto: str, packet: bytes):
         return gen_arp_key(packet)
     return b'', None
 
-
-# Use the original gen_*_key functions here (not shown for brevity)
-# They normalize packets and strip non-essential fields to create a matchable key.
-# You can reuse: gen_tcp_key(), gen_icmp_key(), gen_udp_key(), gen_arp_key()
-# Make sure those are included in your project and imported as needed.
+# Include your original gen_tcp_key, gen_icmp_key, gen_udp_key, gen_arp_key functions here...
+# For brevity, they're omitted from this snippet unless you want them re-pasted.
