@@ -14,6 +14,7 @@ from src.tcp import TcpConnect
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
 
+
 class OsDeceiver:
     def __init__(self, target_host: str, target_os: str, dest=None, nic: str = None):
         self.host = target_host
@@ -22,9 +23,9 @@ class OsDeceiver:
         self.dest = dest
         self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
 
-        # --- Check NIC existence and log MAC ---
+        # Validate NIC and log MAC
         if not os.path.exists(f"/sys/class/net/{self.nic}"):
-            logging.error(f"❌ NIC '{self.nic}' not found. Check your interface name.")
+            logging.error(f"❌ NIC '{self.nic}' not found.")
             raise ValueError(f"NIC '{self.nic}' does not exist.")
 
         mac_path = f"/sys/class/net/{self.nic}/address"
@@ -33,41 +34,46 @@ class OsDeceiver:
                 mac = f.read().strip()
                 logging.info(f"✅ Using MAC address {mac} for NIC '{self.nic}'")
         except Exception as e:
-            logging.warning(f"⚠ Unable to read MAC address for {self.nic}: {e}")
+            logging.warning(f"⚠️ Unable to read MAC address: {e}")
 
         os.makedirs(self.os_record_path, exist_ok=True)
         self.conn = TcpConnect(self.host, nic=self.nic)
 
-        logging.info(f"🛡️ OS Deception ready for {self.os} using NIC: {self.nic}")
-        logging.info(f"📁 Fingerprint path: {self.os_record_path}")
+        logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
+        logging.info(f"📁 Using OS template path: {self.os_record_path}")
 
     def save_record(self, pkt_type: str, record: Dict[bytes, bytes]):
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
-        with open(file_path, "w") as f:
+        try:
             encoded = {
                 base64.b64encode(k).decode(): base64.b64encode(v).decode()
                 for k, v in record.items() if v
             }
-            json.dump(encoded, f, indent=2)
-        logging.info(f"✅ Saved {pkt_type} record to {file_path}")
+            with open(file_path, "w") as f:
+                json.dump(encoded, f, indent=2)
+            logging.info(f"✅ Saved {pkt_type} record to {file_path}")
+        except Exception as e:
+            logging.error(f"❌ Failed to save {pkt_type} record: {e}")
 
     def load_file(self, pkt_type: str) -> Dict[bytes, bytes]:
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
         try:
             with open(file_path, "r") as f:
                 raw = json.load(f)
-                return {
-                    base64.b64decode(k): base64.b64decode(v)
-                    for k, v in raw.items()
-                }
+            parsed = {}
+            for k, v in raw.items():
+                try:
+                    parsed[base64.b64decode(k)] = base64.b64decode(v)
+                except Exception as decode_error:
+                    logging.warning(f"⚠️ Skipping malformed entry in {pkt_type}: {decode_error}")
+            return parsed
         except Exception as e:
-            logging.error(f"❌ Fail to load {file_path}, {e}")
+            logging.error(f"❌ Fail to load {file_path}: {e}")
             return {}
 
     def os_record(self, timeout_minutes: int = 3):
         logging.info("📡 Capturing OS fingerprint packets...")
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
-
         tcp, udp, icmp, arp = {}, {}, {}, {}
 
         while datetime.now() < timeout:
@@ -99,17 +105,10 @@ class OsDeceiver:
         logging.info("✅ Fingerprint collection complete.")
 
     def os_deceive(self, timeout_minutes: int = 5):
-        templates = {
-            'tcp': self.load_file('tcp'),
-            'icmp': self.load_file('icmp'),
-            'udp': self.load_file('udp'),
-            'arp': self.load_file('arp')
-        }
-
+        logging.info("🌀 Starting OS deception loop...")
+        templates = {ptype: self.load_file(ptype) for ptype in ["tcp", "icmp", "udp", "arp"]}
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
         counter = 0
-
-        logging.info("🌀 Starting OS deception loop...")
 
         while datetime.now() < timeout:
             try:
@@ -119,15 +118,17 @@ class OsDeceiver:
                 pkt = Packet(raw)
                 pkt.unpack()
 
-                logging.info(f"Parsed Packet - L3: {pkt.l3}, L4: {pkt.l4}, Dest IP: {socket.inet_ntoa(pkt.l3_field.get('dest_IP', b'0.0.0.0'))}")
+                dest_ip = pkt.l3_field.get('dest_IP', b'\x00\x00\x00\x00')
+                safe_ip = socket.inet_ntoa(dest_ip) if len(dest_ip) == 4 else "INVALID_IP"
+                logging.info(f"Parsed Packet - L3: {pkt.l3}, L4: {pkt.l4}, Dest IP: {safe_ip}")
 
                 proto = pkt.l4 if pkt.l4 else pkt.l3
 
                 if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
                     continue
 
-                if (pkt.l3 == 'ip' and pkt.l3_field['dest_IP'] == socket.inet_aton(self.host)) or \
-                   (pkt.l3 == 'arp' and pkt.l3_field['recv_ip'] == socket.inet_aton(self.host)):
+                if (pkt.l3 == 'ip' and dest_ip == socket.inet_aton(self.host)) or \
+                   (pkt.l3 == 'arp' and pkt.l3_field.get('recv_ip') == socket.inet_aton(self.host)):
 
                     key, _ = gen_key(proto, pkt.packet)
                     template = templates.get(proto, {}).get(key)
@@ -143,6 +144,7 @@ class OsDeceiver:
                             f.write(f"[{proto}] {key.hex()}\n")
             except Exception as e:
                 logging.error(f"❌ Error in deception loop: {e}")
+
 
 # --- Response Synthesis ---
 def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
@@ -185,6 +187,7 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
         logging.error(f"❌ Synthesis error: {e}")
         return b''
 
+
 # --- Key Normalization Helpers ---
 def gen_key(proto: str, packet: bytes):
     if proto == 'tcp':
@@ -198,34 +201,51 @@ def gen_key(proto: str, packet: bytes):
     return b'', None
 
 def gen_tcp_key(packet: bytes):
-    ip_header = packet[14:34]
-    tcp_header = packet[34:54]
-    src_port, dest_port, seq, ack_num, offset_flags = struct.unpack('!HHLLH', tcp_header[:14])
-    offset = (offset_flags >> 12) * 4
-    payload = packet[54:54+offset-20]
-    ip_key = ip_header[:8] + b'\x00' * 8
-    tcp_key = struct.pack('!HHLLH', 0, dest_port, 0, 0, offset_flags) + tcp_header[14:20]
-    return ip_key + tcp_key + payload, None
+    try:
+        ip_header = packet[14:34]
+        tcp_header = packet[34:54]
+        src_port, dest_port, seq, ack_num, offset_flags = struct.unpack('!HHLLH', tcp_header[:14])
+        offset = (offset_flags >> 12) * 4
+        payload = packet[54:54+offset-20]
+        ip_key = ip_header[:8] + b'\x00' * 8
+        tcp_key = struct.pack('!HHLLH', 0, dest_port, 0, 0, offset_flags) + tcp_header[14:20]
+        return ip_key + tcp_key + payload, None
+    except Exception as e:
+        logging.warning(f"⚠️ gen_tcp_key failed: {e}")
+        return b'', None
 
 def gen_udp_key(packet: bytes):
-    ip_header = packet[14:34]
-    udp_header = packet[34:42]
-    payload = packet[42:]
-    ip_key = ip_header[:8] + b'\x00' * 8
-    udp_key = struct.pack('!HHH', 0, 0, 8) + b'\x00\x00'
-    return ip_key + udp_key + payload, None
+    try:
+        ip_header = packet[14:34]
+        udp_header = packet[34:42]
+        payload = packet[42:]
+        ip_key = ip_header[:8] + b'\x00' * 8
+        udp_key = struct.pack('!HHH', 0, 0, 8) + b'\x00\x00'
+        return ip_key + udp_key + payload, None
+    except Exception as e:
+        logging.warning(f"⚠️ gen_udp_key failed: {e}")
+        return b'', None
 
 def gen_icmp_key(packet: bytes):
-    ip_header = packet[14:34]
-    icmp_header = packet[34:42]
-    ip_key = ip_header[:8] + b'\x00' * 8
-    icmp_type, code, checksum, icmp_id, seq = struct.unpack('!BBHHH', icmp_header)
-    icmp_key = struct.pack('!BBHHH', icmp_type, code, 0, 0, 0)
-    return ip_key + icmp_key, None
+    try:
+        ip_header = packet[14:34]
+        icmp_header = packet[34:42]
+        ip_key = ip_header[:8] + b'\x00' * 8
+        icmp_type, code, _, _, _ = struct.unpack('!BBHHH', icmp_header)
+        icmp_key = struct.pack('!BBHHH', icmp_type, code, 0, 0, 0)
+        return ip_key + icmp_key, None
+    except Exception as e:
+        logging.warning(f"⚠️ gen_icmp_key failed: {e}")
+        return b'', None
 
 def gen_arp_key(packet: bytes):
-    arp_header = packet[14:42]
-    hw_type, proto_type, hw_size, proto_size, opcode, s_mac, s_ip, t_mac, t_ip = struct.unpack('!HHBBH6s4s6s4s', arp_header)
-    key = struct.pack('!HHBBH6s4s6s4s', hw_type, proto_type, hw_size, proto_size, opcode,
-                      b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
-    return key, None
+    try:
+        arp_header = packet[14:42]
+        fields = struct.unpack('!HHBBH6s4s6s4s', arp_header)
+        key = struct.pack('!HHBBH6s4s6s4s',
+                          fields[0], fields[1], fields[2], fields[3], fields[4],
+                          b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
+        return key, None
+    except Exception as e:
+        logging.warning(f"⚠️ gen_arp_key failed: {e}")
+        return b'', None
