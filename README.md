@@ -142,7 +142,7 @@ cd
 sudo chown -R $USER:$USER ~/Camouflage-Cloak/os_record
 ```
 
-***Step 6:*** create the os folder (use win10 as example)
+***Step 6:*** create the os folder (use win10 as example, you can choose linuxm Linux5, win7, win10, win11, windows2022, windows2025, mac, freebsd, centos)
 ```bash
 mkdir -p /home/user/Camouflage-Cloak/os_record/win10
 ```
