@@ -78,19 +78,9 @@ Camouflage-Cloak/
 
 ## ✍️ Configuration (Edit `src/settings.py`)
 
-```python
 NIC_TARGET = 'ens192'     # NIC to target host
 NIC_PROBE  = 'ens224'     # NIC to Nmap/attacker
 HOST = "192.168.23.206"   # Your Camouflage Cloak IP
-
-OS_PRESETS = {
-  "win10":  {"ttl": 128, "tcp_window": 8192},
-  "win11":  {"ttl": 128, "tcp_window": 16384},
-  "win2022": {"ttl": 128, "tcp_window": 32768},
-  "linux":  {"ttl": 64, "tcp_window": 5840},
-  "mac":    {"ttl": 64, "tcp_window": 65535}
-}
-```
 
 ## Usage
 ### Build Template Synthesis
@@ -119,4 +109,8 @@ Then run Nmap again from attacker. It should detect the spoofed OS.
 ```python
 sudo -E python3 main.py --host <target_ip> --nic <NIC_TARGET> --scan pd --status open --te 6
 ```
+Nmap will see open ports even if they aren’t.
 
+## Author
+Camouflage Cloak by Shangkai Chang
+Open-source packet deception toolkit built for research and defense.
