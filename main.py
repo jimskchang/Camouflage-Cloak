@@ -15,13 +15,14 @@ from src.port_deceiver import PortDeceiver
 from src.os_deceiver import OsDeceiver
 from src.settings import MAC
 
-# Logging setup
+# --- Logging Setup ---
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
     datefmt='%y-%m-%d %H:%M:%S',
     level=logging.INFO
 )
 
+# --- Utility Functions ---
 def ensure_directory_exists(directory: str):
     try:
         os.makedirs(directory, exist_ok=True)
@@ -60,7 +61,6 @@ def set_promiscuous_mode(nic: str):
 
 def collect_fingerprint(target_host, dest, nic):
     logging.info(f"📡 Starting OS fingerprint collection on {target_host} via {nic}")
-
     ensure_directory_exists(dest)
 
     packet_files = {
@@ -117,45 +117,44 @@ def collect_fingerprint(target_host, dest, nic):
 
     logging.info(f"✅ Captured {packet_count} packets for fingerprinting.")
 
-def convert_to_json(file_path: str):
+def convert_raw_packets_to_template(file_path: str, proto: str):
+    """
+    Convert raw binary packets into base64-encoded JSON OS fingerprint template.
+    """
+    from src.os_deceiver import gen_key
+    template_dict = {}
+
     try:
         with open(file_path, "rb") as f:
-            content = f.read().strip()
-        if not content:
-            logging.warning(f"⚠ Skipping empty file: {file_path}")
-            return
+            lines = f.read().split(b"\n")
 
-        try:
-            record_dict = ast.literal_eval(content.decode("latin1"))
-        except Exception as e:
-            logging.error(f"❌ Could not parse legacy dict from {file_path}: {e}")
-            return
-
-        json_base64 = {}
-        for k, v in record_dict.items():
-            if v is None:
+        for raw in lines:
+            if not raw or len(raw) < 42:
                 continue
-            key_b64 = base64.b64encode(k if isinstance(k, bytes) else k.encode("latin1")).decode("utf-8")
-            val_b64 = base64.b64encode(v if isinstance(v, bytes) else v.encode("latin1")).decode("utf-8")
-            json_base64[key_b64] = val_b64
+            key, _ = gen_key(proto, raw)
+            template_dict[key] = raw
 
+        encoded = {
+            base64.b64encode(k).decode(): base64.b64encode(v).decode()
+            for k, v in template_dict.items()
+        }
         with open(file_path, "w") as f:
-            json.dump(json_base64, f, indent=2)
+            json.dump(encoded, f, indent=2)
 
-        logging.info(f"✅ Converted {file_path} to base64 JSON.")
-
+        logging.info(f"✅ Converted raw {proto} packets in {file_path} to JSON template.")
     except Exception as e:
-        logging.error(f"❌ Error converting {file_path} to JSON: {e}")
+        logging.error(f"❌ Failed to convert {file_path}: {e}")
 
+# --- Main Logic ---
 def main():
     parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak: OS & Port Deception Engine")
     parser.add_argument("--host", required=True, help="Target IP to impersonate")
     parser.add_argument("--nic", required=True, help="Network interface to bind")
-    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scan mode: ts (template), od (os deceive), pd (port deceive)")
-    parser.add_argument("--os", help="OS template to mimic (e.g., win10)")
-    parser.add_argument("--te", type=int, help="Timeout in minutes for deception")
-    parser.add_argument("--status", help="For --scan pd: open or close")
-    parser.add_argument("--dest", help="Optional: path to OS fingerprint folder")
+    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scan mode: ts, od, pd")
+    parser.add_argument("--os", help="OS template to mimic (for --scan od)")
+    parser.add_argument("--te", type=int, help="Timeout in minutes (for --scan od/pd)")
+    parser.add_argument("--status", help="Port status: open or close (for --scan pd)")
+    parser.add_argument("--dest", help="Optional destination path for OS fingerprint collection")
 
     args = parser.parse_args()
     validate_nic(args.nic)
@@ -166,16 +165,22 @@ def main():
 
     elif args.scan == 'od':
         if not args.os or args.te is None:
-            logging.error("❌ Missing --os or --te for OS deception")
+            logging.error("❌ Missing required arguments --os or --te for OS deception")
             return
 
         os_record_path = os.path.join(settings.OS_RECORD_PATH, args.os)
         ensure_directory_exists(os_record_path)
 
-        # ✅ Convert legacy records to JSON-safe format
-        for fname in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
-            fpath = os.path.join(os_record_path, fname)
-            convert_to_json(fpath)
+        proto_map = {
+            "arp_record.txt": "arp",
+            "tcp_record.txt": "tcp",
+            "udp_record.txt": "udp",
+            "icmp_record.txt": "icmp"
+        }
+
+        for fname, proto in proto_map.items():
+            full_path = os.path.join(os_record_path, fname)
+            convert_raw_packets_to_template(full_path, proto)
 
         deceiver = OsDeceiver(
             target_host=args.host,
