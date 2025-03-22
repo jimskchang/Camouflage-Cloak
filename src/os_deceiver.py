@@ -49,7 +49,7 @@ class OsDeceiver:
             return {}
 
     def os_record(self, timeout_minutes: int = 3):
-        logging.info("📥 Starting OS fingerprint collection...")
+        logging.info("📅 Starting OS fingerprint collection...")
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
 
         tcp, udp, icmp, arp = {}, {}, {}, {}
