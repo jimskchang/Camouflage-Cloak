@@ -45,11 +45,11 @@ class OsDeceiver:
                     for k, v in raw.items()
                 }
         except Exception as e:
-            logging.error(f"Failed to load {file_path}: {e}")
+            logging.error(f"❌ Fail to load {file_path}, {e}")
             return {}
 
     def os_record(self, timeout_minutes: int = 3):
-        logging.info("Starting OS fingerprint collection...")
+        logging.info("📥 Starting OS fingerprint collection...")
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
 
         tcp, udp, icmp, arp = {}, {}, {}, {}
@@ -70,17 +70,17 @@ class OsDeceiver:
                     elif proto == 17:
                         key, _ = gen_udp_key(packet)
                         udp[key] = packet
-                elif eth_type == 0x0806:
+                elif eth_type == 0x0806:  # ARP
                     key, _ = gen_arp_key(packet)
                     arp[key] = packet
             except Exception as e:
-                logging.error(f"Error capturing packet: {e}")
+                logging.error(f"❌ Error capturing packet: {e}")
 
         self.save_record("tcp", tcp)
         self.save_record("udp", udp)
         self.save_record("icmp", icmp)
         self.save_record("arp", arp)
-        logging.info("Fingerprint collection complete.")
+        logging.info("✅ Fingerprint collection complete.")
 
     def os_deceive(self, timeout_minutes: int = 5):
         templates = {
@@ -97,7 +97,9 @@ class OsDeceiver:
                 raw, _ = self.conn.sock.recvfrom(65565)
                 pkt = Packet(raw)
                 pkt.unpack()
-                proto = pkt.get_proc()
+
+                # Replaces the old get_proc() behavior
+                proto = pkt.l4 if pkt.l4 else pkt.l3
 
                 if proto == 'tcp' and pkt.l4_field['dest_port'] in settings.FREE_PORT:
                     continue
@@ -113,20 +115,19 @@ class OsDeceiver:
                         if response:
                             self.conn.sock.send(response)
                             counter += 1
-                            logging.info(f"Sent {proto} response #{counter}")
+                            logging.info(f"📤 Sent {proto} response #{counter}")
                     elif DEBUG_MODE:
                         with open(UNMATCHED_LOG, "a") as f:
                             f.write(f"[{proto}] {key.hex()}\n")
             except Exception as e:
-                logging.error(f"Error in deception loop: {e}")
+                logging.error(f"❌ Error in deception loop: {e}")
 
-# --- Synthesis & Key Helpers ---
+# --- Response Synthesis ---
 def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
     try:
         rsp = Packet(raw_template)
         rsp.unpack()
 
-        # Swap fields
         rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
         rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
 
@@ -159,9 +160,10 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
         rsp.pack()
         return rsp.packet
     except Exception as e:
-        logging.error(f"Synthesis error: {e}")
+        logging.error(f"❌ Synthesis error: {e}")
         return b''
 
+# --- Key Normalization Helpers ---
 def gen_key(proto: str, packet: bytes):
     if proto == 'tcp':
         return gen_tcp_key(packet)
@@ -173,4 +175,5 @@ def gen_key(proto: str, packet: bytes):
         return gen_arp_key(packet)
     return b'', None
 
-# ⬇️ Add your original gen_tcp_key, gen_icmp_key, gen_udp_key, gen_arp_key functions below...
+# You can paste in your existing gen_tcp_key, gen_udp_key, etc., here.
+# Let me know if you want them copied into this version again.
