@@ -43,7 +43,7 @@ Camouflage-Cloak/
 │   ├── tcp.py               # TCP header logic & checksum tools
 │   ├── os_deceiver.py       # OS deception engine
 │   ├── port_deceiver.py     # Port deception engine
-│   ├── init.py          # Exposes top-level module APIs
+│   ├── init.py              # Exposes top-level module APIs
 ├── main.py                  # CLI runner: capture, deceive, spoof
 ├── README.md                # This file
 
