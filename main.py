@@ -53,7 +53,7 @@ def set_promiscuous_mode(nic):
         sys.exit(1)
 
 def collect_fingerprint(target_host, dest, nic):
-    logging.info(f"Starting OS Fingerprinting on {target_host}")
+    logging.info(f"Starting OS Fingerprinting on {target_host} via NIC {nic}")
     if not dest or dest == settings.OS_RECORD_PATH:
         dest = DEFAULT_OS_RECORD_PATH
 
@@ -115,10 +115,6 @@ def collect_fingerprint(target_host, dest, nic):
     logging.info(f"OS Fingerprinting Completed. Captured {packet_count} packets.")
 
 def convert_to_json(file_path):
-    """
-    Converts legacy fingerprint str(dict) files to base64-encoded JSON format.
-    Handles binary content (e.g., null bytes).
-    """
     try:
         with open(file_path, "rb") as f:
             raw_bytes = f.read()
@@ -158,7 +154,8 @@ def convert_to_json(file_path):
 def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception")
     parser.add_argument("--host", required=True, help="Target IP")
-    parser.add_argument("--nic", required=True, help="Network interface")
+    parser.add_argument("--nic_target", required=True, help="NIC connected to the target host")
+    parser.add_argument("--nic_nmap", required=True, help="NIC connected to the Nmap scanner")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scan mode")
     parser.add_argument("--dest", default=DEFAULT_OS_RECORD_PATH, help="OS fingerprint save dir")
     parser.add_argument("--os", help="OS to mimic for deception (for --od)")
@@ -166,10 +163,14 @@ def main():
     parser.add_argument("--status", help="Port status (for --pd)")
     args = parser.parse_args()
 
-    validate_nic(args.nic)
+    validate_nic(args.nic_target)
+    validate_nic(args.nic_nmap)
+
+    logging.info(f"NIC (Target): {args.nic_target}")
+    logging.info(f"NIC (Nmap): {args.nic_nmap}")
 
     if args.scan == 'ts':
-        collect_fingerprint(args.host, args.dest, args.nic)
+        collect_fingerprint(args.host, args.dest, args.nic_target)
 
     elif args.scan == 'od':
         if not args.os or args.te is None:
