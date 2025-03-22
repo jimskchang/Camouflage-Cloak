@@ -28,7 +28,7 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 
 # Set correct network interfaces
 NIC_TARGET = 'ens192'  # NIC facing the target host
-NIC_NMAP = 'ens224'    # NIC facing the scanning attacker
+NIC_PROBE = 'ens224'   # NIC facing the scanning attacker
 NIC_ADDR_PATH = f'/sys/class/net/{NIC_TARGET}/address'
 
 # 🔹 Set Camouflage Cloak IP (the actual IP address of the cloak server, not the target)
