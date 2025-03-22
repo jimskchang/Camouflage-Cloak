@@ -9,7 +9,6 @@ from typing import Dict, Any
 
 import src.settings as settings
 from src.Packet import Packet
-from src.tcp import TcpConnect
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -18,12 +17,16 @@ class OsDeceiver:
     def __init__(self, target_host: str, target_os: str, dest=None):
         self.host = target_host
         self.os = target_os
-        self.conn = TcpConnect(target_host)
         self.dest = dest
         self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
 
         os.makedirs(self.os_record_path, exist_ok=True)
         logging.info(f"OS Deception ready for {self.os} using path: {self.os_record_path}")
+
+        # Bind deception socket to NIC_PROBE
+        self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
+        self.sock.bind((settings.NIC_PROBE, 0))
+        logging.info(f"Listening for packets on NIC_PROBE: {settings.NIC_PROBE}")
 
     def save_record(self, pkt_type: str, record: Dict[bytes, bytes]):
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
@@ -48,40 +51,6 @@ class OsDeceiver:
             logging.error(f"❌ Fail to load {file_path}, {e}")
             return {}
 
-    def os_record(self, timeout_minutes: int = 3):
-        logging.info("📅 Starting OS fingerprint collection...")
-        timeout = datetime.now() + timedelta(minutes=timeout_minutes)
-
-        tcp, udp, icmp, arp = {}, {}, {}, {}
-
-        while datetime.now() < timeout:
-            try:
-                packet, _ = self.conn.sock.recvfrom(65565)
-                eth_type = struct.unpack("!H", packet[12:14])[0]
-
-                if eth_type == 0x0800:  # IPv4
-                    proto = packet[23]
-                    if proto == 6:
-                        key, _ = gen_tcp_key(packet)
-                        tcp[key] = packet
-                    elif proto == 1:
-                        key, _ = gen_icmp_key(packet)
-                        icmp[key] = packet
-                    elif proto == 17:
-                        key, _ = gen_udp_key(packet)
-                        udp[key] = packet
-                elif eth_type == 0x0806:  # ARP
-                    key, _ = gen_arp_key(packet)
-                    arp[key] = packet
-            except Exception as e:
-                logging.error(f"❌ Error capturing packet: {e}")
-
-        self.save_record("tcp", tcp)
-        self.save_record("udp", udp)
-        self.save_record("icmp", icmp)
-        self.save_record("arp", arp)
-        logging.info("✅ Fingerprint collection complete.")
-
     def os_deceive(self, timeout_minutes: int = 5):
         templates = {
             'tcp': self.load_file('tcp'),
@@ -94,7 +63,7 @@ class OsDeceiver:
 
         while datetime.now() < timeout:
             try:
-                raw, _ = self.conn.sock.recvfrom(65565)
+                raw, _ = self.sock.recvfrom(65565)
                 pkt = Packet(raw)
                 pkt.unpack()
 
@@ -112,7 +81,7 @@ class OsDeceiver:
                     if template:
                         response = synthesize_response(pkt, template)
                         if response:
-                            self.conn.sock.send(response)
+                            self.sock.send(response)
                             counter += 1
                             logging.info(f"📤 Sent {proto} response #{counter}")
                     elif DEBUG_MODE:
@@ -151,8 +120,8 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
             rsp.l4_field['seq'] = 0
 
         elif req_pkt.l3 == 'arp':
-            rsp.l3_field['sender_mac'] = settings.mac
-            rsp.l3_field['sender_ip'] = socket.inet_aton(settings.host)
+            rsp.l3_field['sender_mac'] = settings.MAC
+            rsp.l3_field['sender_ip'] = socket.inet_aton(settings.HOST)
             rsp.l3_field['recv_mac'] = req_pkt.l3_field['sender_mac']
             rsp.l3_field['recv_ip'] = req_pkt.l3_field['sender_ip']
 
