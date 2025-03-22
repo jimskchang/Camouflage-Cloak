@@ -1,143 +1,104 @@
+# src/port_deceiver.py
 import logging
 import socket
 import struct
 import random
 import src.settings as settings
 from src.tcp import TcpConnect, getTCPChecksum, getIPChecksum
-from src.Packet import Packet  # Ensure Packet handles IP checksum calculation
+from src.Packet import Packet
 
-# Constants for readability
+# Protocol and Flag Constants
 ETHERNET_PROTOCOL_IP = 0x0800
 PROTOCOL_TCP = 6
-
-# TCP Flags
 TCP_FLAG_SYN = 0x02
 TCP_FLAG_ACK = 0x10
 TCP_FLAG_RST = 0x04
 TCP_FLAG_SYN_ACK = 0x12
 TCP_FLAG_RST_ACK = 0x14
 
-# Configure logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+def get_random_ttl(os_template: str) -> int:
+    return settings.OS_TEMPLATES.get(os_template, {}).get("TTL", random.choice([64, 128, 255]))
 
-def get_random_ttl(os_name: str = None) -> int:
-    """Returns a TTL based on selected OS template or a random fallback."""
-    if os_name and os_name in settings.OS_TEMPLATES:
-        return settings.OS_TEMPLATES[os_name]['ttl']
-    return random.choice([64, 128, 255])
-
-def get_random_tcp_window(os_name: str = None) -> int:
-    """Returns a TCP window size based on selected OS template or a random fallback."""
-    if os_name and os_name in settings.OS_TEMPLATES:
-        return settings.OS_TEMPLATES[os_name]['window']
-    return random.choice([8192, 16384, 32768])
+def get_random_tcp_window(os_template: str) -> int:
+    return settings.OS_TEMPLATES.get(os_template, {}).get("WINDOW", random.choice([8192, 16384, 65535]))
 
 class PortDeceiver:
-    def __init__(self, host: str, os_template: str = None):
-        """
-        Initializes the PortDeceiver for misleading port scans.
-        """
+    def __init__(self, host: str, os_template: str = "generic"):
         self.host = host
         self.os_template = os_template
-        self.conn = TcpConnect(host)
-        logging.info(f"✅ Port deception initialized for host: {self.host} using OS template: {self.os_template}")
+        self.conn = TcpConnect(host, settings.NIC_PROBE)
+        logging.info(f"✅ Port deception initialized for host {self.host} on NIC_PROBE: {settings.NIC_PROBE}")
 
-    def send_packet(self, recv_flags: list, reply_flags: list) -> bool:
-        """
-        Listens for incoming TCP packets and sends deceptive responses.
-        """
+    def send_packet(self, recv_flags: list, reply_flags: list):
         while True:
             try:
                 packet, _ = self.conn.sock.recvfrom(65565)
-                eth_protocol = struct.unpack('!H', packet[12:14])[0]
-
-                if eth_protocol != ETHERNET_PROTOCOL_IP:
+                if struct.unpack('!H', packet[12:14])[0] != ETHERNET_PROTOCOL_IP:
                     continue
 
                 ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
                 fields = struct.unpack('!BBHHHBBH4s4s', ip_header)
-                src_IP, dest_IP, protocol = fields[8], fields[9], fields[6]
+                src_IP, dest_IP, proto = fields[8], fields[9], fields[6]
 
-                if dest_IP != socket.inet_aton(self.conn.dip) or protocol != PROTOCOL_TCP:
+                if dest_IP != socket.inet_aton(self.conn.dip) or proto != PROTOCOL_TCP:
                     continue
 
-                tcp_header_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
-                tcp_header = packet[tcp_header_start: tcp_header_start + settings.TCP_HEADER_LEN]
-                src_port, dest_port, seq, ack_num, _, flags, *_ = struct.unpack('!HHLLBBHHH', tcp_header)
+                tcp_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
+                tcp_header = packet[tcp_start: tcp_start + settings.TCP_HEADER_LEN]
+                src_port, dest_port, seq, ack_num, offset, flags, *_ = struct.unpack('!HHLLBBHHH', tcp_header)
 
                 if flags not in recv_flags:
                     continue
 
-                logging.info(f"📥 Received TCP packet from {socket.inet_ntoa(src_IP)} to {socket.inet_ntoa(dest_IP)} with flags {flags}")
-
-                reply_seq, reply_ack_num = ack_num, seq + 1
-                reply_src_port, reply_dest_port = dest_port, src_port
-
                 for i, recv_flag in enumerate(recv_flags):
-                    if flags == recv_flag and reply_flags[i] != 0:
-                        reply_tcp_header = self.conn.build_tcp_header_from_reply(
-                            5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port,
-                            dest_IP, src_IP, reply_flags[i]
+                    if flags == recv_flag:
+                        reply_flags_val = reply_flags[i]
+                        if reply_flags_val == 0:
+                            continue
+
+                        reply_tcp = self.conn.build_tcp_header_from_reply(
+                            5, ack_num, seq + 1, dest_port, src_port,
+                            dest_IP, src_IP, reply_flags_val
                         )
-                        packet = packet[:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN] + reply_tcp_header
-                        self.conn.sock.send(packet)
-                        logging.info(f"📤 Sent deceptive reply with flag {reply_flags[i]} to {socket.inet_ntoa(src_IP)}")
+                        spoofed_packet = packet[:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN] + reply_tcp
+                        self.conn.sock.send(spoofed_packet)
+                        logging.info(f"📤 Sent spoofed response with flag {reply_flags_val}")
                 return True
             except Exception as e:
-                logging.error(f"❌ Error processing packet: {e}")
-                continue
+                logging.error(f"❌ Error in send_packet: {e}")
 
-    def deceive_ps_hs(self, port_status: str) -> None:
-        """
-        Deceives port scans by making ports appear open or closed.
-        """
-        port_flag = TCP_FLAG_SYN_ACK if port_status == 'open' else TCP_FLAG_RST_ACK
-        logging.info(f"🛑 Deceiving port scan: Simulating {'open' if port_status == 'open' else 'closed'} ports")
+    def deceive_ps_hs(self, port_status: str):
+        reply_flag = TCP_FLAG_SYN_ACK if port_status == 'open' else TCP_FLAG_RST_ACK
+        logging.info(f"🛡️ Simulating {'open' if port_status == 'open' else 'closed'} ports using flag {reply_flag}")
 
         while True:
             try:
                 packet, _ = self.conn.sock.recvfrom(65565)
-                eth_protocol = struct.unpack('!H', packet[12:14])[0]
-
-                if eth_protocol != ETHERNET_PROTOCOL_IP:
+                if struct.unpack('!H', packet[12:14])[0] != ETHERNET_PROTOCOL_IP:
                     continue
 
-                ip_header = packet[settings.ETH_HEADER_LEN: settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+                ip_header = packet[settings.ETH_HEADER_LEN:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
                 fields = struct.unpack('!BBHHHBBH4s4s', ip_header)
-                src_IP, dest_IP, protocol = fields[8], fields[9], fields[6]
+                src_IP, dest_IP, proto = fields[8], fields[9], fields[6]
 
-                if dest_IP != socket.inet_aton(self.conn.dip) or protocol != PROTOCOL_TCP:
+                if dest_IP != socket.inet_aton(self.conn.dip) or proto != PROTOCOL_TCP:
                     continue
 
-                reply_ttl = get_random_ttl(self.os_template)
-                tcp_window = get_random_tcp_window(self.os_template)
-
-                tcp_header_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
-                tcp_header = packet[tcp_header_start: tcp_header_start + settings.TCP_HEADER_LEN]
+                tcp_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
+                tcp_header = packet[tcp_start: tcp_start + settings.TCP_HEADER_LEN]
                 src_port, dest_port, seq, ack_num, _, flags, *_ = struct.unpack('!HHLLBBHHH', tcp_header)
 
-                reply_seq, reply_ack_num = ack_num, seq + 1
-                reply_src_port, reply_dest_port = dest_port, src_port
-
-                if flags == TCP_FLAG_SYN:
-                    logging.info(f"📥 Received SYN from {socket.inet_ntoa(src_IP)}, responding with deception")
-                    reply_tcp_header = self.conn.build_tcp_header_from_reply(
-                        5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port,
-                        src_IP, dest_IP, port_flag
-                    )
-                elif flags == TCP_FLAG_ACK:
-                    logging.info(f"📥 Received ACK from {socket.inet_ntoa(src_IP)}, responding with RST")
-                    reply_tcp_header = self.conn.build_tcp_header_from_reply(
-                        5, reply_seq, reply_ack_num, reply_src_port, reply_dest_port,
-                        src_IP, dest_IP, TCP_FLAG_RST
-                    )
-                else:
+                if flags != TCP_FLAG_SYN:
                     continue
 
-                packet = packet[:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN] + reply_tcp_header
-                self.conn.sock.send(packet)
-                logging.info(f"📤 Sent deceptive packet to {socket.inet_ntoa(src_IP)}")
+                ttl = get_random_ttl(self.os_template)
+                window = get_random_tcp_window(self.os_template)
+                reply_tcp = self.conn.build_tcp_header_from_reply(
+                    5, ack_num, seq + 1, dest_port, src_port, src_IP, dest_IP, reply_flag
+                )
+                spoofed_packet = packet[:settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN] + reply_tcp
+                self.conn.sock.send(spoofed_packet)
+                logging.info(f"📤 Deceptive SYN-ACK/RST sent to {socket.inet_ntoa(src_IP)}")
 
             except Exception as e:
-                logging.error(f"❌ Error processing packet: {e}")
-                continue
+                logging.error(f"❌ Error in deceive_ps_hs: {e}")
