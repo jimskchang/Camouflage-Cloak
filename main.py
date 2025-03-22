@@ -1,3 +1,4 @@
+
 import logging
 import argparse
 import os
@@ -8,11 +9,10 @@ import sys
 import subprocess
 import json
 import base64
-from collections import defaultdict
-
+import ast
 import src.settings as settings
 from src.port_deceiver import PortDeceiver
-from src.os_deceiver import OsDeceiver, gen_key
+from src.os_deceiver import OsDeceiver
 
 # Configure logging
 logging.basicConfig(
@@ -21,7 +21,7 @@ logging.basicConfig(
     level=logging.DEBUG
 )
 
-DEFAULT_OS_RECORD_PATH = settings.OS_RECORD_PATH
+DEFAULT_OS_RECORD_PATH = "/home/user/Camouflage-Cloak/os_record"
 
 def ensure_directory_exists(directory):
     try:
@@ -88,7 +88,7 @@ def collect_fingerprint(target_host, dest, nic):
         try:
             packet, _ = sock.recvfrom(65565)
             eth_protocol = struct.unpack("!H", packet[12:14])[0]
-            proto_type = None
+            proto_type, packet_data = None, None
 
             if eth_protocol == 0x0806:
                 proto_type = "arp"
@@ -117,15 +117,14 @@ def collect_fingerprint(target_host, dest, nic):
 def convert_to_json(file_path):
     try:
         with open(file_path, "rb") as f:
-            raw_bytes = f.read()
+            content = f.read().strip()
 
-        if not raw_bytes:
+        if not content:
             logging.warning(f"⚠ Skipping empty file: {file_path}")
             return
 
         try:
-            raw_text = raw_bytes.decode("latin1")
-            record_dict = eval(raw_text)
+            record_dict = ast.literal_eval(content.decode("latin1"))
         except Exception as e:
             logging.error(f"❌ Could not parse legacy dict from {file_path}: {e}")
             return
@@ -134,12 +133,8 @@ def convert_to_json(file_path):
         for k, v in record_dict.items():
             if v is None:
                 continue
-
-            key_bytes = k.encode("latin1") if isinstance(k, str) else k
-            val_bytes = v.encode("latin1") if isinstance(v, str) else v
-
-            key_b64 = base64.b64encode(key_bytes).decode("utf-8")
-            val_b64 = base64.b64encode(val_bytes).decode("utf-8")
+            key_b64 = base64.b64encode(k if isinstance(k, bytes) else k.encode("latin1")).decode("utf-8")
+            val_b64 = base64.b64encode(v if isinstance(v, bytes) else v.encode("latin1")).decode("utf-8")
             json_base64[key_b64] = val_b64
 
         with open(file_path, "w") as f:
@@ -154,27 +149,18 @@ def convert_to_json(file_path):
 def main():
     parser = argparse.ArgumentParser(description="Camouflage Cloak - OS & Port Deception")
     parser.add_argument("--host", required=True, help="Target IP")
+    parser.add_argument("--nic", required=True, help="Network interface")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scan mode")
     parser.add_argument("--dest", default=DEFAULT_OS_RECORD_PATH, help="OS fingerprint save dir")
     parser.add_argument("--os", help="OS to mimic for deception (for --od)")
     parser.add_argument("--te", type=int, help="Timeout in minutes (for --od or --pd)")
     parser.add_argument("--status", help="Port status (for --pd)")
-    parser.add_argument("--nic_target", help="Interface facing the target host")
-    parser.add_argument("--nic_probe", help="Interface facing the scanning attacker")
     args = parser.parse_args()
 
-    # Inject dynamic NICs into environment
-    if args.nic_target:
-        os.environ["NIC_TARGET"] = args.nic_target
-    if args.nic_probe:
-        os.environ["NIC_PROBE"] = args.nic_probe
+    validate_nic(args.nic)
 
     if args.scan == 'ts':
-        if not args.nic_target:
-            logging.error("--nic_target is required for --scan ts")
-            sys.exit(1)
-        validate_nic(args.nic_target)
-        collect_fingerprint(args.host, args.dest, args.nic_target)
+        collect_fingerprint(args.host, args.dest, args.nic)
 
     elif args.scan == 'od':
         if not args.os or args.te is None:
@@ -184,34 +170,10 @@ def main():
         os_record_path = os.path.join(DEFAULT_OS_RECORD_PATH, args.os)
         ensure_directory_exists(os_record_path)
 
-        raw_records = defaultdict(dict)
-
-        for proto in ["tcp", "udp", "icmp", "arp"]:
-            file_path = os.path.join(os_record_path, f"{proto}_record.txt")
-            if not os.path.exists(file_path):
-                continue
-
-            try:
-                with open(file_path, "rb") as f:
-                    lines = f.read().split(b"\n")
-
-                for pkt in lines:
-                    if not pkt.strip():
-                        continue
-                    key, _ = gen_key(proto, pkt)
-                    raw_records[proto][key] = pkt
-
-                with open(file_path, "w") as f:
-                    encoded = {
-                        base64.b64encode(k).decode(): base64.b64encode(v).decode()
-                        for k, v in raw_records[proto].items()
-                    }
-                    json.dump(encoded, f, indent=2)
-
-                print(f"✅ Regenerated and converted {proto}_record.txt")
-
-            except Exception as e:
-                print(f"❌ Error processing {proto}_record.txt: {e}")
+        for fname in ["arp_record.txt", "tcp_record.txt", "udp_record.txt", "icmp_record.txt"]:
+            file_path = os.path.join(os_record_path, fname)
+            ensure_file_permissions(file_path)
+            convert_to_json(file_path)
 
         deceiver = OsDeceiver(args.host, args.os, os_record_path)
         deceiver.os_deceive(args.te)
