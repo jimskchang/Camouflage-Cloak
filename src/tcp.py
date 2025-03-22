@@ -3,6 +3,7 @@ import binascii
 import struct
 import array
 import logging
+import os
 import src.settings as settings
 
 class TcpConnect:
@@ -13,6 +14,9 @@ class TcpConnect:
         self.dip = host
         self.nic = nic or settings.NIC_PROBE  # Default to NIC_PROBE if not provided
 
+        if not check_nic_exists_and_up(self.nic):
+            raise RuntimeError(f"❌ NIC {self.nic} does not exist or is not UP.")
+
         mac_path = f"/sys/class/net/{self.nic}/address"
         try:
             with open(mac_path, 'r') as f:
@@ -20,6 +24,7 @@ class TcpConnect:
                 if not mac:
                     raise ValueError(f"MAC address file {mac_path} is empty.")
                 self.mac = binascii.unhexlify(mac.replace(':', ''))  # Convert to binary
+                logging.info(f"✅ Using MAC address for {self.nic}: {mac}")
         except FileNotFoundError:
             raise ValueError(f"❌ Error: MAC address file not found for NIC: {self.nic}")
         except Exception as e:
@@ -61,6 +66,18 @@ class TcpConnect:
 
 
 # --- Utility Functions ---
+
+def check_nic_exists_and_up(nic: str) -> bool:
+    """Check if the NIC exists and is up."""
+    nic_path = f"/sys/class/net/{nic}"
+    operstate_path = os.path.join(nic_path, "operstate")
+    try:
+        with open(operstate_path, 'r') as f:
+            status = f.read().strip()
+        return status == 'up'
+    except Exception as e:
+        logging.error(f"Error checking NIC status: {e}")
+        return False
 
 def getTCPChecksum(packet: bytes) -> int:
     """Computes TCP checksum."""
