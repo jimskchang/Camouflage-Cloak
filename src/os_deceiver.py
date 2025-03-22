@@ -58,6 +58,7 @@ class OsDeceiver:
         while datetime.now() < timeout:
             try:
                 packet, _ = self.conn.sock.recvfrom(65565)
+                logging.info(f"📥 Captured packet: {len(packet)} bytes")
                 eth_type = struct.unpack("!H", packet[12:14])[0]
 
                 if eth_type == 0x0800:  # IPv4
@@ -96,8 +97,11 @@ class OsDeceiver:
         while datetime.now() < timeout:
             try:
                 raw, _ = self.conn.sock.recvfrom(65565)
+                logging.info(f"📥 Raw packet received: {len(raw)} bytes")
                 pkt = Packet(raw)
                 pkt.unpack()
+
+                logging.info(f"Parsed Packet - L3: {pkt.l3}, L4: {pkt.l4}, Dest IP: {socket.inet_ntoa(pkt.l3_field.get('dest_IP', b'0.0.0.0'))}")
 
                 proto = pkt.l4 if pkt.l4 else pkt.l3
 
