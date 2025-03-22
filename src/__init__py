@@ -1,11 +1,11 @@
 """
 This __init__.py file makes the 'src' directory a Python package.
-It allows importing modules from 'src' such as settings, tcp, port_deceiver, and os_deceiver.
+It allows importing modules from 'src' such as settings, tcp, port_deceiver, os_deceiver, and Packet.
 
 Enhancements:
 - Proper exception handling for missing dependencies.
 - Exposed key classes and functions for simplified imports.
-- Ensured modules load properly even if missing dependencies.
+- Ensured modules load properly even if dependencies are missing.
 """
 
 import logging
@@ -24,6 +24,12 @@ try:
     from .os_deceiver import OsDeceiver
     from .Packet import Packet
 
+    __all__ = [
+        "settings", "tcp", "port_deceiver", "os_deceiver", "Packet",
+        "TcpConnect", "getTCPChecksum", "getIPChecksum", "byte2mac", "byte2ip",
+        "PortDeceiver", "OsDeceiver"
+    ]
+
 except ImportError as e:
-    logging.error(f"Module Import Error: {e}. Ensure all necessary files exist in 'src' directory.")
+    logging.error(f"❌ Module Import Error: {e}. Make sure all required files exist under 'src/'")
     raise
