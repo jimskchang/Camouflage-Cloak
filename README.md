@@ -105,6 +105,12 @@ cd Camouflage-Cloak
 
 ### **Step 1: Build OS Fingerprint**
 
+**Clone with Updated settings.py**
+```bash
+git clone https://github.com/jimskchang/Camouflage-Cloak.git
+cd Camouflage-Cloak
+```
+
 **Build Template Synthesis**
 
 ***Step 1:*** Navigate to the Camouflage-Cloak
