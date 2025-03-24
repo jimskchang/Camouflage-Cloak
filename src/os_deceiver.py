@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Dict
 
 import src.settings as settings
+from src.settings import OS_TEMPLATES
 from src.Packet import Packet
 from src.tcp import TcpConnect
 
