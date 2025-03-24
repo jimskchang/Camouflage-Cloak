@@ -10,17 +10,22 @@ import json
 import base64
 import ast
 
-import src.settings as settings
-from src.port_deceiver import PortDeceiver
-from src.os_deceiver import OsDeceiver
-from src.settings import MAC
-
-# --- Logging Setup ---
+# --- Initial Basic Logging ---
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
     datefmt='%y-%m-%d %H:%M:%S',
     level=logging.INFO
 )
+
+# --- Safe Imports ---
+try:
+    import src.settings as settings
+    from src.port_deceiver import PortDeceiver
+    from src.os_deceiver import OsDeceiver
+    from src.settings import MAC
+except ImportError as e:
+    logging.error(f"❌ Import Error: {e}")
+    sys.exit(1)
 
 # --- Utility Functions ---
 def ensure_directory_exists(directory: str):
@@ -118,9 +123,6 @@ def collect_fingerprint(target_host, dest, nic):
     logging.info(f"✅ Captured {packet_count} packets for fingerprinting.")
 
 def convert_raw_packets_to_template(file_path: str, proto: str):
-    """
-    Convert raw binary packets into base64-encoded JSON OS fingerprint template.
-    """
     from src.os_deceiver import gen_key
     template_dict = {}
 
@@ -145,18 +147,41 @@ def convert_raw_packets_to_template(file_path: str, proto: str):
     except Exception as e:
         logging.error(f"❌ Failed to convert {file_path}: {e}")
 
+def list_supported_os():
+    print("🧩 Supported OS templates:")
+    for name, conf in settings.OS_TEMPLATES.items():
+        print(f"  - {name} (TTL={conf['ttl']}, Window={conf['window']})")
+
 # --- Main Logic ---
 def main():
     parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak: OS & Port Deception Engine")
-    parser.add_argument("--host", required=True, help="Target IP to impersonate")
-    parser.add_argument("--nic", required=True, help="Network interface to bind")
-    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="Scan mode: ts, od, pd")
+    parser.add_argument("--host", help="Target IP to impersonate")
+    parser.add_argument("--nic", help="Network interface to bind")
+    parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scan mode: ts, od, pd")
     parser.add_argument("--os", help="OS template to mimic (for --scan od)")
     parser.add_argument("--te", type=int, help="Timeout in minutes (for --scan od/pd)")
     parser.add_argument("--status", help="Port status: open or close (for --scan pd)")
     parser.add_argument("--dest", help="Optional destination path for OS fingerprint collection")
+    parser.add_argument("--list-os", action="store_true", help="List available OS templates and exit")
+    parser.add_argument("--debug", action="store_true", help="Enable debug-level logging")
 
     args = parser.parse_args()
+
+    # Handle --debug first
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.debug("🐞 Debug logging enabled.")
+
+    # Handle --list-os early exit
+    if args.list_os:
+        list_supported_os()
+        return
+
+    if not args.host or not args.nic or not args.scan:
+        logging.error("❌ Missing required arguments: --host, --nic, --scan")
+        parser.print_help()
+        return
+
     validate_nic(args.nic)
 
     if args.scan == 'ts':
@@ -164,20 +189,20 @@ def main():
         collect_fingerprint(args.host, dest, args.nic)
 
     elif args.scan == 'od':
-    if not args.os or args.te is None:
-        logging.error("❌ Missing required arguments --os or --te for OS deception")
-        return
+        if not args.os or args.te is None:
+            logging.error("❌ Missing required arguments --os or --te for OS deception")
+            return
 
-    os_name = args.os.lower()
-    if os_name not in settings.OS_TEMPLATES:
-        logging.error(f"❌ Unknown OS template '{args.os}'. Available templates: {', '.join(settings.OS_TEMPLATES.keys())}")
-        return
+        os_name = args.os.lower()
+        if os_name not in settings.OS_TEMPLATES:
+            logging.error(f"❌ Unknown OS template '{args.os}'. Available templates: {', '.join(settings.OS_TEMPLATES.keys())}")
+            return
 
-    spoof_config = settings.OS_TEMPLATES[os_name]
-    logging.info(f"🎭 Using OS template '{os_name}': TTL={spoof_config['ttl']}, Window={spoof_config['window']}")
+        spoof_config = settings.OS_TEMPLATES[os_name]
+        logging.info(f"🎭 Using OS template '{os_name}': TTL={spoof_config['ttl']}, Window={spoof_config['window']}")
 
-    os_record_path = os.path.join(settings.OS_RECORD_PATH, os_name)
-    ensure_directory_exists(os_record_path)
+        os_record_path = os.path.join(settings.OS_RECORD_PATH, os_name)
+        ensure_directory_exists(os_record_path)
 
         proto_map = {
             "arp_record.txt": "arp",
