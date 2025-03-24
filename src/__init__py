@@ -10,7 +10,8 @@ Enhancements:
 
 import logging
 
-# Attempt to import core modules
+__all__ = []
+
 try:
     from . import settings
     from . import tcp
@@ -18,11 +19,13 @@ try:
     from . import os_deceiver
     from . import Packet
 
-    # Expose key classes and functions for easier access
     from .tcp import TcpConnect, getTCPChecksum, getIPChecksum, byte2mac, byte2ip
     from .port_deceiver import PortDeceiver
     from .os_deceiver import OsDeceiver
-    from .Packet import Packet
+    from .Packet import Packet as PacketClass
+
+    # Assign Packet to PacketClass so `from src import Packet` still works
+    Packet = PacketClass
 
     __all__ = [
         "settings", "tcp", "port_deceiver", "os_deceiver", "Packet",
@@ -30,6 +33,8 @@ try:
         "PortDeceiver", "OsDeceiver"
     ]
 
+    logging.info("✅ src package modules imported successfully.")
+
 except ImportError as e:
-    logging.error(f"❌ Module Import Error: {e}. Make sure all required files exist under 'src/'")
+    logging.error(f"❌ Module Import Error in 'src': {e}. Ensure all required files exist.")
     raise
