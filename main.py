@@ -164,12 +164,20 @@ def main():
         collect_fingerprint(args.host, dest, args.nic)
 
     elif args.scan == 'od':
-        if not args.os or args.te is None:
-            logging.error("❌ Missing required arguments --os or --te for OS deception")
-            return
+    if not args.os or args.te is None:
+        logging.error("❌ Missing required arguments --os or --te for OS deception")
+        return
 
-        os_record_path = os.path.join(settings.OS_RECORD_PATH, args.os)
-        ensure_directory_exists(os_record_path)
+    os_name = args.os.lower()
+    if os_name not in settings.OS_TEMPLATES:
+        logging.error(f"❌ Unknown OS template '{args.os}'. Available templates: {', '.join(settings.OS_TEMPLATES.keys())}")
+        return
+
+    spoof_config = settings.OS_TEMPLATES[os_name]
+    logging.info(f"🎭 Using OS template '{os_name}': TTL={spoof_config['ttl']}, Window={spoof_config['window']}")
+
+    os_record_path = os.path.join(settings.OS_RECORD_PATH, os_name)
+    ensure_directory_exists(os_record_path)
 
         proto_map = {
             "arp_record.txt": "arp",
