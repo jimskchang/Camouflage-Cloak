@@ -40,6 +40,16 @@ class OsDeceiver:
         os.makedirs(self.os_record_path, exist_ok=True)
         self.conn = TcpConnect(self.host, nic=self.nic)
 
+        # Load TTL and Window from OS_TEMPLATES
+        os_template = OS_TEMPLATES.get(self.os.lower())
+        if not os_template:
+            logging.error(f"❌ OS template '{self.os}' not found in settings.OS_TEMPLATES.")
+            raise ValueError(f"Invalid OS template: {self.os}")
+
+        self.ttl = os_template.get("ttl")
+        self.window = os_template.get("window")
+        logging.info(f"🎭 TTL and Window Spoofing -> TTL={self.ttl}, Window={self.window}")
+
         logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
         logging.info(f"📁 Using OS template path: {self.os_record_path}")
 
@@ -136,7 +146,7 @@ class OsDeceiver:
                     template = templates.get(proto, {}).get(key)
 
                     if template:
-                        response = synthesize_response(pkt, template)
+                        response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window)
                         if response:
                             self.conn.sock.send(response)
                             counter += 1
@@ -149,7 +159,7 @@ class OsDeceiver:
 
 
 # --- Response Synthesis ---
-def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
+def synthesize_response(req_pkt: Packet, raw_template: bytes, ttl=None, window=None) -> bytes:
     try:
         rsp = Packet(raw_template)
         rsp.unpack()
@@ -160,6 +170,8 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
         if req_pkt.l3 == 'ip':
             rsp.l3_field['src_IP'] = req_pkt.l3_field['dest_IP']
             rsp.l3_field['dest_IP'] = req_pkt.l3_field['src_IP']
+            if ttl and 'ttl' in rsp.l3_field:
+                rsp.l3_field['ttl'] = ttl
 
         if req_pkt.l3 == 'tcp':
             rsp.l4_field['src_port'] = req_pkt.l4_field['dest_port']
@@ -168,6 +180,8 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes) -> bytes:
             rsp.l4_field['ack_num'] = req_pkt.l4_field['seq'] + 1
             if 8 in rsp.l4_field.get('kind_seq', []):
                 rsp.l4_field['option_field']['ts_echo_reply'] = req_pkt.l4_field['option_field']['ts_val']
+            if window and 'window' in rsp.l4_field:
+                rsp.l4_field['window'] = window
 
         elif req_pkt.l3 == 'icmp':
             rsp.l4_field['ID'] = req_pkt.l4_field['ID']
