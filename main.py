@@ -2,13 +2,12 @@ import logging
 import argparse
 import os
 import time
-import socket
-import struct
 import sys
 import subprocess
 import json
 import base64
-import ast
+
+from scapy.all import sniff, wrpcap, rdpcap
 
 # --- Initial Basic Logging ---
 logging.basicConfig(
@@ -68,70 +67,57 @@ def collect_fingerprint(target_host, dest, nic):
     logging.info(f"📡 Starting OS fingerprint collection on {target_host} via {nic}")
     ensure_directory_exists(dest)
 
-    packet_files = {
-        "arp": os.path.join(dest, "arp_record.txt"),
-        "icmp": os.path.join(dest, "icmp_record.txt"),
-        "tcp": os.path.join(dest, "tcp_record.txt"),
-        "udp": os.path.join(dest, "udp_record.txt"),
+    file_paths = {
+        "arp": os.path.join(dest, "arp_record.pcap"),
+        "icmp": os.path.join(dest, "icmp_record.pcap"),
+        "tcp": os.path.join(dest, "tcp_record.pcap"),
+        "udp": os.path.join(dest, "udp_record.pcap")
     }
+
+    packet_buffers = {
+        "arp": [],
+        "icmp": [],
+        "tcp": [],
+        "udp": []
+    }
+
+    def classify_and_store(pkt):
+        if pkt.haslayer("ARP"):
+            packet_buffers["arp"].append(pkt)
+        elif pkt.haslayer("IP"):
+            if pkt.haslayer("TCP"):
+                packet_buffers["tcp"].append(pkt)
+            elif pkt.haslayer("UDP"):
+                packet_buffers["udp"].append(pkt)
+            elif pkt.haslayer("ICMP"):
+                packet_buffers["icmp"].append(pkt)
 
     validate_nic(nic)
     set_promiscuous_mode(nic)
     time.sleep(2)
 
-    try:
-        sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(3))
-        sock.bind((nic, 0))
-    except PermissionError:
-        logging.error("❌ Root privileges required for raw socket.")
-        sys.exit(1)
-    except Exception as e:
-        logging.error(f"❌ Failed to bind socket: {e}")
-        sys.exit(1)
+    logging.info("📥 Sniffing packets for 600 seconds...")
+    sniff(iface=nic, timeout=600, prn=classify_and_store, store=False)
+    logging.info("✅ Packet capture completed.")
 
-    timeout = time.time() + 180
-    packet_count = 0
+    total = 0
+    for proto, pkts in packet_buffers.items():
+        wrpcap(file_paths[proto], pkts)
+        ensure_file_permissions(file_paths[proto])
+        logging.info(f"💾 Saved {len(pkts)} {proto.upper()} packets to {file_paths[proto]}")
+        total += len(pkts)
 
-    while time.time() < timeout:
-        try:
-            packet, _ = sock.recvfrom(65565)
-            eth_protocol = struct.unpack("!H", packet[12:14])[0]
-            proto_type = None
-
-            if eth_protocol == 0x0806:
-                proto_type = "arp"
-            elif eth_protocol == 0x0800:
-                ip_proto = packet[23]
-                if ip_proto == 1:
-                    proto_type = "icmp"
-                elif ip_proto == 6:
-                    proto_type = "tcp"
-                elif ip_proto == 17:
-                    proto_type = "udp"
-
-            if proto_type:
-                file_path = packet_files[proto_type]
-                with open(file_path, "ab") as f:
-                    f.write(packet + b"\n")
-                ensure_file_permissions(file_path)
-                packet_count += 1
-
-        except Exception as e:
-            logging.error(f"❌ Error receiving packet: {e}")
-            break
-
-    logging.info(f"✅ Captured {packet_count} packets for fingerprinting.")
+    logging.info(f"✅ Total packets saved: {total}")
 
 def convert_raw_packets_to_template(file_path: str, proto: str):
     from src.os_deceiver import gen_key
     template_dict = {}
 
     try:
-        with open(file_path, "rb") as f:
-            lines = f.read().split(b"\n")
-
-        for raw in lines:
-            if not raw or len(raw) < 42:
+        packets = rdpcap(file_path)
+        for pkt in packets:
+            raw = bytes(pkt)
+            if len(raw) < 42:
                 continue
             key, _ = gen_key(proto, raw)
             template_dict[key] = raw
@@ -140,10 +126,12 @@ def convert_raw_packets_to_template(file_path: str, proto: str):
             base64.b64encode(k).decode(): base64.b64encode(v).decode()
             for k, v in template_dict.items()
         }
-        with open(file_path, "w") as f:
+
+        output_txt = file_path.replace(".pcap", ".txt")
+        with open(output_txt, "w") as f:
             json.dump(encoded, f, indent=2)
 
-        logging.info(f"✅ Converted raw {proto} packets in {file_path} to JSON template.")
+        logging.info(f"✅ Converted {proto.upper()} packets to template: {output_txt}")
     except Exception as e:
         logging.error(f"❌ Failed to convert {file_path}: {e}")
 
@@ -167,12 +155,10 @@ def main():
 
     args = parser.parse_args()
 
-    # Handle --debug first
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
         logging.debug("🐞 Debug logging enabled.")
 
-    # Handle --list-os early exit
     if args.list_os:
         list_supported_os()
         return
@@ -205,10 +191,10 @@ def main():
         ensure_directory_exists(os_record_path)
 
         proto_map = {
-            "arp_record.txt": "arp",
-            "tcp_record.txt": "tcp",
-            "udp_record.txt": "udp",
-            "icmp_record.txt": "icmp"
+            "arp_record.pcap": "arp",
+            "tcp_record.pcap": "tcp",
+            "udp_record.pcap": "udp",
+            "icmp_record.pcap": "icmp"
         }
 
         for fname, proto in proto_map.items():
