@@ -26,8 +26,8 @@ L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
 
 # 🔹 Manually defined network interfaces
-NIC_TARGET = 'ens192'  # NIC connected to the target host
-NIC_PROBE  = 'ens224'  # NIC exposed to scanning attacker (Nmap, etc.)
+NIC_TARGET = 'ens192'  # NIC faces the target — used in --scan ts
+NIC_PROBE  = 'ens224'  # NIC faces the attacker/prober (used in --scan od / pd)
 
 # 🔹 IP of Camouflage Cloak device (should match NIC_TARGET IP)
 HOST = "192.168.23.206"
