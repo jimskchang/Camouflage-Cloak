@@ -8,6 +8,7 @@ import logging
 import socket
 import struct
 import random
+import time
 
 import src.settings as settings
 from src.tcp import TcpConnect
@@ -16,20 +17,13 @@ logger = logging.getLogger(__name__)
 
 class PortDeceiver:
     def __init__(self, target_host: str, nic: str = None, os_name: str = None):
-        """
-        Initialize deception engine for port-based probes.
-        :param target_host: The host IP we are protecting.
-        :param nic: Network interface used to send deception responses.
-        :param os_name: Name of the OS template to mimic (e.g. win10).
-        """
         self.target_host = target_host
         self.nic = nic or settings.NIC_PROBE
         self.os_name = os_name
 
-        # Load TTL and TCP window from settings
         tmpl = settings.OS_TEMPLATES.get(os_name, {})
         self.ttl = tmpl.get("ttl", 64)
-        self.win = tmpl.get("tcp_window", 8192)
+        self.win = tmpl.get("window", 8192)
 
         try:
             self.conn = TcpConnect(self.target_host, nic=self.nic)
@@ -41,35 +35,39 @@ class PortDeceiver:
                     f"(TTL={self.ttl}, TCP_WIN={self.win})")
 
     def deceive_ps_hs(self, port_status: str = 'open'):
-        """
-        Simulate port scan deception with SYN/ACK or RST/ACK based on desired port status.
-        :param port_status: 'open' or 'close'
-        """
         logger.info(f"🔄 Simulating ports as {'OPEN' if port_status == 'open' else 'CLOSED'}")
-        port_flag = 0x12 if port_status == 'open' else 0x14  # SYN+ACK or RST+ACK
+        port_flag = 0x12 if port_status == 'open' else 0x14
 
         try:
             while True:
                 packet, _ = self.conn.sock.recvfrom(65565)
                 if len(packet) < 34:
-                    continue  # Too short for IP + TCP
+                    continue
 
                 eth_type = struct.unpack('!H', packet[12:14])[0]
-                if eth_type != 0x0800:
-                    continue  # Not IP
+                vlan_offset = 0
+                vlan_tag = None
 
-                ip_header = packet[14:34]
+                if eth_type == 0x8100:
+                    vlan_tag = struct.unpack('!H', packet[14:16])[0] & 0x0FFF
+                    eth_type = struct.unpack('!H', packet[16:18])[0]
+                    vlan_offset = 4
+
+                if eth_type != 0x0800:
+                    continue
+
+                ip_start = 14 + vlan_offset
+                ip_header = packet[ip_start:ip_start + 20]
                 iph = struct.unpack('!BBHHHBBH4s4s', ip_header)
                 proto = iph[6]
                 if proto != 6:
-                    continue  # Not TCP
+                    continue
 
                 src_ip, dst_ip = iph[8], iph[9]
                 if dst_ip != socket.inet_aton(self.target_host):
-                    continue  # Not addressed to us
+                    continue
 
-                ip_total_length = iph[2]
-                tcp_start = 14 + (iph[0] & 0x0F) * 4
+                tcp_start = ip_start + (iph[0] & 0x0F) * 4
                 tcp_header = packet[tcp_start:tcp_start + 20]
                 if len(tcp_header) < 20:
                     continue
@@ -79,39 +77,48 @@ class PortDeceiver:
                 seq_num, ack_num = tcph[2], tcph[3]
                 flags = tcph[5]
 
-                # Only react to SYN or ACK probes
-                if flags == 0x02:  # SYN
+                # Optional: extract TCP options (MSS, WS, TS)
+                option_data = packet[tcp_start + 20:ip_start + iph[2] - 14]
+                tcp_options = self.parse_tcp_options(option_data)
+
+                if flags == 0x02:
                     logger.info(f"📥 SYN probe from {socket.inet_ntoa(src_ip)}:{src_port}")
                     reply_seq = 0
                     reply_ack = seq_num + 1
+
+                    # Optional: delay response to simulate latency
+                    time.sleep(random.uniform(0.02, 0.1))
+
                     response = self.build_packet(
                         src_ip=dst_ip, dst_ip=src_ip,
                         src_port=dst_port, dst_port=src_port,
                         seq=reply_seq, ack=reply_ack,
-                        flags=port_flag
+                        flags=port_flag, vlan=vlan_tag,
+                        tcp_options=tcp_options
                     )
-                elif flags == 0x10:  # ACK
+                elif flags == 0x10:
                     logger.info(f"📥 ACK probe from {socket.inet_ntoa(src_ip)}:{src_port}")
                     reply_seq = ack_num
                     reply_ack = 0
+
+                    time.sleep(random.uniform(0.02, 0.08))
+
                     response = self.build_packet(
                         src_ip=dst_ip, dst_ip=src_ip,
                         src_port=dst_port, dst_port=src_port,
                         seq=reply_seq, ack=reply_ack,
-                        flags=0x04  # RST only
+                        flags=0x04, vlan=vlan_tag,
+                        tcp_options=tcp_options
                     )
                 else:
-                    continue  # Skip other flag types
+                    continue
 
                 self.conn.sock.send(response)
                 logger.info(f"📤 Deceptive TCP response sent to {socket.inet_ntoa(src_ip)}:{src_port}")
         except Exception as e:
             logger.error(f"❌ Deception error: {e}")
 
-    def build_packet(self, src_ip, dst_ip, src_port, dst_port, seq, ack, flags):
-        """
-        Construct spoofed IP+TCP packet.
-        """
+    def build_packet(self, src_ip, dst_ip, src_port, dst_port, seq, ack, flags, vlan=None, tcp_options=None):
         ip_ver_ihl = (4 << 4) + 5
         ip_tos = 0
         ip_tot_len = 40
@@ -128,22 +135,65 @@ class PortDeceiver:
         ip_chk = self._checksum(ip_header)
         ip_header = ip_header[:10] + struct.pack('!H', ip_chk) + ip_header[12:]
 
-        offset_res_flags = (5 << 12) | flags
+        options = b''
+        if tcp_options:
+            if 'mss' in tcp_options:
+                options += struct.pack('!BBH', 2, 4, tcp_options['mss'])
+            if 'ws' in tcp_options:
+                options += struct.pack('!BBB', 3, 3, tcp_options['ws'])
+            if 'ts_val' in tcp_options and 'ts_ecr' in tcp_options:
+                options += struct.pack('!BBII', 8, 10, tcp_options['ts_val'], tcp_options['ts_ecr'])
+            while len(options) % 4:
+                options += struct.pack('!B', 0)
+
+        offset = 5 + len(options) // 4
+        offset_res_flags = (offset << 12) | flags
+
         tcp_header = struct.pack('!HHLLHHHH',
                                  src_port, dst_port, seq, ack,
                                  offset_res_flags, self.win,
                                  0, 0)
 
-        pseudo_hdr = struct.pack('!4s4sBBH', src_ip, dst_ip, 0, ip_proto, len(tcp_header))
-        tcp_chk = self._checksum(pseudo_hdr + tcp_header)
-        tcp_header = tcp_header[:16] + struct.pack('!H', tcp_chk) + tcp_header[18:]
+        pseudo_hdr = struct.pack('!4s4sBBH', src_ip, dst_ip, 0, ip_proto, len(tcp_header + options))
+        tcp_chk = self._checksum(pseudo_hdr + tcp_header + options)
+        tcp_header = tcp_header[:16] + struct.pack('!H', tcp_chk) + tcp_header[18:] + options
 
-        return ip_header + tcp_header
+        eth_src_mac = bytes.fromhex(settings.MAC.replace(':', ''))
+        eth_dst_mac = b'\x11\x22\x33\x44\x55\x66'
+
+        if vlan is not None:
+            eth_header = struct.pack('!6s6sHHH', eth_dst_mac, eth_src_mac, 0x8100, vlan, 0x0800)
+        else:
+            eth_header = struct.pack('!6s6sH', eth_dst_mac, eth_src_mac, 0x0800)
+
+        return eth_header + ip_header + tcp_header
+
+    def parse_tcp_options(self, data: bytes):
+        options = {}
+        i = 0
+        while i < len(data):
+            kind = data[i]
+            if kind == 0:
+                break
+            elif kind == 1:
+                i += 1
+                continue
+            if i + 1 >= len(data):
+                break
+            length = data[i+1]
+            if i + length > len(data):
+                break
+            value = data[i+2:i+length]
+            if kind == 2 and len(value) >= 2:
+                options['mss'] = struct.unpack('!H', value[:2])[0]
+            elif kind == 3 and len(value) >= 1:
+                options['ws'] = struct.unpack('!B', value[:1])[0]
+            elif kind == 8 and len(value) >= 8:
+                options['ts_val'], options['ts_ecr'] = struct.unpack('!II', value[:8])
+            i += length
+        return options
 
     def _checksum(self, data: bytes) -> int:
-        """
-        Generic checksum computation for IP/TCP headers.
-        """
         if len(data) % 2:
             data += b'\x00'
         s = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
