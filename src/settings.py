@@ -31,24 +31,24 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 NIC_TARGET = 'ens192'
 IP_TARGET = '192.168.10.10'
 GW_TARGET = '192.168.10.1'        # Gateway for NIC_TARGET
-VLAN_TARGET = None                # e.g. '10' if tagged (None if no VLAN)
+VLAN_TARGET = None                # No VLAN tagging
 
 # Interface facing the attacker/scanner
 NIC_PROBE  = 'ens224'
 IP_PROBE   = '192.168.23.206'
 GW_PROBE   = '192.168.23.1'       # Gateway for NIC_PROBE
-VLAN_PROBE = None                 # e.g. '20' if tagged
+VLAN_PROBE = None                # No VLAN tagging
 
 # IP used to bind raw sockets (should be facing attacker)
 HOST = IP_PROBE
 
-# Optional: VLAN-aware interface mapping (useful for packet parsing/logging)
+# VLAN-aware interface mapping (will resolve to None if no tagging is used)
 VLAN_MAP = {
-    NIC_TARGET: VLAN_TARGET,
-    NIC_PROBE: VLAN_PROBE,
+    NIC_TARGET: None,
+    NIC_PROBE: None,
 }
 
-# Optional: gateway routing table (future use for routing or forwarding)
+# Gateway routing table (future use for routing or forwarding)
 GATEWAY_MAP = {
     NIC_TARGET: GW_TARGET,
     NIC_PROBE: GW_PROBE,
@@ -97,3 +97,4 @@ OS_TEMPLATES = {
 
 def get_os_fingerprint(os_name: str) -> dict:
     return OS_TEMPLATES.get(os_name.lower(), {"ttl": 64, "window": 8192})
+
