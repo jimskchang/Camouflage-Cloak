@@ -24,7 +24,6 @@ class OsDeceiver:
         self.dest = dest
         self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
 
-        # Validate NIC and log MAC
         if not os.path.exists(f"/sys/class/net/{self.nic}"):
             logging.error(f"❌ NIC '{self.nic}' not found.")
             raise ValueError(f"NIC '{self.nic}' does not exist.")
@@ -40,7 +39,6 @@ class OsDeceiver:
         os.makedirs(self.os_record_path, exist_ok=True)
         self.conn = TcpConnect(self.host, nic=self.nic)
 
-        # Load TTL and Window from OS_TEMPLATES
         os_template = OS_TEMPLATES.get(self.os.lower())
         if not os_template:
             logging.error(f"❌ OS template '{self.os}' not found in settings.OS_TEMPLATES.")
@@ -235,3 +233,5 @@ def gen_arp_key(packet: bytes):
     except Exception as e:
         logging.warning(f"⚠️ gen_arp_key failed: {e}")
         return b'', None
+
+
