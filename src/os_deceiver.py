@@ -83,39 +83,6 @@ class OsDeceiver:
             logging.error(f"❌ Fail to load {file_path}: {e}")
             return {}
 
-    def os_record(self, timeout_minutes: int = 3):
-        logging.info("📡 Capturing OS fingerprint packets...")
-        timeout = datetime.now() + timedelta(minutes=timeout_minutes)
-        tcp, udp, icmp, arp = {}, {}, {}, {}
-
-        while datetime.now() < timeout:
-            try:
-                packet, _ = self.conn.sock.recvfrom(65565)
-                eth_type = struct.unpack("!H", packet[12:14])[0]
-
-                if eth_type == 0x0800:
-                    proto = packet[23]
-                    if proto == 6:
-                        key, _ = gen_tcp_key(packet)
-                        tcp[key] = packet
-                    elif proto == 1:
-                        key, _ = gen_icmp_key(packet)
-                        icmp[key] = packet
-                    elif proto == 17:
-                        key, _ = gen_udp_key(packet)
-                        udp[key] = packet
-                elif eth_type == 0x0806:
-                    key, _ = gen_arp_key(packet)
-                    arp[key] = packet
-            except Exception as e:
-                logging.error(f"❌ Error capturing packet: {e}")
-
-        self.save_record("tcp", tcp)
-        self.save_record("udp", udp)
-        self.save_record("icmp", icmp)
-        self.save_record("arp", arp)
-        logging.info("✅ Fingerprint collection complete.")
-
     def os_deceive(self, timeout_minutes: int = 5):
         logging.info("🌀 Starting OS deception loop...")
         templates = {ptype: self.load_file(ptype) for ptype in ["tcp", "icmp", "udp", "arp"]}
@@ -128,6 +95,7 @@ class OsDeceiver:
                 logging.debug(f"📥 Raw packet received: {len(raw)} bytes")
 
                 pkt = Packet(raw)
+                pkt.interface = self.nic
                 pkt.unpack()
 
                 dest_ip = pkt.l3_field.get('dest_IP', b'\x00\x00\x00\x00')
@@ -158,14 +126,17 @@ class OsDeceiver:
                 logging.error(f"❌ Error in deception loop: {e}")
 
 
-# --- Response Synthesis ---
 def synthesize_response(req_pkt: Packet, raw_template: bytes, ttl=None, window=None) -> bytes:
     try:
         rsp = Packet(raw_template)
+        rsp.interface = req_pkt.interface
         rsp.unpack()
 
         rsp.l2_field['dMAC'] = req_pkt.l2_field['sMAC']
         rsp.l2_field['sMAC'] = req_pkt.l2_field['dMAC']
+
+        if req_pkt.l2_field.get('vlan') is not None:
+            rsp.l2_field['vlan'] = req_pkt.l2_field['vlan']
 
         if req_pkt.l3 == 'ip':
             rsp.l3_field['src_IP'] = req_pkt.l3_field['dest_IP']
@@ -173,21 +144,21 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes, ttl=None, window=N
             if ttl and 'ttl' in rsp.l3_field:
                 rsp.l3_field['ttl'] = ttl
 
-        if req_pkt.l3 == 'tcp':
+        if req_pkt.l4 == 'tcp':
             rsp.l4_field['src_port'] = req_pkt.l4_field['dest_port']
             rsp.l4_field['dest_port'] = req_pkt.l4_field['src_port']
             rsp.l4_field['seq'] = req_pkt.l4_field['ack_num']
             rsp.l4_field['ack_num'] = req_pkt.l4_field['seq'] + 1
             if 8 in rsp.l4_field.get('kind_seq', []):
-                rsp.l4_field['option_field']['ts_echo_reply'] = req_pkt.l4_field['option_field']['ts_val']
+                rsp.l4_field['option_field']['ts_echo_reply'] = req_pkt.l4_field['option_field'].get('ts_val', 0)
             if window and 'window' in rsp.l4_field:
                 rsp.l4_field['window'] = window
 
-        elif req_pkt.l3 == 'icmp':
+        elif req_pkt.l4 == 'icmp':
             rsp.l4_field['ID'] = req_pkt.l4_field['ID']
             rsp.l4_field['seq'] = req_pkt.l4_field['seq']
 
-        elif req_pkt.l3 == 'udp':
+        elif req_pkt.l4 == 'udp':
             rsp.l4_field['ID'] = 0
             rsp.l4_field['seq'] = 0
 
@@ -204,7 +175,6 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes, ttl=None, window=N
         return b''
 
 
-# --- Key Normalization Helpers ---
 def gen_key(proto: str, packet: bytes):
     if proto == 'tcp':
         return gen_tcp_key(packet)
