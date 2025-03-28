@@ -21,7 +21,7 @@ try:
     import src.settings as settings
     from src.port_deceiver import PortDeceiver
     from src.os_deceiver import OsDeceiver
-    from src.settings import MAC
+    from src.settings import MAC, VLAN_MAP, GATEWAY_MAP
 except ImportError as e:
     logging.error(f"❌ Import Error: {e}")
     sys.exit(1)
@@ -54,6 +54,13 @@ def validate_nic(nic: str):
             logging.info(f"✅ NIC {nic} MAC address: {mac}")
     except Exception as e:
         logging.warning(f"⚠ Could not read MAC address for NIC {nic}: {e}")
+
+    vlan = VLAN_MAP.get(nic)
+    gateway = GATEWAY_MAP.get(nic)
+    if vlan:
+        logging.info(f"🔸 VLAN Tag on {nic}: {vlan}")
+    if gateway:
+        logging.info(f"🔸 Gateway for {nic}: {gateway}")
 
 def set_promiscuous_mode(nic: str):
     try:
@@ -163,12 +170,26 @@ def main():
         list_supported_os()
         return
 
-    if not args.host or not args.nic or not args.scan:
-        logging.error("❌ Missing required arguments: --host, --nic, --scan")
+    if not args.nic or not args.scan:
+        logging.error("❌ Missing required arguments: --nic and --scan")
         parser.print_help()
         return
 
     validate_nic(args.nic)
+
+    # Fallback for --host if not given
+    if not args.host:
+        if args.nic == settings.NIC_PROBE:
+            args.host = settings.IP_PROBE
+        elif args.nic == settings.NIC_TARGET:
+            args.host = settings.IP_TARGET
+        else:
+            logging.error("❌ Cannot infer IP from unknown NIC. Please provide --host explicitly.")
+            return
+        logging.info(f"🧠 Auto-detected host IP from NIC {args.nic}: {args.host}")
+
+    gateway = GATEWAY_MAP.get(args.nic, "unknown")
+    logging.info(f"🌐 Using gateway {gateway} for interface {args.nic}")
 
     if args.scan == 'ts':
         dest = args.dest or settings.OS_RECORD_PATH
