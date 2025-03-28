@@ -27,28 +27,23 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 # Network Interface Setup
 # =======================
 
-# Interface connected to the real target
 NIC_TARGET = 'ens192'
 IP_TARGET = '192.168.10.10'
-GW_TARGET = '192.168.10.1'        # Gateway for NIC_TARGET
-VLAN_TARGET = None                # No VLAN tagging
+GW_TARGET = '192.168.10.1'
+VLAN_TARGET = None
 
-# Interface facing the attacker/scanner
 NIC_PROBE  = 'ens224'
 IP_PROBE   = '192.168.23.206'
-GW_PROBE   = '192.168.23.1'       # Gateway for NIC_PROBE
-VLAN_PROBE = None                # No VLAN tagging
+GW_PROBE   = '192.168.23.1'
+VLAN_PROBE = None
 
-# IP used to bind raw sockets (should be facing attacker)
 HOST = IP_PROBE
 
-# VLAN-aware interface mapping (will resolve to None if no tagging is used)
 VLAN_MAP = {
     NIC_TARGET: None,
     NIC_PROBE: None,
 }
 
-# Gateway routing table (future use for routing or forwarding)
 GATEWAY_MAP = {
     NIC_TARGET: GW_TARGET,
     NIC_PROBE: GW_PROBE,
@@ -83,18 +78,18 @@ FREE_PORT = [4441, 5551, 6661]
 # =======================
 
 OS_TEMPLATES = {
-    "linux": {"ttl": 64, "window": 5840},
-    "linux5": {"ttl": 64, "window": 29200},
-    "win7": {"ttl": 128, "window": 8192},
-    "win10": {"ttl": 128, "window": 65535},
-    "win11": {"ttl": 128, "window": 64240},
-    "windows2022": {"ttl": 128, "window": 65535},
-    "windows2025": {"ttl": 128, "window": 65535},
-    "mac": {"ttl": 64, "window": 65535},
-    "freebsd": {"ttl": 64, "window": 65535},
-    "centos": {"ttl": 64, "window": 5840}
+    "linux":        {"ttl": 64,  "window": 5840,  "ws": 2, "ip_id_mode": "increment"},
+    "linux5":       {"ttl": 64,  "window": 29200, "ws": 1, "ip_id_mode": "increment"},
+    "win7":         {"ttl": 128, "window": 8192,  "ws": 1, "ip_id_mode": "increment"},
+    "win10":        {"ttl": 128, "window": 65535, "ws": 1, "ip_id_mode": "increment"},
+    "win11":        {"ttl": 128, "window": 64240, "ws": 1, "ip_id_mode": "increment"},
+    "windows2022":  {"ttl": 128, "window": 65535, "ws": 1, "ip_id_mode": "increment"},
+    "windows2025":  {"ttl": 128, "window": 65535, "ws": 1, "ip_id_mode": "increment"},
+    "mac":          {"ttl": 64,  "window": 65535, "ws": 3, "ip_id_mode": "random"},
+    "freebsd":      {"ttl": 64,  "window": 65535, "ws": 3, "ip_id_mode": "random"},
+    "centos":       {"ttl": 64,  "window": 5840,  "ws": 2, "ip_id_mode": "increment"},
+    "openbsd":      {"ttl": 64,  "window": 16384, "ws": 0, "ip_id_mode": "zero"}
 }
 
 def get_os_fingerprint(os_name: str) -> dict:
-    return OS_TEMPLATES.get(os_name.lower(), {"ttl": 64, "window": 8192})
-
+    return OS_TEMPLATES.get(os_name.lower(), {"ttl": 64, "window": 8192, "ws": 0, "ip_id_mode": "random"})
