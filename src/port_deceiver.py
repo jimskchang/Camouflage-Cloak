@@ -24,6 +24,12 @@ class PortDeceiver:
         tmpl = settings.OS_TEMPLATES.get(os_name, {})
         self.ttl = tmpl.get("ttl", 64)
         self.win = tmpl.get("window", 8192)
+        self.ws = tmpl.get("ws", 0)
+        self.ip_id_mode = tmpl.get("ip_id_mode", "random")
+        self.ip_id_counter = random.randint(0, 65535)
+
+        self.ts_start = time.time()
+        self.ip_state = {}  # per-IP scan tracking
 
         try:
             self.conn = TcpConnect(self.target_host, nic=self.nic)
@@ -32,7 +38,7 @@ class PortDeceiver:
             raise
 
         logger.info(f"🛡️ PortDeceiver ready on {self.nic} for OS: {self.os_name or 'default'} "
-                    f"(TTL={self.ttl}, TCP_WIN={self.win})")
+                    f"(TTL={self.ttl}, WIN={self.win}, WS={self.ws}, IP_ID={self.ip_id_mode})")
 
     def deceive_ps_hs(self, port_status: str = 'open'):
         logger.info(f"🔄 Simulating ports as {'OPEN' if port_status == 'open' else 'CLOSED'}")
@@ -40,7 +46,9 @@ class PortDeceiver:
 
         try:
             while True:
-                packet, _ = self.conn.sock.recvfrom(65565)
+                packet, addr = self.conn.sock.recvfrom(65565)
+                src_ip_str = addr[0]
+
                 if len(packet) < 34:
                     continue
 
@@ -67,6 +75,8 @@ class PortDeceiver:
                 if dst_ip != socket.inet_aton(self.target_host):
                     continue
 
+                self.track_ip_state(src_ip_str, 'tcp')
+
                 tcp_start = ip_start + (iph[0] & 0x0F) * 4
                 tcp_header = packet[tcp_start:tcp_start + 20]
                 if len(tcp_header) < 20:
@@ -77,18 +87,20 @@ class PortDeceiver:
                 seq_num, ack_num = tcph[2], tcph[3]
                 flags = tcph[5]
 
-                # Optional: extract TCP options (MSS, WS, TS)
                 option_data = packet[tcp_start + 20:ip_start + iph[2] - 14]
                 tcp_options = self.parse_tcp_options(option_data)
+
+                # Simulated TCP timestamp
+                ts_val = int((time.time() - self.ts_start) * 1000) & 0xFFFFFFFF
+                ts_ecr = tcp_options.get('ts_val', 0)
+                tcp_options['ts_val'] = ts_val
+                tcp_options['ts_ecr'] = ts_ecr
 
                 if flags == 0x02:
                     logger.info(f"📥 SYN probe from {socket.inet_ntoa(src_ip)}:{src_port}")
                     reply_seq = 0
                     reply_ack = seq_num + 1
-
-                    # Optional: delay response to simulate latency
                     time.sleep(random.uniform(0.02, 0.1))
-
                     response = self.build_packet(
                         src_ip=dst_ip, dst_ip=src_ip,
                         src_port=dst_port, dst_port=src_port,
@@ -100,9 +112,7 @@ class PortDeceiver:
                     logger.info(f"📥 ACK probe from {socket.inet_ntoa(src_ip)}:{src_port}")
                     reply_seq = ack_num
                     reply_ack = 0
-
                     time.sleep(random.uniform(0.02, 0.08))
-
                     response = self.build_packet(
                         src_ip=dst_ip, dst_ip=src_ip,
                         src_port=dst_port, dst_port=src_port,
@@ -122,7 +132,7 @@ class PortDeceiver:
         ip_ver_ihl = (4 << 4) + 5
         ip_tos = 0
         ip_tot_len = 40
-        ip_id = random.randint(0, 65535)
+        ip_id = self.generate_ip_id()
         ip_frag_off = 0
         ip_ttl = self.ttl
         ip_proto = socket.IPPROTO_TCP
@@ -136,22 +146,23 @@ class PortDeceiver:
         ip_header = ip_header[:10] + struct.pack('!H', ip_chk) + ip_header[12:]
 
         options = b''
+        if self.ws > 0:
+            options += struct.pack('!BBB', 3, 3, self.ws)
         if tcp_options:
             if 'mss' in tcp_options:
-                options += struct.pack('!BBH', 2, 4, tcp_options['mss'])
-            if 'ws' in tcp_options:
-                options += struct.pack('!BBB', 3, 3, tcp_options['ws'])
+                options = struct.pack('!BBH', 2, 4, tcp_options['mss']) + options
             if 'ts_val' in tcp_options and 'ts_ecr' in tcp_options:
                 options += struct.pack('!BBII', 8, 10, tcp_options['ts_val'], tcp_options['ts_ecr'])
-            while len(options) % 4:
-                options += struct.pack('!B', 0)
+        while len(options) % 4:
+            options += struct.pack('!B', 0)
 
         offset = 5 + len(options) // 4
         offset_res_flags = (offset << 12) | flags
+        scaled_win = self.win << self.ws
 
         tcp_header = struct.pack('!HHLLHHHH',
                                  src_port, dst_port, seq, ack,
-                                 offset_res_flags, self.win,
+                                 offset_res_flags, scaled_win,
                                  0, 0)
 
         pseudo_hdr = struct.pack('!4s4sBBH', src_ip, dst_ip, 0, ip_proto, len(tcp_header + options))
@@ -167,6 +178,15 @@ class PortDeceiver:
             eth_header = struct.pack('!6s6sH', eth_dst_mac, eth_src_mac, 0x0800)
 
         return eth_header + ip_header + tcp_header
+
+    def generate_ip_id(self):
+        if self.ip_id_mode == "increment":
+            self.ip_id_counter = (self.ip_id_counter + 1) % 65536
+            return self.ip_id_counter
+        elif self.ip_id_mode == "random":
+            return random.randint(0, 65535)
+        else:
+            return 0
 
     def parse_tcp_options(self, data: bytes):
         options = {}
@@ -192,6 +212,18 @@ class PortDeceiver:
                 options['ts_val'], options['ts_ecr'] = struct.unpack('!II', value[:8])
             i += length
         return options
+
+    def track_ip_state(self, ip: str, proto: str):
+        if ip not in self.ip_state:
+            self.ip_state[ip] = {
+                'first_seen': time.time(),
+                'tcp_count': 0,
+                'icmp_count': 0,
+                'udp_count': 0
+            }
+        key = f"{proto}_count"
+        if key in self.ip_state[ip]:
+            self.ip_state[ip][key] += 1
 
     def _checksum(self, data: bytes) -> int:
         if len(data) % 2:
