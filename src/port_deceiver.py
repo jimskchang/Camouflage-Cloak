@@ -9,6 +9,8 @@ import socket
 import struct
 import random
 import time
+import json
+import os
 
 import src.settings as settings
 from src.tcp import TcpConnect
@@ -30,6 +32,9 @@ class PortDeceiver:
 
         self.ts_start = time.time()
         self.ip_state = {}  # per-IP scan tracking
+
+        self.os_record_path = os.path.join(settings.OS_RECORD_PATH, self.os_name or "unknown")
+        os.makedirs(self.os_record_path, exist_ok=True)
 
         try:
             self.conn = TcpConnect(self.target_host, nic=self.nic)
@@ -125,8 +130,12 @@ class PortDeceiver:
 
                 self.conn.sock.send(response)
                 logger.info(f"📤 Deceptive TCP response sent to {socket.inet_ntoa(src_ip)}:{src_port}")
+        except KeyboardInterrupt:
+            logger.info("🛑 Port deception stopped by user.")
         except Exception as e:
             logger.error(f"❌ Deception error: {e}")
+        finally:
+            self.export_state_log()
 
     def build_packet(self, src_ip, dst_ip, src_port, dst_port, seq, ack, flags, vlan=None, tcp_options=None):
         ip_ver_ihl = (4 << 4) + 5
@@ -224,6 +233,15 @@ class PortDeceiver:
         key = f"{proto}_count"
         if key in self.ip_state[ip]:
             self.ip_state[ip][key] += 1
+
+    def export_state_log(self):
+        try:
+            state_path = os.path.join(self.os_record_path, "state_log.json")
+            with open(state_path, "w") as f:
+                json.dump(self.ip_state, f, indent=2)
+            logger.info(f"🧾 Exported per-IP state log to {state_path}")
+        except Exception as e:
+            logger.error(f"❌ Failed to export state log: {e}")
 
     def _checksum(self, data: bytes) -> int:
         if len(data) % 2:
