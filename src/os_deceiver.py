@@ -4,6 +4,7 @@ import base64
 import logging
 import socket
 import struct
+import time
 from datetime import datetime, timedelta
 from typing import Dict
 
@@ -14,7 +15,6 @@ from src.tcp import TcpConnect
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
-
 
 class OsDeceiver:
     def __init__(self, target_host: str, target_os: str, dest=None, nic: str = None):
@@ -46,8 +46,9 @@ class OsDeceiver:
 
         self.ttl = os_template.get("ttl")
         self.window = os_template.get("window")
-        logging.info(f"🎭 TTL and Window Spoofing -> TTL={self.ttl}, Window={self.window}")
+        self.ip_state = {}  # Track probe counts per IP
 
+        logging.info(f"🎭 TTL and Window Spoofing -> TTL={self.ttl}, Window={self.window}")
         logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
         logging.info(f"📁 Using OS template path: {self.os_record_path}")
 
@@ -89,7 +90,8 @@ class OsDeceiver:
 
         while datetime.now() < timeout:
             try:
-                raw, _ = self.conn.sock.recvfrom(65565)
+                raw, addr = self.conn.sock.recvfrom(65565)
+                ip_str = addr[0]
                 logging.debug(f"📥 Raw packet received: {len(raw)} bytes")
 
                 pkt = Packet(raw)
@@ -101,6 +103,7 @@ class OsDeceiver:
                 logging.info(f"Parsed Packet - L3: {pkt.l3}, L4: {pkt.l4}, Dest IP: {safe_ip}")
 
                 proto = pkt.l4 if pkt.l4 else pkt.l3
+                self.track_ip_state(ip_str, proto)
 
                 if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
                     continue
@@ -112,6 +115,9 @@ class OsDeceiver:
                     template = templates.get(proto, {}).get(key)
 
                     if template:
+                        if proto == 'icmp':
+                            time.sleep(random.uniform(0.25, 0.5))  # ICMP latency injection
+
                         response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window)
                         if response:
                             self.conn.sock.send(response)
@@ -122,6 +128,19 @@ class OsDeceiver:
                             f.write(f"[{proto}] {key.hex()}\n")
             except Exception as e:
                 logging.error(f"❌ Error in deception loop: {e}")
+
+    def track_ip_state(self, ip: str, proto: str):
+        if ip not in self.ip_state:
+            self.ip_state[ip] = {
+                'first_seen': time.time(),
+                'tcp_count': 0,
+                'icmp_count': 0,
+                'udp_count': 0,
+                'arp_count': 0
+            }
+        key = f"{proto}_count"
+        if key in self.ip_state[ip]:
+            self.ip_state[ip][key] += 1
 
 
 def synthesize_response(req_pkt: Packet, raw_template: bytes, ttl=None, window=None) -> bytes:
@@ -172,7 +191,7 @@ def synthesize_response(req_pkt: Packet, raw_template: bytes, ttl=None, window=N
         logging.error(f"❌ Synthesis error: {e}")
         return b''
 
-
+# --- Key Normalization Helpers ---
 def gen_key(proto: str, packet: bytes):
     if proto == 'tcp':
         return gen_tcp_key(packet)
@@ -233,5 +252,3 @@ def gen_arp_key(packet: bytes):
     except Exception as e:
         logging.warning(f"⚠️ gen_arp_key failed: {e}")
         return b'', None
-
-
