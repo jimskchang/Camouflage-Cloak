@@ -36,16 +36,32 @@ class Packet:
             logging.error("[L2] Packet too short for Ethernet header.")
             return
         try:
-            self.l2_header = self.packet[:settings.ETH_HEADER_LEN]
-            eth_dMAC, eth_sMAC, eth_protocol = struct.unpack('!6s6sH', self.l2_header)
-            self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(eth_protocol, 'others')
-            self.l2_field = {
-                'dMAC': eth_dMAC,
-                'sMAC': eth_sMAC,
-                'protocol': eth_protocol,
-            }
+            eth_dMAC, eth_sMAC, eth_type = struct.unpack('!6s6sH', self.packet[:14])
+
+            if eth_type == 0x8100 and len(self.packet) >= 18:
+                vlan_tag = struct.unpack('!H', self.packet[14:16])[0]
+                real_eth_type = struct.unpack('!H', self.packet[16:18])[0]
+                vlan_id = vlan_tag & 0x0FFF
+
+                self.l2_field = {
+                    'dMAC': eth_dMAC,
+                    'sMAC': eth_sMAC,
+                    'protocol': real_eth_type,
+                    'vlan': vlan_id
+                }
+                self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(real_eth_type, 'others')
+                self.l2_header = self.packet[:18]
+            else:
+                self.l2_field = {
+                    'dMAC': eth_dMAC,
+                    'sMAC': eth_sMAC,
+                    'protocol': eth_type,
+                    'vlan': None
+                }
+                self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(eth_type, 'others')
+                self.l2_header = self.packet[:14]
         except Exception as e:
-            logging.error(f"[L2] Error unpacking Ethernet: {e}")
+            logging.error(f"[L2] Error unpacking Ethernet/VLAN: {e}")
 
     def unpack_l3_header(self, l3: str) -> None:
         if l3 == 'ip':
@@ -63,9 +79,8 @@ class Packet:
 
     def unpack_arp_header(self) -> None:
         try:
-            if len(self.packet) < settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN:
-                raise ValueError("Packet too short for ARP header.")
-            self.l3_header = self.packet[settings.ETH_HEADER_LEN : settings.ETH_HEADER_LEN + settings.ARP_HEADER_LEN]
+            start = len(self.l2_header)
+            self.l3_header = self.packet[start:start + settings.ARP_HEADER_LEN]
             fields = struct.unpack('!HHBBH6s4s6s4s', self.l3_header)
             self.l3_field = {
                 'hw_type': fields[0],
@@ -83,9 +98,8 @@ class Packet:
 
     def unpack_ip_header(self) -> None:
         try:
-            if len(self.packet) < settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN:
-                raise ValueError("Packet too short for IP header.")
-            self.l3_header = self.packet[settings.ETH_HEADER_LEN : settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN]
+            start = len(self.l2_header)
+            self.l3_header = self.packet[start:start + settings.IP_HEADER_LEN]
             fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header)
             self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(fields[6], 'others')
             self.l3_field = {
@@ -105,8 +119,8 @@ class Packet:
 
     def unpack_tcp_header(self) -> None:
         try:
-            tcp_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
-            self.l4_header = self.packet[tcp_start : tcp_start + settings.TCP_HEADER_LEN]
+            start = len(self.l2_header) + settings.IP_HEADER_LEN
+            self.l4_header = self.packet[start:start + settings.TCP_HEADER_LEN]
             fields = struct.unpack('!HHLLBBHHH', self.l4_header)
             self.l4_field = {
                 'src_port': fields[0],
@@ -121,9 +135,7 @@ class Packet:
                 'kind_seq': [],
                 'option_field': {}
             }
-
-            # Try parse TCP options
-            option_data = self.packet[tcp_start + settings.TCP_HEADER_LEN : tcp_start + fields[4] * 4]
+            option_data = self.packet[start + settings.TCP_HEADER_LEN:start + fields[4] * 4]
             i = 0
             while i < len(option_data):
                 kind = option_data[i]
@@ -135,7 +147,7 @@ class Packet:
                     continue
                 else:
                     length = option_data[i + 1]
-                    value = option_data[i + 2 : i + length]
+                    value = option_data[i + 2:i + length]
                     if kind == 2 and len(value) >= 2:
                         self.l4_field['option_field']['mss'] = struct.unpack('!H', value[:2])[0]
                     elif kind == 3 and len(value) >= 1:
@@ -143,14 +155,13 @@ class Packet:
                     elif kind == 8 and len(value) >= 8:
                         self.l4_field['option_field']['ts_val'], self.l4_field['option_field']['ts_echo_reply'] = struct.unpack('!II', value[:8])
                     i += length
-
         except Exception as e:
             logging.error(f"[TCP] Error unpacking: {e}")
 
     def unpack_udp_header(self) -> None:
         try:
-            udp_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
-            self.l4_header = self.packet[udp_start : udp_start + settings.UDP_HEADER_LEN]
+            start = len(self.l2_header) + settings.IP_HEADER_LEN
+            self.l4_header = self.packet[start:start + settings.UDP_HEADER_LEN]
             fields = struct.unpack('!HHHH', self.l4_header)
             self.l4_field = {
                 'src_port': fields[0],
@@ -163,8 +174,8 @@ class Packet:
 
     def unpack_icmp_header(self) -> None:
         try:
-            icmp_start = settings.ETH_HEADER_LEN + settings.IP_HEADER_LEN
-            self.l4_header = self.packet[icmp_start : icmp_start + settings.ICMP_HEADER_LEN]
+            start = len(self.l2_header) + settings.IP_HEADER_LEN
+            self.l4_header = self.packet[start:start + settings.ICMP_HEADER_LEN]
             fields = struct.unpack('!BBHHH', self.l4_header)
             self.l4_field = {
                 'icmp_type': fields[0],
@@ -177,14 +188,23 @@ class Packet:
             logging.error(f"[ICMP] Error unpacking: {e}")
 
     def pack(self) -> None:
-        """Rebuilds the packet from fields, including TCP options if available"""
         try:
-            # --- Ethernet Layer ---
-            eth = struct.pack('!6s6sH',
+            vlan_id = self.l2_field.get("vlan")
+            if not vlan_id and self.interface:
+                vlan_id = settings.VLAN_MAP.get(self.interface)
+
+            vlan_tag_bytes = b""
+            ether_type = self.l2_field.get("protocol", 0x0800)
+
+            if vlan_id is not None:
+                vlan_tci = vlan_id & 0x0FFF
+                vlan_tag_bytes = struct.pack("!HH", 0x8100, vlan_tci)
+                ether_type = 0x0800 if self.l3 == 'ip' else 0x0806
+
+            eth = struct.pack('!6s6s',
                 self.l2_field.get('dMAC', b'\x00' * 6),
-                self.l2_field.get('sMAC', b'\x00' * 6),
-                self.l2_field.get('protocol', 0x0800)
-            )
+                self.l2_field.get('sMAC', b'\x00' * 6)
+            ) + vlan_tag_bytes + struct.pack("!H", ether_type)
 
             if self.l3 == 'arp':
                 arp_header = struct.pack(
@@ -202,13 +222,11 @@ class Packet:
                 self.packet = eth + arp_header
                 return
 
-            # --- IP Layer ---
             src_ip = self.l3_field.get('src_IP', b'\x00\x00\x00\x00')
             dst_ip = self.l3_field.get('dest_IP', b'\x00\x00\x00\x00')
             ttl = self.l3_field.get('ttl', 64)
             proto = self.l3_field.get('PROTOCOL', 6)
 
-            # --- TCP Layer ---
             options = b''
             if self.l4 == 'tcp':
                 kind_seq = self.l4_field.get('kind_seq', [])
@@ -255,7 +273,6 @@ class Packet:
                 )
                 self.l4_header = tcp_header + options
 
-            # IP total_len
             total_len = settings.IP_HEADER_LEN + len(self.l4_header)
             ip_header = struct.pack('!BBHHHBBH4s4s',
                 0x45, 0, total_len, 54321, 0,
@@ -267,7 +284,6 @@ class Packet:
                 ttl, proto, checksum, src_ip, dst_ip
             )
             self.l3_header = ip_header
-
             self.packet = eth + ip_header + self.l4_header
 
         except Exception as e:
