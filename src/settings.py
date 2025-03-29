@@ -1,18 +1,20 @@
 import os
 import socket
-import getpass
-import pwd
+import logging
 
-# 🔹 Always use the real user's home directory, even with sudo
-CC_HOME = pwd.getpwuid(os.getuid()).pw_dir
-CC_USER = getpass.getuser()
+# =======================
+# Project Paths & Storage
+# =======================
 
-# 🔹 Project paths
-PROJECT_PATH = os.path.join(CC_HOME, "Camouflage-Cloak")
+# 🔹 Dynamically resolve the base project path
+PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OS_RECORD_PATH = os.path.join(PROJECT_PATH, "os_record")
 os.makedirs(OS_RECORD_PATH, exist_ok=True)
 
-# 🔹 Header lengths
+# =======================
+# Protocol Header Lengths
+# =======================
+
 ETH_HEADER_LEN = 14
 IP_HEADER_LEN = 20
 ARP_HEADER_LEN = 28
@@ -43,7 +45,7 @@ VLAN_PROBE = None
 # IP used to bind raw sockets (should be facing attacker)
 HOST = IP_PROBE
 
-# Optional: VLAN-aware interface mapping (useful for packet parsing/logging)
+# Optional: VLAN-aware interface mapping (used for packet parsing/logging)
 VLAN_MAP = {
     NIC_TARGET: VLAN_TARGET,
     NIC_PROBE: VLAN_PROBE,
@@ -55,7 +57,18 @@ GATEWAY_MAP = {
     NIC_PROBE: GW_PROBE,
 }
 
-# 🔹 Get MAC from a specific NIC
+# =======================
+# NIC Validation & MAC Utils
+# =======================
+
+def check_nic_exists(nic: str) -> bool:
+    return os.path.exists(f"/sys/class/net/{nic}")
+
+if not check_nic_exists(NIC_TARGET):
+    logging.warning(f"⚠ NIC_TARGET '{NIC_TARGET}' not found!")
+if not check_nic_exists(NIC_PROBE):
+    logging.warning(f"⚠ NIC_PROBE '{NIC_PROBE}' not found!")
+
 def get_mac_address(nic: str) -> str:
     try:
         with open(f"/sys/class/net/{nic}/address", "r") as f:
@@ -65,18 +78,14 @@ def get_mac_address(nic: str) -> str:
     except Exception as e:
         raise RuntimeError(f"❌ Unexpected error retrieving MAC address: {e}")
 
+# Use on demand: MAC = get_mac_address(NIC_PROBE) or NIC_TARGET
 MAC = get_mac_address(NIC_TARGET)
 
-# 🔹 Validate interfaces
-def check_nic_exists(nic: str) -> bool:
-    return os.path.exists(f"/sys/class/net/{nic}")
+# =======================
+# Port Deception Settings
+# =======================
 
-if not check_nic_exists(NIC_TARGET):
-    raise ValueError(f"❌ Error: NIC_TARGET '{NIC_TARGET}' not found!")
-if not check_nic_exists(NIC_PROBE):
-    raise ValueError(f"❌ Error: NIC_PROBE '{NIC_PROBE}' not found!")
-
-# 🔹 Define deceptive "free" TCP ports
+# Define deceptive "free" TCP ports
 FREE_PORT = [4441, 5551, 6661]
 
 # =======================
