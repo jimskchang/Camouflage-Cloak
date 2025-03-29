@@ -144,8 +144,12 @@ def convert_raw_packets_to_template(file_path: str, proto: str):
 
 def list_supported_os():
     print("🧩 Supported OS templates:")
-    for name, conf in settings.OS_TEMPLATES.items():
-        print(f"  - {name} (TTL={conf['ttl']}, Window={conf['window']})")
+    for name in settings.BASE_OS_TEMPLATES:
+        print(f"  - {name} (TTL={settings.BASE_OS_TEMPLATES[name]['ttl']}, Window={settings.BASE_OS_TEMPLATES[name]['window']})")
+    if settings.OS_ALIASES:
+        print("\n🔁 Aliases:")
+        for alias, base in settings.OS_ALIASES.items():
+            print(f"  - {alias} → {base}")
 
 # --- Main Logic ---
 def main():
@@ -201,11 +205,12 @@ def main():
             return
 
         os_name = args.os.lower()
-        if os_name not in settings.OS_TEMPLATES:
-            logging.error(f"❌ Unknown OS template '{args.os}'. Available templates: {', '.join(settings.OS_TEMPLATES.keys())}")
+        spoof_config = settings.get_os_fingerprint(os_name)
+
+        if not spoof_config:
+            logging.error(f"❌ Unable to load OS fingerprint for '{args.os}'")
             return
 
-        spoof_config = settings.OS_TEMPLATES[os_name]
         logging.info(f"🎭 Using OS template '{os_name}': TTL={spoof_config['ttl']}, Window={spoof_config['window']}")
 
         os_record_path = os.path.join(settings.OS_RECORD_PATH, os_name)
