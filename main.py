@@ -21,7 +21,7 @@ try:
     import src.settings as settings
     from src.port_deceiver import PortDeceiver
     from src.os_deceiver import OsDeceiver
-    from src.settings import MAC, VLAN_MAP, GATEWAY_MAP
+    from src.settings import MAC, VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
 except ImportError as e:
     logging.error(f"❌ Import Error: {e}")
     sys.exit(1)
@@ -144,8 +144,8 @@ def convert_raw_packets_to_template(file_path: str, proto: str):
 
 def list_supported_os():
     print("🧩 Supported OS templates:")
-    for name in settings.BASE_OS_TEMPLATES:
-        print(f"  - {name} (TTL={settings.BASE_OS_TEMPLATES[name]['ttl']}, Window={settings.BASE_OS_TEMPLATES[name]['window']})")
+    for name in BASE_OS_TEMPLATES:
+        print(f"  - {name} (TTL={BASE_OS_TEMPLATES[name]['ttl']}, Window={BASE_OS_TEMPLATES[name]['window']})")
     if settings.OS_ALIASES:
         print("\n🔁 Aliases:")
         for alias, base in settings.OS_ALIASES.items():
