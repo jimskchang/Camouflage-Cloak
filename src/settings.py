@@ -78,7 +78,7 @@ def get_mac_address(nic: str) -> str:
     except Exception as e:
         raise RuntimeError(f"❌ Unexpected error retrieving MAC address: {e}")
 
-# Use on demand: MAC = get_mac_address(NIC_PROBE) or NIC_TARGET
+# Default MAC (used by some modules at init)
 MAC = get_mac_address(NIC_TARGET)
 
 # =======================
@@ -92,18 +92,51 @@ FREE_PORT = [4441, 5551, 6661]
 # OS Fingerprint Templates
 # =======================
 
-OS_TEMPLATES = {
-    "linux": {"ttl": 64, "window": 5840},
-    "linux5": {"ttl": 64, "window": 29200},
-    "win7": {"ttl": 128, "window": 8192},
-    "win10": {"ttl": 128, "window": 65535},
-    "win11": {"ttl": 128, "window": 64240},
-    "windows2022": {"ttl": 128, "window": 65535},
-    "windows2025": {"ttl": 128, "window": 65535},
-    "mac": {"ttl": 64, "window": 65535},
-    "freebsd": {"ttl": 64, "window": 65535},
-    "centos": {"ttl": 64, "window": 5840}
+BASE_OS_TEMPLATES = {
+    "linux":        {"ttl": 64,  "window": 5840},
+    "linux5":       {"ttl": 64,  "window": 29200},
+    "centos":       {"ttl": 64,  "window": 5840},
+    "mac":          {"ttl": 64,  "window": 65535},
+    "freebsd":      {"ttl": 64,  "window": 65535},
+    "win7":         {"ttl": 128, "window": 8192},
+    "win10":        {"ttl": 128, "window": 65535},
+    "win11":        {"ttl": 128, "window": 64240},
+    "windows2022":  {"ttl": 128, "window": 65535},
+    "windows2025":  {"ttl": 128, "window": 65535},
+}
+
+# 🔄 OS aliases (user-friendly names → real keys)
+OS_ALIASES = {
+    "windows10": "win10",
+    "windows11": "win11",
+    "windows7": "win7",
+    "ubuntu20": "linux",
+    "ubuntu22": "linux5",
+    "centos7": "centos",
+    "centos8": "centos",
+    "macos": "mac",
+    "macos12": "mac",
+    "macos13": "mac",
 }
 
 def get_os_fingerprint(os_name: str) -> dict:
-    return OS_TEMPLATES.get(os_name.lower(), {"ttl": 64, "window": 8192})
+    name = os_name.lower()
+
+    # Check alias mapping
+    if name in OS_ALIASES:
+        base = OS_ALIASES[name]
+        return BASE_OS_TEMPLATES[base]
+
+    # Direct match
+    if name in BASE_OS_TEMPLATES:
+        return BASE_OS_TEMPLATES[name]
+
+    # Match by OS family prefix (e.g., win10_22h2 → win10)
+    for base in BASE_OS_TEMPLATES:
+        if name.startswith(base):
+            logging.info(f"🔁 Detected OS version '{name}', inheriting base template '{base}'")
+            return BASE_OS_TEMPLATES[base]
+
+    # Fallback default
+    logging.warning(f"⚠ Unknown OS '{name}', using fallback TTL/Window")
+    return {"ttl": 64, "window": 8192}
