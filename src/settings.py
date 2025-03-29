@@ -6,7 +6,6 @@ import logging
 # Project Paths & Storage
 # =======================
 
-# 🔹 Dynamically resolve the base project path
 PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OS_RECORD_PATH = os.path.join(PROJECT_PATH, "os_record")
 os.makedirs(OS_RECORD_PATH, exist_ok=True)
@@ -32,28 +31,23 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 # Network Interface Setup
 # =======================
 
-# Interface connected to the real target
 NIC_TARGET = 'ens192'
 IP_TARGET = '192.168.10.10'
 GW_TARGET = '192.168.10.1'
 VLAN_TARGET = None
 
-# Interface facing the attacker/scanner
 NIC_PROBE  = 'ens224'
 IP_PROBE   = '192.168.23.206'
 GW_PROBE   = '192.168.23.1'
 VLAN_PROBE = None
 
-# IP used to bind raw sockets (should be facing attacker)
 HOST = IP_PROBE
 
-# Optional: VLAN-aware interface mapping (used for packet parsing/logging)
 VLAN_MAP = {
     NIC_TARGET: VLAN_TARGET,
     NIC_PROBE: VLAN_PROBE,
 }
 
-# Optional: gateway routing table (future use for routing or forwarding)
 GATEWAY_MAP = {
     NIC_TARGET: GW_TARGET,
     NIC_PROBE: GW_PROBE,
@@ -80,19 +74,20 @@ def get_mac_address(nic: str) -> str:
     except Exception as e:
         raise RuntimeError(f"❌ Unexpected error retrieving MAC address: {e}")
 
-# Default MAC (used by some modules at init)
 MAC = get_mac_address(NIC_TARGET)
 
 # =======================
 # Port Deception Settings
 # =======================
 
-# Define deceptive "free" TCP ports
 FREE_PORT = [4441, 5551, 6661]
 
 # =======================
 # OS Fingerprint Templates
 # =======================
+
+FALLBACK_TTL = 64
+FALLBACK_WINDOW = 8192
 
 BASE_OS_TEMPLATES = {
     "linux":        {"ttl": 64,  "window": 5840},
@@ -107,7 +102,6 @@ BASE_OS_TEMPLATES = {
     "windows2025":  {"ttl": 128, "window": 65535},
 }
 
-# 🔄 OS aliases (user-friendly names → real keys)
 OS_ALIASES = {
     "windows10": "win10",
     "windows11": "win11",
@@ -124,21 +118,26 @@ OS_ALIASES = {
 def get_os_fingerprint(os_name: str) -> dict:
     name = os_name.lower()
 
-    # Check alias mapping
     if name in OS_ALIASES:
         base = OS_ALIASES[name]
-        return BASE_OS_TEMPLATES[base]
+        result = BASE_OS_TEMPLATES[base]
+        logging.info(f"🧩 Resolved alias '{name}' → '{base}'")
+        return result
 
-    # Direct match
     if name in BASE_OS_TEMPLATES:
-        return BASE_OS_TEMPLATES[name]
+        result = BASE_OS_TEMPLATES[name]
+        logging.info(f"🧩 Found base template for '{name}'")
+        return result
 
-    # Match by OS family prefix (e.g., win10_22h2 → win10)
     for base in BASE_OS_TEMPLATES:
         if name.startswith(base):
-            logging.info(f"🔁 Detected OS version '{name}', inheriting base template '{base}'")
-            return BASE_OS_TEMPLATES[base]
+            result = BASE_OS_TEMPLATES[base]
+            logging.info(f"🔁 Detected versioned OS '{name}', inheriting from base '{base}'")
+            return result
 
-    # Fallback default
-    logging.warning(f"⚠ Unknown OS '{name}', using fallback TTL/Window")
-    return {"ttl": 64, "window": 8192}
+    logging.warning(f"⚠ Unknown OS '{name}', using fallback TTL={FALLBACK_TTL}, Window={FALLBACK_WINDOW}")
+    return {"ttl": FALLBACK_TTL, "window": FALLBACK_WINDOW}
+
+def list_all_templates() -> dict:
+    all_keys = set(BASE_OS_TEMPLATES.keys()) | set(OS_ALIASES.keys())
+    return {k: get_os_fingerprint(k) for k in sorted(all_keys)}
