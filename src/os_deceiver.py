@@ -13,6 +13,7 @@ import src.settings as settings
 from src.settings import get_os_fingerprint
 from src.Packet import Packet
 from src.tcp import TcpConnect
+from src.response import synthesize_response  # Make sure this exists and supports TTL/window
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -109,7 +110,7 @@ class OsDeceiver:
 
         self.ttl = os_template.get("ttl")
         self.window = os_template.get("window")
-        self.ip_state = {}  # Track probe counts per IP
+        self.ip_state = {}
 
         logging.info(f"🎭 TTL and Window Spoofing -> TTL={self.ttl}, Window={self.window}")
         logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
@@ -179,16 +180,24 @@ class OsDeceiver:
 
                     if template:
                         if proto == 'icmp':
-                            time.sleep(random.uniform(0.25, 0.5))  # ICMP latency injection
+                            time.sleep(random.uniform(0.25, 0.5))  # Fake ICMP latency
 
                         response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window)
                         if response:
                             self.conn.sock.send(response)
                             counter += 1
                             logging.info(f"📤 Sent {proto.upper()} response #{counter}")
-                    elif DEBUG_MODE:
-                        with open(UNMATCHED_LOG, "a") as f:
-                            f.write(f"[{proto}] {key.hex()}\n")
+
+                    else:
+                        logging.warning(f"⚠️ No template match for {proto} key (len={len(key)}).")
+                        if settings.AUTO_LEARN_MISSING:
+                            logging.info(f"🧠 Learning new {proto.upper()} template on the fly")
+                            templates[proto][key] = pkt.packet
+                            self.save_record(proto, templates[proto])
+                        elif DEBUG_MODE:
+                            with open(UNMATCHED_LOG, "a") as f:
+                                f.write(f"[{proto}] {key.hex()}\n")
+
             except Exception as e:
                 logging.error(f"❌ Error in deception loop: {e}")
 
