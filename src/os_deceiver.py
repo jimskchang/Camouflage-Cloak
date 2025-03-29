@@ -5,11 +5,12 @@ import logging
 import socket
 import struct
 import time
+import random
 from datetime import datetime, timedelta
 from typing import Dict
 
 import src.settings as settings
-from src.settings import OS_TEMPLATES
+from src.settings import get_os_fingerprint
 from src.Packet import Packet
 from src.tcp import TcpConnect
 
@@ -101,9 +102,9 @@ class OsDeceiver:
         os.makedirs(self.os_record_path, exist_ok=True)
         self.conn = TcpConnect(self.host, nic=self.nic)
 
-        os_template = OS_TEMPLATES.get(self.os.lower())
+        os_template = get_os_fingerprint(self.os)
         if not os_template:
-            logging.error(f"❌ OS template '{self.os}' not found in settings.OS_TEMPLATES.")
+            logging.error(f"❌ OS template '{self.os}' could not be loaded.")
             raise ValueError(f"Invalid OS template: {self.os}")
 
         self.ttl = os_template.get("ttl")
