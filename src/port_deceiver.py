@@ -1,252 +1,156 @@
-"""
-port_deceiver.py - Camouflage Cloak Project
-Handles TCP port scan deception by responding to probes with OS-specific
-network characteristics to mislead reconnaissance tools like Nmap.
-"""
-
 import logging
-import socket
-import struct
-import random
-import time
-import json
-import os
-
-import src.settings as settings
-from src.tcp import TcpConnect
+from scapy.all import IP, TCP, send  # plus any other scapy components used for packet crafting
+from settings import get_os_fingerprint
 
 logger = logging.getLogger(__name__)
+# (Assume logging is configured in the main program to capture these logs appropriately)
 
 class PortDeceiver:
-    def __init__(self, target_host: str, nic: str = None, os_name: str = None):
-        self.target_host = target_host
-        self.nic = nic or settings.NIC_PROBE
+    """
+    PortDeceiver simulates open/closed ports with spoofed OS fingerprints to deceive port scanners.
+    It crafts TCP/IP responses (e.g., SYN-ACK or RST packets) with characteristics matching a target OS.
+    """
+    def __init__(self, interface_ip, os_name=None, ports_config=None):
+        """
+        Initialize the PortDeceiver.
+        :param interface_ip: The IP address of the interface to use for crafting replies.
+        :param os_name: Name of the OS whose fingerprint to mimic (can be None for default).
+        :param ports_config: Configuration of ports to simulate (e.g., which ports appear open or closed).
+        """
+        self.local_ip = interface_ip
         self.os_name = os_name
+        self.ports_config = ports_config or {}  # e.g., dict of port->state ('open' or 'closed'), if applicable
 
-        tmpl = settings.OS_TEMPLATES.get(os_name, {})
-        self.ttl = tmpl.get("ttl", 64)
-        self.win = tmpl.get("window", 8192)
-        self.ws = tmpl.get("ws", 0)
-        self.ip_id_mode = tmpl.get("ip_id_mode", "random")
-        self.ip_id_counter = random.randint(0, 65535)
-
-        self.ts_start = time.time()
-        self.ip_state = {}  # per-IP scan tracking
-
-        self.os_record_path = os.path.join(settings.OS_RECORD_PATH, self.os_name or "unknown")
-        os.makedirs(self.os_record_path, exist_ok=True)
-
-        try:
-            self.conn = TcpConnect(self.target_host, nic=self.nic)
-        except Exception as e:
-            logger.error(f"❌ Failed to initialize TcpConnect on {self.nic}: {e}")
-            raise
-
-        logger.info(f"🛡️ PortDeceiver ready on {self.nic} for OS: {self.os_name or 'default'} "
-                    f"(TTL={self.ttl}, WIN={self.win}, WS={self.ws}, IP_ID={self.ip_id_mode})")
-
-    def deceive_ps_hs(self, port_status: str = 'open'):
-        logger.info(f"🔄 Simulating ports as {'OPEN' if port_status == 'open' else 'CLOSED'}")
-        port_flag = 0x12 if port_status == 'open' else 0x14
-
-        try:
-            while True:
-                packet, addr = self.conn.sock.recvfrom(65565)
-                src_ip_str = addr[0]
-
-                if len(packet) < 34:
-                    continue
-
-                eth_type = struct.unpack('!H', packet[12:14])[0]
-                vlan_offset = 0
-                vlan_tag = None
-
-                if eth_type == 0x8100:
-                    vlan_tag = struct.unpack('!H', packet[14:16])[0] & 0x0FFF
-                    eth_type = struct.unpack('!H', packet[16:18])[0]
-                    vlan_offset = 4
-
-                if eth_type != 0x0800:
-                    continue
-
-                ip_start = 14 + vlan_offset
-                ip_header = packet[ip_start:ip_start + 20]
-                iph = struct.unpack('!BBHHHBBH4s4s', ip_header)
-                proto = iph[6]
-                if proto != 6:
-                    continue
-
-                src_ip, dst_ip = iph[8], iph[9]
-                if dst_ip != socket.inet_aton(self.target_host):
-                    continue
-
-                self.track_ip_state(src_ip_str, 'tcp')
-
-                tcp_start = ip_start + (iph[0] & 0x0F) * 4
-                tcp_header = packet[tcp_start:tcp_start + 20]
-                if len(tcp_header) < 20:
-                    continue
-
-                tcph = struct.unpack('!HHLLBBHHH', tcp_header)
-                src_port, dst_port = tcph[0], tcph[1]
-                seq_num, ack_num = tcph[2], tcph[3]
-                flags = tcph[5]
-
-                option_data = packet[tcp_start + 20:ip_start + iph[2] - 14]
-                tcp_options = self.parse_tcp_options(option_data)
-
-                # Simulated TCP timestamp
-                ts_val = int((time.time() - self.ts_start) * 1000) & 0xFFFFFFFF
-                ts_ecr = tcp_options.get('ts_val', 0)
-                tcp_options['ts_val'] = ts_val
-                tcp_options['ts_ecr'] = ts_ecr
-
-                if flags == 0x02:
-                    logger.info(f"📥 SYN probe from {socket.inet_ntoa(src_ip)}:{src_port}")
-                    reply_seq = 0
-                    reply_ack = seq_num + 1
-                    time.sleep(random.uniform(0.02, 0.1))
-                    response = self.build_packet(
-                        src_ip=dst_ip, dst_ip=src_ip,
-                        src_port=dst_port, dst_port=src_port,
-                        seq=reply_seq, ack=reply_ack,
-                        flags=port_flag, vlan=vlan_tag,
-                        tcp_options=tcp_options
-                    )
-                elif flags == 0x10:
-                    logger.info(f"📥 ACK probe from {socket.inet_ntoa(src_ip)}:{src_port}")
-                    reply_seq = ack_num
-                    reply_ack = 0
-                    time.sleep(random.uniform(0.02, 0.08))
-                    response = self.build_packet(
-                        src_ip=dst_ip, dst_ip=src_ip,
-                        src_port=dst_port, dst_port=src_port,
-                        seq=reply_seq, ack=reply_ack,
-                        flags=0x04, vlan=vlan_tag,
-                        tcp_options=tcp_options
-                    )
-                else:
-                    continue
-
-                self.conn.sock.send(response)
-                logger.info(f"📤 Deceptive TCP response sent to {socket.inet_ntoa(src_ip)}:{src_port}")
-        except KeyboardInterrupt:
-            logger.info("🛑 Port deception stopped by user.")
-        except Exception as e:
-            logger.error(f"❌ Deception error: {e}")
-        finally:
-            self.export_state_log()
-
-    def build_packet(self, src_ip, dst_ip, src_port, dst_port, seq, ack, flags, vlan=None, tcp_options=None):
-        ip_ver_ihl = (4 << 4) + 5
-        ip_tos = 0
-        ip_tot_len = 40
-        ip_id = self.generate_ip_id()
-        ip_frag_off = 0
-        ip_ttl = self.ttl
-        ip_proto = socket.IPPROTO_TCP
-        ip_chk = 0
-        ip_header = struct.pack('!BBHHHBBH4s4s',
-                                ip_ver_ihl, ip_tos, ip_tot_len,
-                                ip_id, ip_frag_off,
-                                ip_ttl, ip_proto,
-                                ip_chk, src_ip, dst_ip)
-        ip_chk = self._checksum(ip_header)
-        ip_header = ip_header[:10] + struct.pack('!H', ip_chk) + ip_header[12:]
-
-        options = b''
-        if self.ws > 0:
-            options += struct.pack('!BBB', 3, 3, self.ws)
-        if tcp_options:
-            if 'mss' in tcp_options:
-                options = struct.pack('!BBH', 2, 4, tcp_options['mss']) + options
-            if 'ts_val' in tcp_options and 'ts_ecr' in tcp_options:
-                options += struct.pack('!BBII', 8, 10, tcp_options['ts_val'], tcp_options['ts_ecr'])
-        while len(options) % 4:
-            options += struct.pack('!B', 0)
-
-        offset = 5 + len(options) // 4
-        offset_res_flags = (offset << 12) | flags
-        scaled_win = self.win << self.ws
-
-        tcp_header = struct.pack('!HHLLHHHH',
-                                 src_port, dst_port, seq, ack,
-                                 offset_res_flags, scaled_win,
-                                 0, 0)
-
-        pseudo_hdr = struct.pack('!4s4sBBH', src_ip, dst_ip, 0, ip_proto, len(tcp_header + options))
-        tcp_chk = self._checksum(pseudo_hdr + tcp_header + options)
-        tcp_header = tcp_header[:16] + struct.pack('!H', tcp_chk) + tcp_header[18:] + options
-
-        eth_src_mac = bytes.fromhex(settings.MAC.replace(':', ''))
-        eth_dst_mac = b'\x11\x22\x33\x44\x55\x66'
-
-        if vlan is not None:
-            eth_header = struct.pack('!6s6sHHH', eth_dst_mac, eth_src_mac, 0x8100, vlan, 0x0800)
+        # Retrieve OS fingerprint traits (TTL, window, etc.) using settings.get_os_fingerprint
+        fingerprint = None
+        if self.os_name:
+            fingerprint = get_os_fingerprint(self.os_name)
+        if not fingerprint:
+            # OS not recognized or not provided – use safe fallback defaults
+            if self.os_name:
+                logger.warning(f"Unknown OS '{self.os_name}' – using fallback TTL=64, window=8192.")
+            else:
+                logger.info("No OS specified – using default TTL=64, window=8192.")
+            fingerprint = {'ttl': 64, 'window': 8192}
         else:
-            eth_header = struct.pack('!6s6sH', eth_dst_mac, eth_src_mac, 0x0800)
-
-        return eth_header + ip_header + tcp_header
-
-    def generate_ip_id(self):
-        if self.ip_id_mode == "increment":
-            self.ip_id_counter = (self.ip_id_counter + 1) % 65536
-            return self.ip_id_counter
-        elif self.ip_id_mode == "random":
-            return random.randint(0, 65535)
-        else:
-            return 0
-
-    def parse_tcp_options(self, data: bytes):
-        options = {}
-        i = 0
-        while i < len(data):
-            kind = data[i]
-            if kind == 0:
-                break
-            elif kind == 1:
-                i += 1
-                continue
-            if i + 1 >= len(data):
-                break
-            length = data[i+1]
-            if i + length > len(data):
-                break
-            value = data[i+2:i+length]
-            if kind == 2 and len(value) >= 2:
-                options['mss'] = struct.unpack('!H', value[:2])[0]
-            elif kind == 3 and len(value) >= 1:
-                options['ws'] = struct.unpack('!B', value[:1])[0]
-            elif kind == 8 and len(value) >= 8:
-                options['ts_val'], options['ts_ecr'] = struct.unpack('!II', value[:8])
-            i += length
-        return options
-
-    def track_ip_state(self, ip: str, proto: str):
-        if ip not in self.ip_state:
-            self.ip_state[ip] = {
-                'first_seen': time.time(),
-                'tcp_count': 0,
-                'icmp_count': 0,
-                'udp_count': 0
+            # Fingerprint found for the given OS name (or alias)
+            # Log which OS template is being used, including alias resolution if applicable
+            os_name_lower = self.os_name.lower() if self.os_name else ""
+            # Define common aliases for logging purposes
+            alias_map = {
+                "winxp": "Windows XP", "windows xp": "Windows XP",
+                "win7": "Windows 7", "windows 7": "Windows 7",
+                "win8": "Windows 8", "windows 8": "Windows 8",
+                "win10": "Windows 10", "windows 10": "Windows 10",
+                "win11": "Windows 11", "windows 11": "Windows 11",
+                "macos": "Mac OS X", "osx": "Mac OS X"
             }
-        key = f"{proto}_count"
-        if key in self.ip_state[ip]:
-            self.ip_state[ip][key] += 1
+            if os_name_lower in alias_map:
+                # The provided name is an alias that was resolved internally
+                actual_name = alias_map[os_name_lower]
+                logger.info(f"OS alias '{self.os_name}' resolved to '{actual_name}' – using OS fingerprint (TTL={fingerprint['ttl']}, window={fingerprint['window']}).")
+            else:
+                # Use the provided OS name in the log (already a canonical name or unrecognized alias that happened to match)
+                logger.info(f"Using OS fingerprint for '{self.os_name}' (TTL={fingerprint['ttl']}, window={fingerprint['window']}).")
 
-    def export_state_log(self):
+        # Save the fingerprint parameters for use in packet crafting
+        self.default_ttl = fingerprint.get('ttl', 64)
+        self.default_window = fingerprint.get('window', 8192)
+        # Other traits like Don't-Fragment flag, TCP options (e.g., timestamp, window scale) can be included if provided
+        self.df_flag = fingerprint.get('df', False)               # Don't Fragment flag (DF) default
+        self.win_scale = fingerprint.get('wscale', 0)             # Window scale factor (if any; 0 means no scaling)
+        self.mss_value = fingerprint.get('mss', 1460)             # MSS value for TCP options (1460 is common default)
+        self.timestamp_enabled = fingerprint.get('timestamp', False) or fingerprint.get('ts', False)
+        # Note: The get_os_fingerprint may return more fields depending on implementation, e.g., options list.
+
+        # Initialize any necessary state for tracking ongoing deceptive connections
+        self.sessions = {}  # e.g., {(client_ip, client_port, server_port): connection_state}
+
+    def craft_response(self, src_ip, src_port, dst_port, flag):
+        """
+        Craft a TCP packet response with the appropriate OS fingerprint.
+        :param src_ip: Source IP of the incoming packet (the scanner's IP).
+        :param src_port: Source port of the incoming packet.
+        :param dst_port: Destination port that was targeted (our port).
+        :param flag: The TCP flag of the incoming packet ('S' for SYN, etc.).
+        :return: Scapy packet (IP/TCP) ready to send, or None if no response needed.
+        """
+        # Only handle TCP SYN packets for port deception (if other flags, return None)
+        if flag != 'S':  # Only respond to SYNs (simplified check)
+            return None
+
+        # Determine if the targeted port is supposed to appear open or closed
+        port_state = self.ports_config.get(dst_port, 'closed')
+        # Create IP/TCP packet with appropriate fingerprint values
+        ip_layer = IP(src=self.local_ip, dst=src_ip)
+        ip_layer.ttl = self.default_ttl
+        if self.df_flag:
+            ip_layer.flags |= 0x2  # Set the DF (Don't Fragment) flag in IP if required
+
+        # Build TCP layer
+        if port_state == 'open':
+            # Simulate open port: respond with SYN-ACK
+            tcp_layer = TCP(sport=dst_port, dport=src_port, flags='SA', window=self.default_window)
+        else:
+            # Simulate closed port: respond with RST
+            tcp_layer = TCP(sport=dst_port, dport=src_port, flags='R', window=self.default_window)
+
+        # Apply TCP options for timestamps, window scaling, MSS, etc., if the OS fingerprint requires them
+        options = []
+        # MSS option (common for SYN-ACK responses)
+        if self.mss_value:
+            options.append(('MSS', self.mss_value))
+        # Window scale option
+        if self.win_scale:
+            options.append(('WScale', self.win_scale))
+        # Timestamp option if enabled
+        if self.timestamp_enabled:
+            # For a SYN-ACK, set TSval to a pseudo uptime tick and TS ecr (echo) to 0 (no TS in initial SYN)
+            import time
+            ts_val = int(time.time() * 1000) & 0xFFFFFFFF  # example: millisecond uptime modulo 32-bit
+            options.append(('Timestamp', (ts_val, 0)))
+        # SACK permitted option (commonly enabled on modern OS)
+        if 'MSS' in [opt[0] for opt in options] and self.timestamp_enabled:
+            # If MSS is set and timestamp is enabled, often SACK is also permitted
+            options.append(('SAckOK', ''))
+        tcp_layer.options = options
+
+        return ip_layer / tcp_layer
+
+    def run(self):
+        """
+        Main loop of the PortDeceiver. It listens for incoming TCP SYN packets on the specified interface/IP 
+        and responds with crafted packets that imitate the chosen OS characteristics.
+        """
+        # This pseudocode assumes a sniffer captures packets directed to this host.
+        # In practice, you might use scapy.sniff with a BPF filter for TCP SYNs to our ports.
+        # For each captured packet, determine if/how to respond.
+        def _packet_handler(packet):
+            # Ensure it's an IPv4 TCP packet directed to us
+            if packet.haslayer(TCP) and packet.haslayer(IP):
+                ip = packet[IP]
+                tcp = packet[TCP]
+                # Only consider packets destined to our host IP and one of the configured ports
+                if ip.dst == self.local_ip:
+                    resp = self.craft_response(src_ip=ip.src, src_port=tcp.sport, dst_port=tcp.dport, flag=tcp.flags)
+                    if resp:
+                        send(resp, verbose=False)
+                        # Update state if this was part of a simulated open connection
+                        if tcp.flags == 'S':
+                            if self.ports_config.get(tcp.dport, 'closed') == 'open':
+                                # Record that we've sent a SYN-ACK and are expecting an ACK (simple state tracking)
+                                self.sessions[(ip.src, tcp.sport, tcp.dport)] = {'state': 'SYN-ACK sent', 'ts_val': None}
+                        if tcp.flags == 'A' and (ip.src, tcp.sport, tcp.dport) in self.sessions:
+                            # Received final ACK of 3-way handshake for an open port
+                            self.sessions[(ip.src, tcp.sport, tcp.dport)]['state'] = 'established'
+                            if self.timestamp_enabled:
+                                # Store the peer's echoed timestamp for future timestamp calculations (if needed)
+                                self.sessions[(ip.src, tcp.sport, tcp.dport)]['ts_val'] = tcp.options  # simplification
+
+        # Start sniffing for incoming packets (this will run indefinitely in this thread)
+        # Using a filter to capture SYN or ACK packets destined to our host on TCP
         try:
-            state_path = os.path.join(self.os_record_path, "state_log.json")
-            with open(state_path, "w") as f:
-                json.dump(self.ip_state, f, indent=2)
-            logger.info(f"🧾 Exported per-IP state log to {state_path}")
+            from scapy.all import sniff
+            sniff(filter=f"tcp and host {self.local_ip}", prn=_packet_handler, store=False)
         except Exception as e:
-            logger.error(f"❌ Failed to export state log: {e}")
-
-    def _checksum(self, data: bytes) -> int:
-        if len(data) % 2:
-            data += b'\x00'
-        s = sum((data[i] << 8) + data[i + 1] for i in range(0, len(data), 2))
-        while s >> 16:
-            s = (s & 0xFFFF) + (s >> 16)
-        return ~s & 0xFFFF
+            logger.error(f"PortDeceiver sniffing error: {e}")
