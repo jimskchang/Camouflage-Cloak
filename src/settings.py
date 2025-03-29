@@ -11,6 +11,8 @@ PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OS_RECORD_PATH = os.path.join(PROJECT_PATH, "os_record")
 os.makedirs(OS_RECORD_PATH, exist_ok=True)
 
+AUTO_LEARN_MISSING = True  # Enable auto-learning of new probe templates
+
 # =======================
 # Protocol Header Lengths
 # =======================
