@@ -1,69 +1,67 @@
-from scapy.all import Ether, IP, TCP, UDP, ICMP, ARP
 import logging
 import random
+from scapy.all import Ether, IP, TCP, UDP, ICMP
 
-def synthesize_response(pkt, template: bytes, ttl: int = 64, window: int = 8192, deceiver=None) -> bytes:
+def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=None):
     try:
-        scapy_pkt = Ether(template)
+        # Unpack the original probe
+        src_mac = pkt.l2_field.get("sMAC")
+        dst_mac = pkt.l2_field.get("dMAC")
+        src_ip = pkt.l3_field.get("src_IP")
+        dst_ip = pkt.l3_field.get("dest_IP")
+        proto = pkt.l4
 
-        # Handle IP header
-        if IP in scapy_pkt:
-            scapy_pkt[IP].dst = pkt.l3_field.get("src_IP_str", pkt.src_ip)
-            scapy_pkt[IP].src = pkt.l3_field.get("dest_IP_str", pkt.dst_ip)
-            scapy_pkt[IP].ttl = ttl
-            scapy_pkt[IP].id = deceiver.get_ip_id(pkt.src_ip) if deceiver else random.randint(0, 65535)
+        # Deconstruct template
+        ether = Ether(template_bytes[:14])
+        ip = IP(template_bytes[14:34])
+        l4 = template_bytes[34:]
 
-            # TOS + ECN
-            tos_val = deceiver.os_flags.get("tos", 0) if deceiver else 0
-            ecn_bits = deceiver.os_flags.get("ecn", 0) if deceiver else 0
-            scapy_pkt[IP].tos = (tos_val & 0xFC) | (ecn_bits & 0x03)
+        # Overwrite dynamic fields
+        ether.src = dst_mac
+        ether.dst = src_mac
 
-            # DF flag
-            if deceiver and deceiver.os_flags.get("df", False):
-                scapy_pkt[IP].flags = "DF"
-            del scapy_pkt[IP].chksum
+        ip.src = dst_ip
+        ip.dst = src_ip
+        ip.ttl = ttl if ttl is not None else ip.ttl
+        ip.tos = deceiver.os_flags.get("tos", 0) if deceiver else ip.tos
+        ip.id = deceiver.get_ip_id(src_ip) if deceiver else random.randint(0, 65535)
 
-        # TCP Response
-        if TCP in scapy_pkt:
-            scapy_pkt[TCP].sport = pkt.l4_field.get("dest_port", 1234)
-            scapy_pkt[TCP].dport = pkt.l4_field.get("src_port", 1234)
-            scapy_pkt[TCP].window = window
-            scapy_pkt[TCP].flags = pkt.l4_field.get("flags", "SA")
+        if deceiver and deceiver.os_flags.get("df"):
+            ip.flags = "DF"
+        if deceiver and deceiver.os_flags.get("ecn"):
+            ip.tos |= deceiver.os_flags["ecn"]
 
-            # TCP Seq/Ack
-            scapy_pkt[TCP].seq = pkt.l4_field.get("ack_num", random.randint(0, 2**32-1))
-            scapy_pkt[TCP].ack = pkt.l4_field.get("seq", 0) + 1
+        # Handle protocol-specific patching
+        if proto == "tcp":
+            tcp = TCP(l4)
+            tcp.sport = pkt.l4_field.get("dest_port")
+            tcp.dport = pkt.l4_field.get("src_port")
+            tcp.seq = random.randint(0, 4294967295)
+            tcp.ack = pkt.l4_field.get("seq", 0) + 1
+            tcp.flags = "SA"
+            tcp.window = window if window else tcp.window
 
-            # TCP Reserved Bits (merged into data offset field)
-            reserved = pkt.l4_field.get("reserved", 0) << 9
-            scapy_pkt[TCP].dataofs = pkt.l4_field.get("offset", 5)
-
-            # TCP Options
             if deceiver:
-                src_ip_str = pkt.l3_field.get("src_IP_str", pkt.src_ip)
-                ts_echo = pkt.l4_field.get("ts_val", 0)
-                scapy_pkt[TCP].options = deceiver.get_tcp_options(src_ip_str, ts_echo)
+                tcp.options = deceiver.get_tcp_options(src_ip, ts_echo=pkt.l4_field.get("option_field", {}).get("ts_val", 0))
 
-            del scapy_pkt[TCP].chksum
+            l4_layer = tcp
 
-        # UDP Response
-        if UDP in scapy_pkt:
-            scapy_pkt[UDP].sport = pkt.l4_field.get("dest_port", 1234)
-            scapy_pkt[UDP].dport = pkt.l4_field.get("src_port", 1234)
-            del scapy_pkt[UDP].chksum
+        elif proto == "udp":
+            udp = UDP(l4)
+            udp.sport = pkt.l4_field.get("dest_port")
+            udp.dport = pkt.l4_field.get("src_port")
+            l4_layer = udp
 
-        # ICMP Response
-        if ICMP in scapy_pkt:
-            scapy_pkt[ICMP].type = 0  # Echo Reply
-            del scapy_pkt[ICMP].chksum
+        elif proto == "icmp":
+            icmp = ICMP(l4)
+            l4_layer = icmp
 
-        # ARP Response
-        if ARP in scapy_pkt:
-            scapy_pkt[ARP].op = 2
-            scapy_pkt[ARP].psrc = pkt.l3_field.get("recv_ip_str", pkt.dst_ip)
-            scapy_pkt[ARP].pdst = pkt.l3_field.get("send_ip_str", pkt.src_ip)
+        else:
+            logging.warning(f"❓ Unknown L4 protocol: {proto}")
+            return None
 
-        return bytes(scapy_pkt)
+        final_packet = ether / ip / l4_layer
+        return bytes(final_packet)
 
     except Exception as e:
         logging.error(f"❌ synthesize_response failed: {e}")
