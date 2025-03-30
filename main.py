@@ -181,7 +181,6 @@ def main():
 
     validate_nic(args.nic)
 
-    # Fallback for --host if not given
     if not args.host:
         if args.nic == settings.NIC_PROBE:
             args.host = settings.IP_PROBE
@@ -214,7 +213,9 @@ def main():
         logging.info(f"🎭 Using OS template '{os_name}': TTL={spoof_config['ttl']}, Window={spoof_config['window']}")
 
         os_record_path = os.path.join(settings.OS_RECORD_PATH, os_name)
-        ensure_directory_exists(os_record_path)
+        if not os.path.isdir(os_record_path):
+            logging.error(f"❌ OS fingerprint directory not found: {os_record_path}")
+            return
 
         proto_map = {
             "arp_record.pcap": "arp",
