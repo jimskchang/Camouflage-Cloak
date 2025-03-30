@@ -208,7 +208,23 @@ def main():
                 dest_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, args.dest))
         else:
             dest_path = settings.OS_RECORD_PATH
+
+        # 🧹 Always clean old files before capture
+        for proto in ["arp", "icmp", "tcp", "udp"]:
+            for ext in [".pcap", ".txt"]:
+                path = os.path.join(dest_path, f"{proto}_record{ext}")
+                if os.path.exists(path):
+                    os.remove(path)
+                    logging.info(f"🧹 Deleted old file: {path}")
+
+        # 📡 Capture new fingerprint
         collect_fingerprint(args.host, dest_path, args.nic)
+
+        # 🛠️ Auto-generate .txt templates
+        for proto in ["arp", "icmp", "tcp", "udp"]:
+            pcap_file = os.path.join(dest_path, f"{proto}_record.pcap")
+            if os.path.exists(pcap_file):
+                convert_raw_packets_to_template(pcap_file, proto)
 
     elif args.scan == 'od':
         if not args.os or args.te is None:
