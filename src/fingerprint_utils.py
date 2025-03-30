@@ -1,6 +1,17 @@
-import struct
 import logging
+import struct
 
+# --- Key Normalization Helpers ---
+def gen_key(proto: str, packet: bytes):
+    if proto == 'tcp':
+        return gen_tcp_key(packet)
+    elif proto == 'icmp':
+        return gen_icmp_key(packet)
+    elif proto == 'udp':
+        return gen_udp_key(packet)
+    elif proto == 'arp':
+        return gen_arp_key(packet)
+    return b'', None
 
 def gen_tcp_key(packet: bytes):
     try:
@@ -13,9 +24,8 @@ def gen_tcp_key(packet: bytes):
         tcp_key = struct.pack('!HHLLH', 0, dest_port, 0, 0, offset_flags) + tcp_header[14:20]
         return ip_key + tcp_key + payload, None
     except Exception as e:
-        logging.warning(f"[gen_tcp_key] {e}")
+        logging.warning(f"⚠️ gen_tcp_key failed: {e}")
         return b'', None
-
 
 def gen_udp_key(packet: bytes):
     try:
@@ -26,9 +36,8 @@ def gen_udp_key(packet: bytes):
         udp_key = struct.pack('!HHH', 0, 0, 8) + b'\x00\x00'
         return ip_key + udp_key + payload, None
     except Exception as e:
-        logging.warning(f"[gen_udp_key] {e}")
+        logging.warning(f"⚠️ gen_udp_key failed: {e}")
         return b'', None
-
 
 def gen_icmp_key(packet: bytes):
     try:
@@ -39,9 +48,8 @@ def gen_icmp_key(packet: bytes):
         icmp_key = struct.pack('!BBHHH', icmp_type, code, 0, 0, 0)
         return ip_key + icmp_key, None
     except Exception as e:
-        logging.warning(f"[gen_icmp_key] {e}")
+        logging.warning(f"⚠️ gen_icmp_key failed: {e}")
         return b'', None
-
 
 def gen_arp_key(packet: bytes):
     try:
@@ -49,20 +57,8 @@ def gen_arp_key(packet: bytes):
         fields = struct.unpack('!HHBBH6s4s6s4s', arp_header)
         key = struct.pack('!HHBBH6s4s6s4s',
                           fields[0], fields[1], fields[2], fields[3], fields[4],
-                          b'\x00' * 6, b'\x00' * 4, b'\x00' * 6, b'\x00' * 4)
+                          b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
         return key, None
     except Exception as e:
-        logging.warning(f"[gen_arp_key] {e}")
+        logging.warning(f"⚠️ gen_arp_key failed: {e}")
         return b'', None
-
-
-def gen_key(proto: str, packet: bytes):
-    if proto == 'tcp':
-        return gen_tcp_key(packet)
-    elif proto == 'udp':
-        return gen_udp_key(packet)
-    elif proto == 'icmp':
-        return gen_icmp_key(packet)
-    elif proto == 'arp':
-        return gen_arp_key(packet)
-    return b'', None
