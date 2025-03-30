@@ -31,13 +31,10 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 # Network Interface Setup
 # =======================
 
-# ens192 = connected to Win10/Win11 hosts
-NIC_TARGET = 'ens192'                    # used for --scan ts
-IP_TARGET = '192.168.23.200'             # real Win10 for fingerprinting
-
-# ens224 = connected to attacker (Nmap)
-NIC_PROBE  = 'ens224'                    # used for --scan od
-IP_PROBE   = '192.168.23.201'            # spoofed IP for deception (pretend to be Win11 as Win10)
+NIC_TARGET = 'ens192'
+IP_TARGET = '192.168.23.200'
+NIC_PROBE  = 'ens224'
+IP_PROBE   = '192.168.23.201'
 
 GW_TARGET = '192.168.23.1'
 GW_PROBE  = '192.168.10.1'
@@ -94,16 +91,66 @@ FALLBACK_TTL = 64
 FALLBACK_WINDOW = 8192
 
 BASE_OS_TEMPLATES = {
-    "linux":        {"ttl": 64,  "window": 5840},
-    "linux5":       {"ttl": 64,  "window": 29200},
-    "centos":       {"ttl": 64,  "window": 5840},
-    "mac":          {"ttl": 64,  "window": 65535},
-    "freebsd":      {"ttl": 64,  "window": 65535},
-    "win7":         {"ttl": 128, "window": 8192},
-    "win10":        {"ttl": 128, "window": 65535},
-    "win11":        {"ttl": 128, "window": 64240},
-    "windows2022":  {"ttl": 128, "window": 65535},
-    "windows2025":  {"ttl": 128, "window": 65535},
+    "linux": {
+        "ttl": 64,
+        "window": 5840,
+        "ipid": "increment",
+        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "WS=2"]
+    },
+    "linux5": {
+        "ttl": 64,
+        "window": 29200,
+        "ipid": "increment",
+        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "WS=7"]
+    },
+    "centos": {
+        "ttl": 64,
+        "window": 5840,
+        "ipid": "increment",
+        "tcp_options": ["MSS=1460", "SACK"]
+    },
+    "mac": {
+        "ttl": 64,
+        "window": 65535,
+        "ipid": "zero",
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=6"]
+    },
+    "freebsd": {
+        "ttl": 64,
+        "window": 65535,
+        "ipid": "increment",
+        "tcp_options": ["MSS=1460", "SACK", "NOP", "NOP", "WS=5", "TS"]
+    },
+    "win7": {
+        "ttl": 128,
+        "window": 8192,
+        "ipid": "random",
+        "tcp_options": ["MSS=1460", "WS=2", "NOP", "NOP", "SACK"]
+    },
+    "win10": {
+        "ttl": 128,
+        "window": 65535,
+        "ipid": "random",
+        "tcp_options": ["MSS=1460", "WS=7", "TS", "NOP", "NOP", "SACK"]
+    },
+    "win11": {
+        "ttl": 128,
+        "window": 64240,
+        "ipid": "random",
+        "tcp_options": ["MSS=1460", "WS=8", "TS", "NOP", "NOP", "SACK"]
+    },
+    "windows2022": {
+        "ttl": 128,
+        "window": 65535,
+        "ipid": "random",
+        "tcp_options": ["MSS=1460", "WS=8", "TS", "NOP", "NOP", "SACK"]
+    },
+    "windows2025": {
+        "ttl": 128,
+        "window": 65535,
+        "ipid": "random",
+        "tcp_options": ["MSS=1460", "WS=8", "TS", "NOP", "NOP", "SACK"]
+    },
 }
 
 OS_ALIASES = {
