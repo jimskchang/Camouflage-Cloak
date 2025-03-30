@@ -165,8 +165,8 @@ class OsDeceiver:
     def send_tcp_rst(self, pkt: Packet):
         try:
             ip = IP(
-                src=pkt.l3_field.get("dest_IP_str", pkt.l3_field.get("src_IP")),
-                dst=pkt.l3_field.get("src_IP_str", pkt.l3_field.get("dest_IP")),
+                src=pkt.l3_field.get("dest_IP_str", socket.inet_ntoa(pkt.l3_field.get("dest_IP", b"\x00\x00\x00\x00"))),
+                dst=pkt.l3_field.get("src_IP_str", socket.inet_ntoa(pkt.l3_field.get("src_IP", b"\x00\x00\x00\x00"))),
                 ttl=self.ttl,
                 id=self.get_ip_id(),
                 tos=self.os_flags.get("tos", 0)
