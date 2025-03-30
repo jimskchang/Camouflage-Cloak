@@ -201,7 +201,13 @@ def main():
     logging.info(f"🌐 Using gateway {gateway} for interface {args.nic}")
 
     if args.scan == 'ts':
-        dest_path = os.path.abspath(args.dest or settings.OS_RECORD_PATH)
+        if args.dest:
+            if os.path.isabs(args.dest) or args.dest.startswith("."):
+                dest_path = os.path.abspath(args.dest)
+            else:
+                dest_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, args.dest))
+        else:
+            dest_path = settings.OS_RECORD_PATH
         collect_fingerprint(args.host, dest_path, args.nic)
 
     elif args.scan == 'od':
