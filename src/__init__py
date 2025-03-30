@@ -11,30 +11,44 @@ Enhancements:
 import logging
 
 __all__ = []
+missing_modules = []
 
 try:
     from . import settings
+    __all__.append("settings")
+except ImportError:
+    missing_modules.append("settings")
+
+try:
     from . import tcp
-    from . import port_deceiver
-    from . import os_deceiver
-    from . import Packet
-
     from .tcp import TcpConnect, getTCPChecksum, getIPChecksum, byte2mac, byte2ip
+    __all__.extend(["tcp", "TcpConnect", "getTCPChecksum", "getIPChecksum", "byte2mac", "byte2ip"])
+except ImportError:
+    missing_modules.append("tcp")
+
+try:
+    from . import port_deceiver
     from .port_deceiver import PortDeceiver
+    __all__.extend(["port_deceiver", "PortDeceiver"])
+except ImportError:
+    missing_modules.append("port_deceiver")
+
+try:
+    from . import os_deceiver
     from .os_deceiver import OsDeceiver
+    __all__.extend(["os_deceiver", "OsDeceiver"])
+except ImportError:
+    missing_modules.append("os_deceiver")
+
+try:
+    from . import Packet
     from .Packet import Packet as PacketClass
-
-    # Assign Packet to PacketClass so `from src import Packet` still works
     Packet = PacketClass
+    __all__.extend(["Packet"])
+except ImportError:
+    missing_modules.append("Packet")
 
-    __all__ = [
-        "settings", "tcp", "port_deceiver", "os_deceiver", "Packet",
-        "TcpConnect", "getTCPChecksum", "getIPChecksum", "byte2mac", "byte2ip",
-        "PortDeceiver", "OsDeceiver"
-    ]
-
-    logging.info("✅ src package modules imported successfully.")
-
-except ImportError as e:
-    logging.error(f"❌ Module Import Error in 'src': {e}. Ensure all required files exist.")
-    raise
+if missing_modules:
+    logging.warning(f"⚠ Some modules failed to import: {missing_modules}")
+else:
+    logging.info("✅ All src package modules imported successfully.")
