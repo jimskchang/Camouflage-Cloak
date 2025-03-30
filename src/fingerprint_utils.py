@@ -1,6 +1,6 @@
+# src/fingerprint_utils.py
 import struct
 import logging
-
 
 def gen_key(proto: str, packet: bytes):
     if proto == 'tcp':
@@ -13,21 +13,19 @@ def gen_key(proto: str, packet: bytes):
         return gen_arp_key(packet)
     return b'', None
 
-
 def gen_tcp_key(packet: bytes):
     try:
         ip_header = packet[14:34]
         tcp_header = packet[34:54]
         src_port, dest_port, seq, ack_num, offset_flags = struct.unpack('!HHLLH', tcp_header[:14])
         offset = (offset_flags >> 12) * 4
-        payload = packet[54:54 + offset - 20]
+        payload = packet[54:54+offset-20]
         ip_key = ip_header[:8] + b'\x00' * 8
         tcp_key = struct.pack('!HHLLH', 0, dest_port, 0, 0, offset_flags) + tcp_header[14:20]
         return ip_key + tcp_key + payload, None
     except Exception as e:
         logging.warning(f"⚠️ gen_tcp_key failed: {e}")
         return b'', None
-
 
 def gen_udp_key(packet: bytes):
     try:
@@ -41,7 +39,6 @@ def gen_udp_key(packet: bytes):
         logging.warning(f"⚠️ gen_udp_key failed: {e}")
         return b'', None
 
-
 def gen_icmp_key(packet: bytes):
     try:
         ip_header = packet[14:34]
@@ -53,7 +50,6 @@ def gen_icmp_key(packet: bytes):
     except Exception as e:
         logging.warning(f"⚠️ gen_icmp_key failed: {e}")
         return b'', None
-
 
 def gen_arp_key(packet: bytes):
     try:
