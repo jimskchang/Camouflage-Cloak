@@ -9,6 +9,12 @@ import base64
 
 from scapy.all import sniff, wrpcap, rdpcap
 
+# --- Ensure src is in sys.path ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.join(BASE_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
+
 # --- Initial Basic Logging ---
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
@@ -25,7 +31,6 @@ try:
 except ImportError as e:
     logging.error(f"❌ Import Error: {e}")
     sys.exit(1)
-
 # --- Utility Functions ---
 def ensure_directory_exists(directory: str):
     try:
