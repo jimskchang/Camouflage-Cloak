@@ -27,6 +27,7 @@ try:
     import src.settings as settings
     from src.port_deceiver import PortDeceiver
     from src.os_deceiver import OsDeceiver
+    from src.fingerprint_utils import gen_key
     from src.settings import MAC, VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
 except ImportError as e:
     logging.error(f"❌ Import Error: {e}")
