@@ -13,7 +13,7 @@ import src.settings as settings
 from src.settings import get_os_fingerprint
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.response import synthesize_response  # Make sure this exists and supports TTL/window + deceiver
+from src.response import synthesize_response
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -41,7 +41,7 @@ def gen_tcp_key(packet: bytes):
         tcp_key = struct.pack('!HHLLH', 0, dest_port, 0, 0, offset_flags) + tcp_header[14:20]
         return ip_key + tcp_key + payload, None
     except Exception as e:
-        logging.warning(f"⚠️ gen_tcp_key failed: {e}")
+        logging.warning(f"\u26a0\ufe0f gen_tcp_key failed: {e}")
         return b'', None
 
 def gen_udp_key(packet: bytes):
@@ -53,7 +53,7 @@ def gen_udp_key(packet: bytes):
         udp_key = struct.pack('!HHH', 0, 0, 8) + b'\x00\x00'
         return ip_key + udp_key + payload, None
     except Exception as e:
-        logging.warning(f"⚠️ gen_udp_key failed: {e}")
+        logging.warning(f"\u26a0\ufe0f gen_udp_key failed: {e}")
         return b'', None
 
 def gen_icmp_key(packet: bytes):
@@ -65,7 +65,7 @@ def gen_icmp_key(packet: bytes):
         icmp_key = struct.pack('!BBHHH', icmp_type, code, 0, 0, 0)
         return ip_key + icmp_key, None
     except Exception as e:
-        logging.warning(f"⚠️ gen_icmp_key failed: {e}")
+        logging.warning(f"\u26a0\ufe0f gen_icmp_key failed: {e}")
         return b'', None
 
 def gen_arp_key(packet: bytes):
@@ -77,7 +77,7 @@ def gen_arp_key(packet: bytes):
                           b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
         return key, None
     except Exception as e:
-        logging.warning(f"⚠️ gen_arp_key failed: {e}")
+        logging.warning(f"\u26a0\ufe0f gen_arp_key failed: {e}")
         return b'', None
 
 class OsDeceiver:
@@ -89,41 +89,70 @@ class OsDeceiver:
         self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
 
         if not os.path.exists(f"/sys/class/net/{self.nic}"):
-            logging.error(f"❌ NIC '{self.nic}' not found.")
+            logging.error(f"\u274c NIC '{self.nic}' not found.")
             raise ValueError(f"NIC '{self.nic}' does not exist.")
 
         mac_path = f"/sys/class/net/{self.nic}/address"
         try:
             with open(mac_path, "r") as f:
                 mac = f.read().strip()
-                logging.info(f"✅ Using MAC address {mac} for NIC '{self.nic}'")
+                logging.info(f"\u2705 Using MAC address {mac} for NIC '{self.nic}'")
         except Exception as e:
-            logging.warning(f"⚠️ Unable to read MAC address: {e}")
+            logging.warning(f"\u26a0\ufe0f Unable to read MAC address: {e}")
 
         os.makedirs(self.os_record_path, exist_ok=True)
         self.conn = TcpConnect(self.host, nic=self.nic)
 
         os_template = get_os_fingerprint(self.os)
         if not os_template:
-            logging.error(f"❌ OS template '{self.os}' could not be loaded.")
+            logging.error(f"\u274c OS template '{self.os}' could not be loaded.")
             raise ValueError(f"Invalid OS template: {self.os}")
 
         self.ttl = os_template.get("ttl")
         self.window = os_template.get("window")
+        self.ipid_mode = os_template.get("ipid", "increment")
+        self.tcp_options = os_template.get("tcp_options", [])
+        self.ip_id_counter = 0
         self.ip_state = {}
-        self.timestamp_base = {}  # ⬅️ Clock drift base per IP
+        self.timestamp_base = {}
 
-        logging.info(f"🎭 TTL and Window Spoofing -> TTL={self.ttl}, Window={self.window}")
-        logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
-        logging.info(f"📁 Using OS template path: {self.os_record_path}")
+        logging.info(f"\ud83c\udfad TTL/Window/IPID -> TTL={self.ttl}, Window={self.window}, IPID={self.ipid_mode}")
+        logging.info(f"\ud83d\udee1\ufe0f OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
+        logging.info(f"\ud83d\udcc1 Using OS template path: {self.os_record_path}")
 
     def get_timestamp(self, ip: str):
         now = time.time()
         if ip not in self.timestamp_base:
-            base = int(now - random.uniform(1, 10))  # drift in seconds
+            base = int(now - random.uniform(1, 10))
             self.timestamp_base[ip] = base
-        drifted = int((now - self.timestamp_base[ip]) * 1000)  # ms
+        drifted = int((now - self.timestamp_base[ip]) * 1000)
         return drifted
+
+    def get_ip_id(self, ip: str = "") -> int:
+        if self.ipid_mode == "increment":
+            self.ip_id_counter = (self.ip_id_counter + 1) % 65536
+            return self.ip_id_counter
+        elif self.ipid_mode == "random":
+            return random.randint(0, 65535)
+        elif self.ipid_mode == "zero":
+            return 0
+        return 0
+
+    def get_tcp_options(self, src_ip: str, ts_echo=0):
+        options = []
+        for opt in self.tcp_options:
+            if opt.startswith("MSS="):
+                options.append(("MSS", int(opt.split("=")[1])))
+            elif opt.startswith("WS="):
+                options.append(("WS", int(opt.split("=")[1])))
+            elif opt == "TS":
+                ts_val = self.get_timestamp(src_ip)
+                options.append(("Timestamp", (ts_val, ts_echo)))
+            elif opt == "SACK":
+                options.append(("SAckOK", b""))
+            elif opt == "NOP":
+                options.append(("NOP", None))
+        return options
 
     def save_record(self, pkt_type: str, record: Dict[bytes, bytes]):
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
