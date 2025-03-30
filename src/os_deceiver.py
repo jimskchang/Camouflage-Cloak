@@ -1,188 +1,319 @@
+import logging
+import argparse
 import os
+import time
+import sys
+import subprocess
 import json
 import base64
-import logging
-import socket
-import struct
-import time
-import random
-from datetime import datetime, timedelta
-from typing import Dict
 
-from scapy.all import IP, TCP, ICMP, Ether
+from scapy.all import sniff, wrpcap, rdpcap
 
-import src.settings as settings
-from src.settings import get_os_fingerprint
-from src.Packet import Packet
-from src.tcp import TcpConnect
-from src.response import synthesize_response
+# --- Ensure src is in sys.path ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SRC_DIR = os.path.join(BASE_DIR, "src")
+if SRC_DIR not in sys.path:
+    sys.path.insert(0, SRC_DIR)
 
-DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
-UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
+# --- Initial Basic Logging ---
+logging.basicConfig(
+    format='%(asctime)s [%(levelname)s]: %(message)s',
+    datefmt='%y-%m-%d %H:%M:%S',
+    level=logging.INFO
+)
 
-# --- Key Normalization Helpers ---
-def gen_key(proto: str, packet: bytes):
-    if proto == 'tcp':
-        return gen_tcp_key(packet)
-    elif proto == 'icmp':
-        return gen_icmp_key(packet)
-    elif proto == 'udp':
-        return gen_udp_key(packet)
-    elif proto == 'arp':
-        return gen_arp_key(packet)
-    return b'', None
+# --- Safe Imports ---
+try:
+    import src.settings as settings
+    from src.port_deceiver import PortDeceiver
+    from src.os_deceiver import OsDeceiver
+    from src.settings import MAC, VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
+except ImportError as e:
+    logging.error(f"❌ Import Error: {e}")
+    sys.exit(1)
 
-def gen_tcp_key(packet: bytes):
+# --- Utility Functions ---
+def ensure_directory_exists(directory: str):
     try:
-        ip_header = packet[14:34]
-        tcp_header = packet[34:54]
-        src_port, dest_port, seq, ack_num, offset_flags = struct.unpack('!HHLLH', tcp_header[:14])
-        offset = (offset_flags >> 12) * 4
-        payload = packet[54:54+offset-20]
-        ip_key = ip_header[:8] + b'\x00' * 8
-        tcp_key = struct.pack('!HHLLH', 0, dest_port, 0, 0, offset_flags) + tcp_header[14:20]
-        return ip_key + tcp_key + payload, None
+        os.makedirs(directory, exist_ok=True)
+        logging.info(f"📁 Ensured directory exists: {directory}")
     except Exception as e:
-        logging.warning(f"⚠️ gen_tcp_key failed: {e}")
-        return b'', None
+        logging.error(f"❌ Failed to create directory {directory}: {e}")
+        sys.exit(1)
 
-def gen_udp_key(packet: bytes):
+def ensure_file_permissions(file_path: str):
     try:
-        ip_header = packet[14:34]
-        udp_header = packet[34:42]
-        payload = packet[42:]
-        ip_key = ip_header[:8] + b'\x00' * 8
-        udp_key = struct.pack('!HHH', 0, 0, 8) + b'\x00\x00'
-        return ip_key + udp_key + payload, None
+        if os.path.exists(file_path):
+            os.chmod(file_path, 0o644)
+            logging.info(f"🔐 Set permissions for {file_path}")
     except Exception as e:
-        logging.warning(f"⚠️ gen_udp_key failed: {e}")
-        return b'', None
+        logging.error(f"❌ Failed to set permissions for {file_path}: {e}")
 
-def gen_icmp_key(packet: bytes):
+def validate_nic(nic: str):
+    path = f"/sys/class/net/{nic}"
+    if not os.path.exists(path):
+        logging.error(f"❌ Network interface {nic} not found.")
+        sys.exit(1)
     try:
-        ip_header = packet[14:34]
-        icmp_header = packet[34:42]
-        ip_key = ip_header[:8] + b'\x00' * 8
-        icmp_type, code, _, _, _ = struct.unpack('!BBHHH', icmp_header)
-        icmp_key = struct.pack('!BBHHH', icmp_type, code, 0, 0, 0)
-        return ip_key + icmp_key, None
+        with open(f"{path}/address", "r") as f:
+            mac = f.read().strip()
+            logging.info(f"✅ NIC {nic} MAC address: {mac}")
     except Exception as e:
-        logging.warning(f"⚠️ gen_icmp_key failed: {e}")
-        return b'', None
+        logging.warning(f"⚠ Could not read MAC address for NIC {nic}: {e}")
 
-def gen_arp_key(packet: bytes):
+    vlan = VLAN_MAP.get(nic)
+    gateway = GATEWAY_MAP.get(nic)
+    if vlan:
+        logging.info(f"🔸 VLAN Tag on {nic}: {vlan}")
+    if gateway:
+        logging.info(f"🔸 Gateway for {nic}: {gateway}")
+
+def set_promiscuous_mode(nic: str):
     try:
-        arp_header = packet[14:42]
-        fields = struct.unpack('!HHBBH6s4s6s4s', arp_header)
-        key = struct.pack('!HHBBH6s4s6s4s',
-                          fields[0], fields[1], fields[2], fields[3], fields[4],
-                          b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
-        return key, None
-    except Exception as e:
-        logging.warning(f"⚠️ gen_arp_key failed: {e}")
-        return b'', None
+        subprocess.run(["ip", "link", "set", nic, "promisc", "on"], check=True)
+        logging.info(f"🔁 Promiscuous mode enabled for {nic}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"❌ Failed to set promiscuous mode: {e}")
+        sys.exit(1)
 
-class OsDeceiver:
-    def __init__(self, target_host: str, target_os: str, dest=None, nic: str = None):
-        self.host = target_host
-        self.os = target_os
-        self.nic = nic or settings.NIC_PROBE
-        self.dest = dest
-        self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
+def collect_fingerprint(target_host, dest, nic):
+    logging.info(f"📡 Starting OS fingerprint collection on {target_host} via {nic}")
+    ensure_directory_exists(dest)
 
-        if not os.path.exists(f"/sys/class/net/{self.nic}"):
-            logging.error(f"❌ NIC '{self.nic}' not found.")
-            raise ValueError(f"NIC '{self.nic}' does not exist.")
+    file_paths = {
+        "arp": os.path.join(dest, "arp_record.pcap"),
+        "icmp": os.path.join(dest, "icmp_record.pcap"),
+        "tcp": os.path.join(dest, "tcp_record.pcap"),
+        "udp": os.path.join(dest, "udp_record.pcap")
+    }
 
-        mac_path = f"/sys/class/net/{self.nic}/address"
-        try:
-            with open(mac_path, "r") as f:
-                mac = f.read().strip()
-                logging.info(f"✅ Using MAC address {mac} for NIC '{self.nic}'")
-        except Exception as e:
-            logging.warning(f"⚠️ Unable to read MAC address: {e}")
+    packet_buffers = {
+        "arp": [],
+        "icmp": [],
+        "tcp": [],
+        "udp": []
+    }
 
-        os.makedirs(self.os_record_path, exist_ok=True)
-        self.conn = TcpConnect(self.host, nic=self.nic)
+    def classify_and_store(pkt):
+        if pkt.haslayer("ARP"):
+            packet_buffers["arp"].append(pkt)
+        elif pkt.haslayer("IP"):
+            if pkt.haslayer("TCP"):
+                packet_buffers["tcp"].append(pkt)
+            elif pkt.haslayer("UDP"):
+                packet_buffers["udp"].append(pkt)
+            elif pkt.haslayer("ICMP"):
+                packet_buffers["icmp"].append(pkt)
 
-        os_template = get_os_fingerprint(self.os)
-        if not os_template:
-            logging.error(f"❌ OS template '{self.os}' could not be loaded.")
-            raise ValueError(f"Invalid OS template: {self.os}")
+    validate_nic(nic)
+    set_promiscuous_mode(nic)
+    time.sleep(2)
 
-        self.ttl = os_template.get("ttl")
-        self.window = os_template.get("window")
-        self.ipid_mode = os_template.get("ipid", "increment")
-        self.tcp_options = os_template.get("tcp_options", [])
-        self.os_flags = {
-            "df": os_template.get("df", False),
-            "tos": os_template.get("tos", 0),
-            "ecn": os_template.get("ecn", 0)
+    logging.info("📥 Sniffing packets for 600 seconds...")
+    sniff(iface=nic, timeout=600, prn=classify_and_store, store=False)
+    logging.info("✅ Packet capture completed.")
+
+    total = 0
+    for proto, pkts in packet_buffers.items():
+        wrpcap(file_paths[proto], pkts)
+        ensure_file_permissions(file_paths[proto])
+        logging.info(f"💾 Saved {len(pkts)} {proto.upper()} packets to {file_paths[proto]}")
+        total += len(pkts)
+
+    logging.info(f"✅ Total packets saved: {total}")
+
+def convert_raw_packets_to_template(file_path: str, proto: str):
+    from src.os_deceiver import gen_key
+    template_dict = {}
+
+    try:
+        packets = rdpcap(file_path)
+        for pkt in packets:
+            raw = bytes(pkt)
+            if len(raw) < 42:
+                continue
+            key, _ = gen_key(proto, raw)
+            template_dict[key] = raw
+
+        encoded = {
+            base64.b64encode(k).decode(): base64.b64encode(v).decode()
+            for k, v in template_dict.items()
         }
 
-        self.ip_id_counter = 0
-        self.ip_state = {}
-        self.timestamp_base = {}
+        output_txt = file_path.replace(".pcap", ".txt")
+        with open(output_txt, "w") as f:
+            json.dump(encoded, f, indent=2)
 
-        logging.info(f"🎭 TTL/Window/IPID -> TTL={self.ttl}, Window={self.window}, IPID={self.ipid_mode}")
-        logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
-        logging.info(f"📁 Using OS template path: {self.os_record_path}")
+        logging.info(f"✅ Converted {proto.upper()} packets to template: {output_txt}")
+    except Exception as e:
+        logging.error(f"❌ Failed to convert {file_path}: {e}")
 
-    def get_timestamp(self, ip: str):
-        now = time.time()
-        if ip not in self.timestamp_base:
-            base = int(now - random.uniform(1, 10))
-            self.timestamp_base[ip] = base
-        drifted = int((now - self.timestamp_base[ip]) * 1000)
-        return drifted
+def validate_template_file(template_path: str):
+    try:
+        if not os.path.exists(template_path):
+            logging.error(f"❌ Template file missing: {template_path}")
+            return False
 
-    def get_ip_id(self, ip: str = "") -> int:
-        if self.ipid_mode == "increment":
-            self.ip_id_counter = (self.ip_id_counter + 1) % 65536
-            return self.ip_id_counter
-        elif self.ipid_mode == "random":
-            return random.randint(0, 65535)
-        elif self.ipid_mode == "zero":
-            return 0
-        return 0
+        with open(template_path, "r") as f:
+            data = json.load(f)
 
-    def get_tcp_options(self, src_ip: str, ts_echo=0):
-        options = []
-        for opt in self.tcp_options:
-            if opt.startswith("MSS="):
-                options.append(("MSS", int(opt.split("=")[1])))
-            elif opt.startswith("WS="):
-                options.append(("WS", int(opt.split("=")[1])))
-            elif opt == "TS":
-                ts_val = self.get_timestamp(src_ip)
-                options.append(("Timestamp", (ts_val, ts_echo)))
-            elif opt == "SACK":
-                options.append(("SAckOK", b""))
-            elif opt == "NOP":
-                options.append(("NOP", None))
-        return options
+        if not data:
+            logging.error(f"⚠ Empty template file: {template_path}")
+            return False
 
-    def send_tcp_rst(self, pkt: Packet):
-        try:
-            ip = IP(
-                src=pkt.l3_field.get("dest_IP_str", socket.inet_ntoa(pkt.l3_field.get("dest_IP", b"\x00\x00\x00\x00"))),
-                dst=pkt.l3_field.get("src_IP_str", socket.inet_ntoa(pkt.l3_field.get("src_IP", b"\x00\x00\x00\x00"))),
-                ttl=self.ttl,
-                id=self.get_ip_id(),
-                tos=self.os_flags.get("tos", 0)
-            )
-            if self.os_flags.get("df"):
-                ip.flags = "DF"
+        decoded_count = 0
+        for k, v in data.items():
+            try:
+                base64.b64decode(k)
+                base64.b64decode(v)
+                decoded_count += 1
+            except Exception:
+                continue
 
-            tcp = TCP(
-                sport=pkt.l4_field.get("dest_port", 1234),
-                dport=pkt.l4_field.get("src_port", 1234),
-                flags="R",
-                seq=random.randint(0, 4294967295)
-            )
-            ether = Ether(dst=pkt.l2_field.get("sMAC", b""), src=pkt.l2_field.get("dMAC", b""))
-            raw = ether / ip / tcp
-            self.conn.sock.send(bytes(raw))
-            logging.info(f"🚫 Sent TCP RST to {ip.dst}:{tcp.dport}")
-        except Exception as e:
-            logging.error(f"❌ Failed to send TCP RST: {e}")
+        if decoded_count == 0:
+            logging.error(f"❌ No decodable entries in: {template_path}")
+            return False
+        else:
+            logging.info(f"✅ Valid template: {os.path.basename(template_path)} ({decoded_count} keys)")
+            return True
+    except Exception as e:
+        logging.error(f"❌ Failed to validate {template_path}: {e}")
+        return False
+
+def list_supported_os():
+    print("🧩 Supported OS templates:")
+    for name in BASE_OS_TEMPLATES:
+        print(f"  - {name} (TTL={BASE_OS_TEMPLATES[name]['ttl']}, Window={BASE_OS_TEMPLATES[name]['window']})")
+    if settings.OS_ALIASES:
+        print("\n🔁 Aliases:")
+        for alias, base in settings.OS_ALIASES.items():
+            print(f"  - {alias} → {base}")
+
+# (Everything above remains the same)
+
+import getpass
+
+# --- Fix file/folder ownership ---
+def fix_permissions(path):
+    try:
+        username = getpass.getuser()
+        subprocess.run(["chown", "-R", f"{username}:{username}", path], check=True)
+        logging.info(f"🔓 Fixed ownership for {path}")
+    except Exception as e:
+        logging.warning(f"⚠ Failed to fix ownership: {e}")
+
+# --- Main Logic ---
+def main():
+    parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak: OS & Port Deception Engine")
+    parser.add_argument("--host", help="Target IP to impersonate")
+    parser.add_argument("--nic", help="Network interface to bind")
+    parser.add_argument("--scan", choices=["ts", "od", "pd"], help="Scan mode: ts, od, pd")
+    parser.add_argument("--os", help="OS template to mimic (for --scan od)")
+    parser.add_argument("--te", type=int, help="Timeout in minutes (for --scan od/pd)")
+    parser.add_argument("--status", help="Port status: open or close (for --scan pd)")
+    parser.add_argument("--dest", help="Optional destination path for OS fingerprint collection")
+    parser.add_argument("--list-os", action="store_true", help="List available OS templates and exit")
+    parser.add_argument("--debug", action="store_true", help="Enable debug-level logging")
+
+    args = parser.parse_args()
+
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+        logging.debug("🐞 Debug logging enabled.")
+
+    if args.list_os:
+        list_supported_os()
+        return
+
+    if not args.nic or not args.scan:
+        logging.error("❌ Missing required arguments: --nic and --scan")
+        parser.print_help()
+        return
+
+    validate_nic(args.nic)
+
+    if not args.host:
+        if args.nic == settings.NIC_PROBE:
+            args.host = settings.IP_PROBE
+        elif args.nic == settings.NIC_TARGET:
+            args.host = settings.IP_TARGET
+        else:
+            logging.error("❌ Cannot infer IP from unknown NIC. Please provide --host explicitly.")
+            return
+        logging.info(f"🧠 Auto-detected host IP from NIC {args.nic}: {args.host}")
+
+    gateway = GATEWAY_MAP.get(args.nic, "unknown")
+    logging.info(f"🌐 Using gateway {gateway} for interface {args.nic}")
+
+    if args.scan == 'ts':
+        dest_path = os.path.abspath(args.dest) if args.dest else os.path.abspath(settings.OS_RECORD_PATH)
+
+        # 🧹 Clean old .pcap and .txt files
+        for proto in ["arp", "icmp", "tcp", "udp"]:
+            for ext in [".pcap", ".txt"]:
+                path = os.path.join(dest_path, f"{proto}_record{ext}")
+                if os.path.exists(path):
+                    os.remove(path)
+                    logging.info(f"🧹 Deleted old file: {path}")
+
+        # 📡 Capture
+        collect_fingerprint(args.host, dest_path, args.nic)
+
+        # 🔓 Fix ownership if run as root
+        fix_permissions(dest_path)
+
+        # 🛠️ Convert & ✅ Validate
+        for proto in ["arp", "icmp", "tcp", "udp"]:
+            pcap_file = os.path.join(dest_path, f"{proto}_record.pcap")
+            if os.path.exists(pcap_file):
+                convert_raw_packets_to_template(pcap_file, proto)
+                txt_file = pcap_file.replace(".pcap", ".txt")
+                validate_template_file(txt_file)
+
+    elif args.scan == 'od':
+        if not args.os or args.te is None:
+            logging.error("❌ Missing required arguments --os or --te for OS deception")
+            return
+
+        os_name = args.os.lower()
+        spoof_config = settings.get_os_fingerprint(os_name)
+
+        if not spoof_config:
+            logging.error(f"❌ Unable to load OS fingerprint for '{args.os}'")
+            return
+
+        logging.info(f"🎭 Using OS template '{os_name}': TTL={spoof_config['ttl']}, Window={spoof_config['window']}")
+
+        os_record_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, os_name))
+        if not os.path.isdir(os_record_path):
+            logging.error(f"❌ OS fingerprint directory not found: {os_record_path}")
+            return
+
+        proto_map = {
+            "arp_record.pcap": "arp",
+            "tcp_record.pcap": "tcp",
+            "udp_record.pcap": "udp",
+            "icmp_record.pcap": "icmp"
+        }
+
+        for fname, proto in proto_map.items():
+            full_path = os.path.join(os_record_path, fname)
+            convert_raw_packets_to_template(full_path, proto)
+
+        deceiver = OsDeceiver(
+            target_host=args.host,
+            target_os=args.os,
+            dest=os_record_path,
+            nic=args.nic
+        )
+        deceiver.os_deceive(timeout_minutes=args.te)
+
+    elif args.scan == 'pd':
+        if not args.status or args.te is None:
+            logging.error("❌ Missing --status or --te for Port Deception")
+            return
+        deceiver = PortDeceiver(args.host, nic=args.nic)
+        deceiver.deceive_ps_hs(args.status)
+
+if __name__ == '__main__':
+    main()
