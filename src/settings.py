@@ -31,14 +31,18 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 # Network Interface Setup
 # =======================
 
-NIC_TARGET = 'ens192'
-IP_TARGET = '192.168.10.10'
-GW_TARGET = '192.168.10.1'
-VLAN_TARGET = None
+# ens192 = connected to Win10/Win11 hosts
+NIC_TARGET = 'ens192'                    # used for --scan ts
+IP_TARGET = '192.168.23.200'             # real Win10 for fingerprinting
 
-NIC_PROBE  = 'ens224'
-IP_PROBE   = '192.168.23.206'
-GW_PROBE   = '192.168.23.1'
+# ens224 = connected to attacker (Nmap)
+NIC_PROBE  = 'ens224'                    # used for --scan od
+IP_PROBE   = '192.168.23.201'            # spoofed IP for deception (pretend to be Win11 as Win10)
+
+GW_TARGET = '192.168.23.1'
+GW_PROBE  = '192.168.10.1'
+
+VLAN_TARGET = None
 VLAN_PROBE = None
 
 HOST = IP_PROBE
