@@ -201,13 +201,7 @@ def main():
     logging.info(f"🌐 Using gateway {gateway} for interface {args.nic}")
 
     if args.scan == 'ts':
-        if args.dest:
-            if os.path.isabs(args.dest) or args.dest.startswith("."):
-                dest_path = os.path.abspath(args.dest)
-            else:
-                dest_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, args.dest))
-        else:
-            dest_path = settings.OS_RECORD_PATH
+        dest_path = os.path.abspath(args.dest) if args.dest else os.path.abspath(settings.OS_RECORD_PATH)
 
         # 🧹 Always clean old files before capture
         for proto in ["arp", "icmp", "tcp", "udp"]:
@@ -272,4 +266,4 @@ def main():
         deceiver.deceive_ps_hs(args.status)
 
 if __name__ == '__main__':
-    main()
+    main()   
