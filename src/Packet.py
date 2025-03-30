@@ -27,14 +27,6 @@ class Packet:
             self.unpack_l3_header(self.l3)
             if self.l4:
                 self.unpack_l4_header(self.l4)
-
-            # Provide string versions of IPs
-            if 'src_IP' in self.l3_field:
-                self.src_ip = socket.inet_ntoa(self.l3_field['src_IP'])
-                self.l3_field['src_IP_str'] = self.src_ip
-            if 'dest_IP' in self.l3_field:
-                self.dst_ip = socket.inet_ntoa(self.l3_field['dest_IP'])
-                self.l3_field['dest_IP_str'] = self.dst_ip
         except Exception as e:
             logging.error(f"[Packet] General unpack error: {e}")
 
@@ -106,8 +98,9 @@ class Packet:
     def unpack_ip_header(self) -> None:
         try:
             start = len(self.l2_header)
-            self.l3_header = self.packet[start:start + settings.IP_HEADER_LEN]
-            fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header)
+            ihl = self.packet[start] & 0x0F
+            self.l3_header = self.packet[start:start + ihl * 4]
+            fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header[:20])
             self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(fields[6], 'others')
             self.l3_field = {
                 'IHL_VERSION': fields[0],
@@ -119,30 +112,33 @@ class Packet:
                 'PROTOCOL': fields[6],
                 'check_sum_of_hdr': fields[7],
                 'src_IP': fields[8],
-                'dest_IP': fields[9]
+                'dest_IP': fields[9],
+                'options': self.packet[start + 20:start + ihl * 4] if ihl > 5 else b''
             }
         except Exception as e:
             logging.error(f"[IP] Error unpacking: {e}")
 
     def unpack_tcp_header(self) -> None:
         try:
-            start = len(self.l2_header) + settings.IP_HEADER_LEN
-            self.l4_header = self.packet[start:start + settings.TCP_HEADER_LEN]
-            fields = struct.unpack('!HHLLBBHHH', self.l4_header)
+            start = len(self.l2_header) + (self.l3_field.get('IHL_VERSION', 0) & 0x0F) * 4
+            offset = (self.packet[start + 12] >> 4)
+            self.l4_header = self.packet[start:start + offset * 4]
+            fields = struct.unpack('!HHLLBBHHH', self.l4_header[:20])
             self.l4_field = {
                 'src_port': fields[0],
                 'dest_port': fields[1],
                 'seq': fields[2],
                 'ack_num': fields[3],
-                'offset': (fields[4] >> 4) * 4,
+                'offset': offset * 4,
                 'flags': fields[5],
+                'reserved': (fields[4] & 0x0E) >> 1,
                 'window': self.window_override if self.window_override is not None else fields[6],
                 'checksum': fields[7],
                 'urgent_ptr': fields[8],
                 'kind_seq': [],
                 'option_field': {}
             }
-            option_data = self.packet[start + settings.TCP_HEADER_LEN:start + fields[4] * 4]
+            option_data = self.l4_header[20:offset * 4]
             i = 0
             while i < len(option_data):
                 kind = option_data[i]
@@ -167,7 +163,7 @@ class Packet:
 
     def unpack_udp_header(self) -> None:
         try:
-            start = len(self.l2_header) + settings.IP_HEADER_LEN
+            start = len(self.l2_header) + (self.l3_field.get('IHL_VERSION', 0) & 0x0F) * 4
             self.l4_header = self.packet[start:start + settings.UDP_HEADER_LEN]
             fields = struct.unpack('!HHHH', self.l4_header)
             self.l4_field = {
@@ -181,7 +177,7 @@ class Packet:
 
     def unpack_icmp_header(self) -> None:
         try:
-            start = len(self.l2_header) + settings.IP_HEADER_LEN
+            start = len(self.l2_header) + (self.l3_field.get('IHL_VERSION', 0) & 0x0F) * 4
             self.l4_header = self.packet[start:start + settings.ICMP_HEADER_LEN]
             fields = struct.unpack('!BBHHH', self.l4_header)
             self.l4_field = {
@@ -193,3 +189,24 @@ class Packet:
             }
         except Exception as e:
             logging.error(f"[ICMP] Error unpacking: {e}")
+
+    # Add enhanced .pack() if needed
+
+    @staticmethod
+    def getTCPChecksum(packet: bytes) -> int:
+        if len(packet) % 2 != 0:
+            packet += b'\0'
+        res = sum(array.array("H", packet))
+        res = (res >> 16) + (res & 0xFFFF)
+        res += res >> 16
+        return (~res) & 0xFFFF
+
+    @staticmethod
+    def getUDPChecksum(data: bytes) -> int:
+        checksum = 0
+        if len(data) % 2:
+            data += b'\0'
+        for i in range(0, len(data), 2):
+            checksum += (data[i] << 8) + data[i+1]
+        checksum = (checksum >> 16) + (checksum & 0xFFFF)
+        return ~checksum & 0xFFFF
