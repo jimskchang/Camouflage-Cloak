@@ -94,13 +94,39 @@ FALLBACK_TTL = 64
 FALLBACK_WINDOW = 8192
 
 BASE_OS_TEMPLATES = {
-    "linux":        {"ttl": 64,  "window": 5840},
-    "linux5":       {"ttl": 64,  "window": 29200},
-    "centos":       {"ttl": 64,  "window": 5840},
-    "mac":          {"ttl": 64,  "window": 65535},
-    "freebsd":      {"ttl": 64,  "window": 65535},
-    "win7":         {"ttl": 128, "window": 8192},
-    "win10":        {
+    "linux": {
+        "ttl": 64,
+        "window": 5840,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "NOP"]
+    },
+    "linux5": {
+        "ttl": 64,
+        "window": 29200,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=7", "NOP", "NOP"]
+    },
+    "centos": {
+        "ttl": 64,
+        "window": 5840,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "NOP"]
+    },
+    "mac": {
+        "ttl": 64,
+        "window": 65535,
+        "ipid": "zero",
+        "df": True,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=6", "NOP", "NOP"]
+    },
+    "freebsd": {
+        "ttl": 64,
+        "window": 65535,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=5", "NOP", "NOP"]
+    },
+    "win7": {
+        "ttl": 128,
+        "window": 8192,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=2", "NOP", "NOP"]
+    },
+    "win10": {
         "ttl": 128,
         "window": 8192,
         "ipid": "random",
@@ -108,9 +134,21 @@ BASE_OS_TEMPLATES = {
         "df": True,
         "tcp_options": ["MSS=1460", "SACK", "TS", "WS=7", "NOP", "NOP"]
     },
-    "win11":        {"ttl": 128, "window": 64240},
-    "windows2022":  {"ttl": 128, "window": 65535},
-    "windows2025":  {"ttl": 128, "window": 65535},
+    "win11": {
+        "ttl": 128,
+        "window": 64240,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
+    },
+    "windows2022": {
+        "ttl": 128,
+        "window": 65535,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
+    },
+    "windows2025": {
+        "ttl": 128,
+        "window": 65535,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
+    },
 }
 
 OS_ALIASES = {
