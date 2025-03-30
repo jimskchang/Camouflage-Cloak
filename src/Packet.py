@@ -1,4 +1,3 @@
-# ✅ 修正後的 Packet.py
 import logging
 import socket
 import struct
@@ -28,6 +27,14 @@ class Packet:
             self.unpack_l3_header(self.l3)
             if self.l4:
                 self.unpack_l4_header(self.l4)
+
+            # Provide string versions of IPs
+            if 'src_IP' in self.l3_field:
+                self.src_ip = socket.inet_ntoa(self.l3_field['src_IP'])
+                self.l3_field['src_IP_str'] = self.src_ip
+            if 'dest_IP' in self.l3_field:
+                self.dst_ip = socket.inet_ntoa(self.l3_field['dest_IP'])
+                self.l3_field['dest_IP_str'] = self.dst_ip
         except Exception as e:
             logging.error(f"[Packet] General unpack error: {e}")
 
@@ -77,43 +84,6 @@ class Packet:
         elif l4 == 'icmp':
             self.unpack_icmp_header()
 
-    def unpack_ip_header(self) -> None:
-        try:
-            start = len(self.l2_header)
-            self.l3_header = self.packet[start:start + settings.IP_HEADER_LEN]
-            fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header)
-            self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(fields[6], 'others')
-            self.l3_field = {
-                'IHL_VERSION': fields[0],
-                'TYPE_OF_SERVICE': fields[1],
-                'total_len': fields[2],
-                'pktID': fields[3],
-                'FRAGMENT_STATUS': fields[4],
-                'ttl': self.ttl_override if self.ttl_override is not None else fields[5],
-                'PROTOCOL': fields[6],
-                'check_sum_of_hdr': fields[7],
-                'src_IP': fields[8],
-                'dest_IP': fields[9],
-                'src_IP_str': socket.inet_ntoa(fields[8]),
-                'dest_IP_str': socket.inet_ntoa(fields[9])
-            }
-        except Exception as e:
-            logging.error(f"[IP] Error unpacking: {e}")
-
-    def unpack_udp_header(self) -> None:
-        try:
-            start = len(self.l2_header) + settings.IP_HEADER_LEN
-            self.l4_header = self.packet[start:start + settings.UDP_HEADER_LEN]
-            fields = struct.unpack('!HHHH', self.l4_header)
-            self.l4_field = {
-                'src_port': fields[0],
-                'dest_port': fields[1],
-                'length': fields[2],
-                'checksum': fields[3],
-            }
-        except Exception as e:
-            logging.error(f"[UDP] Error unpacking: {e}")
-
     def unpack_arp_header(self) -> None:
         try:
             start = len(self.l2_header)
@@ -132,3 +102,94 @@ class Packet:
             }
         except Exception as e:
             logging.error(f"[ARP] Error unpacking: {e}")
+
+    def unpack_ip_header(self) -> None:
+        try:
+            start = len(self.l2_header)
+            self.l3_header = self.packet[start:start + settings.IP_HEADER_LEN]
+            fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header)
+            self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(fields[6], 'others')
+            self.l3_field = {
+                'IHL_VERSION': fields[0],
+                'TYPE_OF_SERVICE': fields[1],
+                'total_len': fields[2],
+                'pktID': fields[3],
+                'FRAGMENT_STATUS': fields[4],
+                'ttl': self.ttl_override if self.ttl_override is not None else fields[5],
+                'PROTOCOL': fields[6],
+                'check_sum_of_hdr': fields[7],
+                'src_IP': fields[8],
+                'dest_IP': fields[9]
+            }
+        except Exception as e:
+            logging.error(f"[IP] Error unpacking: {e}")
+
+    def unpack_tcp_header(self) -> None:
+        try:
+            start = len(self.l2_header) + settings.IP_HEADER_LEN
+            self.l4_header = self.packet[start:start + settings.TCP_HEADER_LEN]
+            fields = struct.unpack('!HHLLBBHHH', self.l4_header)
+            self.l4_field = {
+                'src_port': fields[0],
+                'dest_port': fields[1],
+                'seq': fields[2],
+                'ack_num': fields[3],
+                'offset': (fields[4] >> 4) * 4,
+                'flags': fields[5],
+                'window': self.window_override if self.window_override is not None else fields[6],
+                'checksum': fields[7],
+                'urgent_ptr': fields[8],
+                'kind_seq': [],
+                'option_field': {}
+            }
+            option_data = self.packet[start + settings.TCP_HEADER_LEN:start + fields[4] * 4]
+            i = 0
+            while i < len(option_data):
+                kind = option_data[i]
+                self.l4_field['kind_seq'].append(kind)
+                if kind == 0:
+                    break
+                elif kind == 1:
+                    i += 1
+                    continue
+                else:
+                    length = option_data[i + 1]
+                    value = option_data[i + 2:i + length]
+                    if kind == 2 and len(value) >= 2:
+                        self.l4_field['option_field']['mss'] = struct.unpack('!H', value[:2])[0]
+                    elif kind == 3 and len(value) >= 1:
+                        self.l4_field['option_field']['ws'] = struct.unpack('!B', value[:1])[0]
+                    elif kind == 8 and len(value) >= 8:
+                        self.l4_field['option_field']['ts_val'], self.l4_field['option_field']['ts_echo_reply'] = struct.unpack('!II', value[:8])
+                    i += length
+        except Exception as e:
+            logging.error(f"[TCP] Error unpacking: {e}")
+
+    def unpack_udp_header(self) -> None:
+        try:
+            start = len(self.l2_header) + settings.IP_HEADER_LEN
+            self.l4_header = self.packet[start:start + settings.UDP_HEADER_LEN]
+            fields = struct.unpack('!HHHH', self.l4_header)
+            self.l4_field = {
+                'src_port': fields[0],
+                'dest_port': fields[1],
+                'length': fields[2],
+                'checksum': fields[3],
+            }
+        except Exception as e:
+            logging.error(f"[UDP] Error unpacking: {e}")
+
+    def unpack_icmp_header(self) -> None:
+        try:
+            start = len(self.l2_header) + settings.IP_HEADER_LEN
+            self.l4_header = self.packet[start:start + settings.ICMP_HEADER_LEN]
+            fields = struct.unpack('!BBHHH', self.l4_header)
+            self.l4_field = {
+                'icmp_type': fields[0],
+                'code': fields[1],
+                'checksum': fields[2],
+                'ID': fields[3],
+                'seq': fields[4],
+            }
+        except Exception as e:
+            logging.error(f"[ICMP] Error unpacking: {e}")
