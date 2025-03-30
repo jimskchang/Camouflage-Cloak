@@ -148,6 +148,38 @@ def convert_raw_packets_to_template(file_path: str, proto: str):
     except Exception as e:
         logging.error(f"❌ Failed to convert {file_path}: {e}")
 
+def validate_template_file(template_path: str):
+    try:
+        if not os.path.exists(template_path):
+            logging.error(f"❌ Template file missing: {template_path}")
+            return False
+
+        with open(template_path, "r") as f:
+            data = json.load(f)
+
+        if not data:
+            logging.error(f"⚠ Empty template file: {template_path}")
+            return False
+
+        decoded_count = 0
+        for k, v in data.items():
+            try:
+                base64.b64decode(k)
+                base64.b64decode(v)
+                decoded_count += 1
+            except Exception:
+                continue
+
+        if decoded_count == 0:
+            logging.error(f"❌ No decodable entries in: {template_path}")
+            return False
+        else:
+            logging.info(f"✅ Valid template: {os.path.basename(template_path)} ({decoded_count} keys)")
+            return True
+    except Exception as e:
+        logging.error(f"❌ Failed to validate {template_path}: {e}")
+        return False
+
 def list_supported_os():
     print("🧩 Supported OS templates:")
     for name in BASE_OS_TEMPLATES:
@@ -203,7 +235,7 @@ def main():
     if args.scan == 'ts':
         dest_path = os.path.abspath(args.dest) if args.dest else os.path.abspath(settings.OS_RECORD_PATH)
 
-        # 🧹 Always clean old files before capture
+        # 🧹 Clean old .pcap and .txt files
         for proto in ["arp", "icmp", "tcp", "udp"]:
             for ext in [".pcap", ".txt"]:
                 path = os.path.join(dest_path, f"{proto}_record{ext}")
@@ -211,14 +243,16 @@ def main():
                     os.remove(path)
                     logging.info(f"🧹 Deleted old file: {path}")
 
-        # 📡 Capture new fingerprint
+        # 📡 Capture
         collect_fingerprint(args.host, dest_path, args.nic)
 
-        # 🛠️ Auto-generate .txt templates
+        # 🛠️ Convert & ✅ Validate
         for proto in ["arp", "icmp", "tcp", "udp"]:
             pcap_file = os.path.join(dest_path, f"{proto}_record.pcap")
             if os.path.exists(pcap_file):
                 convert_raw_packets_to_template(pcap_file, proto)
+                txt_file = pcap_file.replace(".pcap", ".txt")
+                validate_template_file(txt_file)
 
     elif args.scan == 'od':
         if not args.os or args.te is None:
@@ -266,4 +300,4 @@ def main():
         deceiver.deceive_ps_hs(args.status)
 
 if __name__ == '__main__':
-    main()   
+    main()
