@@ -1,5 +1,6 @@
-import logging
 import struct
+import logging
+
 
 def gen_key(proto: str, packet: bytes):
     if proto == 'tcp':
@@ -11,6 +12,7 @@ def gen_key(proto: str, packet: bytes):
     elif proto == 'arp':
         return gen_arp_key(packet)
     return b'', None
+
 
 def gen_tcp_key(packet: bytes):
     try:
@@ -26,6 +28,7 @@ def gen_tcp_key(packet: bytes):
         logging.warning(f"⚠️ gen_tcp_key failed: {e}")
         return b'', None
 
+
 def gen_udp_key(packet: bytes):
     try:
         ip_header = packet[14:34]
@@ -37,6 +40,7 @@ def gen_udp_key(packet: bytes):
     except Exception as e:
         logging.warning(f"⚠️ gen_udp_key failed: {e}")
         return b'', None
+
 
 def gen_icmp_key(packet: bytes):
     try:
@@ -50,13 +54,14 @@ def gen_icmp_key(packet: bytes):
         logging.warning(f"⚠️ gen_icmp_key failed: {e}")
         return b'', None
 
+
 def gen_arp_key(packet: bytes):
     try:
         arp_header = packet[14:42]
         fields = struct.unpack('!HHBBH6s4s6s4s', arp_header)
         key = struct.pack('!HHBBH6s4s6s4s',
                           fields[0], fields[1], fields[2], fields[3], fields[4],
-                          b'\x00' * 6, b'\x00' * 4, b'\x00' * 6, b'\x00' * 4)
+                          b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
         return key, None
     except Exception as e:
         logging.warning(f"⚠️ gen_arp_key failed: {e}")
