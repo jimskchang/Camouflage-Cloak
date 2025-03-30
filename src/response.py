@@ -6,48 +6,51 @@ def synthesize_response(pkt, template: bytes, ttl: int = 64, window: int = 8192,
     try:
         scapy_pkt = Ether(template)
 
-        # Handle IP layer
+        # --- IP Layer Spoofing ---
         if IP in scapy_pkt:
-            scapy_pkt[IP].src = pkt.l3_field.get("dest_IP_str", pkt.dst_ip)
             scapy_pkt[IP].dst = pkt.l3_field.get("src_IP_str", pkt.src_ip)
+            scapy_pkt[IP].src = pkt.l3_field.get("dest_IP_str", pkt.dst_ip)
             scapy_pkt[IP].ttl = ttl
-
-            # IP ID & ECN/ToS/DF handling
             scapy_pkt[IP].id = deceiver.get_ip_id(pkt.src_ip) if deceiver else random.randint(0, 65535)
-            scapy_pkt[IP].tos = deceiver.os_flags.get("tos", 0x00) if deceiver else 0
-            scapy_pkt[IP].flags = 'DF' if deceiver and deceiver.os_flags.get("df", False) else 0
+
+            # DF & ECN support from OS template
+            if deceiver:
+                df_bit = deceiver.os_flags.get("df", False)
+                tos_val = deceiver.os_flags.get("tos", 0)
+                scapy_pkt[IP].flags = 'DF' if df_bit else 0
+                scapy_pkt[IP].tos = tos_val
+
             del scapy_pkt[IP].chksum
 
-        # TCP Response
+        # --- TCP Layer Spoofing ---
         if TCP in scapy_pkt:
             scapy_pkt[TCP].sport = pkt.l4_field.get("dest_port", 1234)
             scapy_pkt[TCP].dport = pkt.l4_field.get("src_port", 1234)
             scapy_pkt[TCP].seq = pkt.l4_field.get("ack_num", random.randint(0, 2**32 - 1))
             scapy_pkt[TCP].ack = pkt.l4_field.get("seq", 0) + 1
-            scapy_pkt[TCP].flags = "SA"  # default SYN+ACK
+            scapy_pkt[TCP].flags = "SA"  # SYN+ACK by default
             scapy_pkt[TCP].window = window
 
             if deceiver:
-                ts_val = deceiver.get_timestamp(pkt.src_ip)
                 ts_echo = pkt.l4_field.get("option_field", {}).get("ts_val", 0)
                 scapy_pkt[TCP].options = deceiver.get_tcp_options(pkt.src_ip, ts_echo=ts_echo)
 
             del scapy_pkt[TCP].chksum
 
-        # UDP Response
+        # --- UDP Layer Spoofing ---
         if UDP in scapy_pkt:
             scapy_pkt[UDP].sport = pkt.l4_field.get("dest_port", 1234)
             scapy_pkt[UDP].dport = pkt.l4_field.get("src_port", 1234)
             del scapy_pkt[UDP].chksum
 
-        # ICMP Response
+        # --- ICMP Layer Spoofing ---
         if ICMP in scapy_pkt:
-            scapy_pkt[ICMP].type = 0  # Echo reply
+            scapy_pkt[ICMP].type = 0  # Echo Reply
             del scapy_pkt[ICMP].chksum
 
-        # ARP Response
+        # --- ARP Layer Spoofing ---
         if ARP in scapy_pkt:
-            scapy_pkt[ARP].op = 2
+            scapy_pkt[ARP].op = 2  # ARP Reply
             scapy_pkt[ARP].psrc = pkt.l3_field.get("recv_ip_str", pkt.dst_ip)
             scapy_pkt[ARP].pdst = pkt.l3_field.get("send_ip_str", pkt.src_ip)
 
