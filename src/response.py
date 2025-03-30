@@ -10,6 +10,10 @@ def synthesize_response(pkt, template: bytes, ttl: int = 64, window: int = 8192,
             scapy_pkt[IP].dst = pkt.l3_field.get("src_IP_str", pkt.src_ip)
             scapy_pkt[IP].src = pkt.l3_field.get("dest_IP_str", pkt.dst_ip)
             scapy_pkt[IP].ttl = ttl
+            if deceiver:
+                scapy_pkt[IP].id = deceiver.get_ip_id()
+            else:
+                scapy_pkt[IP].id = random.randint(0, 65535)
             del scapy_pkt[IP].chksum  # Force recalculation
 
         # TCP spoofing
@@ -20,7 +24,7 @@ def synthesize_response(pkt, template: bytes, ttl: int = 64, window: int = 8192,
             scapy_pkt[TCP].flags = "SA"  # SYN+ACK default
             del scapy_pkt[TCP].chksum
 
-            # Add TCP Options with Timestamp if deceiver is provided
+            # Add TCP Options with Timestamp if available
             if deceiver:
                 src_ip = pkt.l3_field.get("src_IP")
                 if src_ip:
