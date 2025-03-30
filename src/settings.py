@@ -97,34 +97,68 @@ BASE_OS_TEMPLATES = {
     "linux": {
         "ttl": 64,
         "window": 5840,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "NOP"],
+        "tos": 0,
+        "ecn": 0,
+        "df": False,
+        "ipid": "increment",
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "linux5": {
         "ttl": 64,
         "window": 29200,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=7", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=7", "NOP", "NOP"],
+        "tos": 0,
+        "ecn": 0,
+        "df": False,
+        "ipid": "increment",
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "centos": {
         "ttl": 64,
         "window": 5840,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "NOP"],
+        "tos": 0,
+        "ecn": 0,
+        "df": False,
+        "ipid": "increment",
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "mac": {
         "ttl": 64,
         "window": 65535,
         "ipid": "zero",
         "df": True,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=6", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=6", "NOP", "NOP"],
+        "tos": 0,
+        "ecn": 0,
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "freebsd": {
         "ttl": 64,
         "window": 65535,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=5", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=5", "NOP", "NOP"],
+        "tos": 0,
+        "ecn": 0,
+        "df": False,
+        "ipid": "increment",
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "win7": {
         "ttl": 128,
         "window": 8192,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=2", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=2", "NOP", "NOP"],
+        "tos": 0,
+        "ecn": 0,
+        "df": True,
+        "ipid": "increment",
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "win10": {
         "ttl": 128,
@@ -132,22 +166,43 @@ BASE_OS_TEMPLATES = {
         "ipid": "random",
         "tos": 0x02,
         "df": True,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=7", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=7", "NOP", "NOP"],
+        "ecn": 0,
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "win11": {
         "ttl": 128,
         "window": 64240,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"],
+        "tos": 0x02,
+        "ecn": 0,
+        "df": True,
+        "ipid": "random",
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "windows2022": {
         "ttl": 128,
         "window": 65535,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"],
+        "tos": 0x02,
+        "ecn": 0,
+        "df": True,
+        "ipid": "random",
+        "tcp_reserved": 0,
+        "ip_options": []
     },
     "windows2025": {
         "ttl": 128,
         "window": 65535,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"],
+        "tos": 0x02,
+        "ecn": 0,
+        "df": True,
+        "ipid": "random",
+        "tcp_reserved": 0,
+        "ip_options": []
     },
 }
 
