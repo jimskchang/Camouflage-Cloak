@@ -7,7 +7,6 @@ import struct
 import time
 import random
 from datetime import datetime, timedelta
-from typing import Dict
 
 from scapy.all import IP, TCP, ICMP, Ether
 
@@ -20,7 +19,6 @@ from src.response import synthesize_response
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
 
-# --- Key Normalization Helpers ---
 def gen_key(proto: str, packet: bytes):
     if proto == 'tcp':
         return gen_tcp_key(packet)
@@ -94,42 +92,20 @@ class OsDeceiver:
             logging.error(f"❌ NIC '{self.nic}' not found.")
             raise ValueError(f"NIC '{self.nic}' does not exist.")
 
-        try:
-            with open(f"/sys/class/net/{self.nic}/address", "r") as f:
-                mac = f.read().strip()
-                logging.info(f"✅ Using MAC address {mac} for NIC '{self.nic}'")
-        except Exception as e:
-            logging.warning(f"⚠️ Unable to read MAC address: {e}")
-
         os.makedirs(self.os_record_path, exist_ok=True)
         self.conn = TcpConnect(self.host, nic=self.nic)
 
         os_template = get_os_fingerprint(self.os)
         if not os_template:
+            logging.error(f"❌ OS template '{self.os}' could not be loaded.")
             raise ValueError(f"Invalid OS template: {self.os}")
 
-        self.ttl = os_template.get("ttl", 64)
-        self.window = os_template.get("window", 8192)
-        self.tos = os_template.get("tos", 0x00)
-        self.df = os_template.get("df", False)
+        self.ttl = os_template.get("ttl")
+        self.window = os_template.get("window")
         self.ipid_mode = os_template.get("ipid", "increment")
         self.tcp_options = os_template.get("tcp_options", [])
-
         self.ip_id_counter = 0
-        self.ip_id_per_host = {}
-        self.ip_state = {}
         self.timestamp_base = {}
-
-        logging.info(f"🎭 TTL={self.ttl}, Window={self.window}, IPID={self.ipid_mode}, TOS={self.tos}, DF={self.df}")
-        logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
-        logging.info(f"📁 Using OS template path: {self.os_record_path}")
-
-    def get_timestamp(self, ip: str):
-        now = time.time()
-        if ip not in self.timestamp_base:
-            base = int(now - random.uniform(1, 10))
-            self.timestamp_base[ip] = base
-        return int((now - self.timestamp_base[ip]) * 1000)
 
     def get_ip_id(self, ip: str = "") -> int:
         if self.ipid_mode == "increment":
@@ -137,14 +113,15 @@ class OsDeceiver:
             return self.ip_id_counter
         elif self.ipid_mode == "random":
             return random.randint(0, 65535)
-        elif self.ipid_mode == "zero":
-            return 0
-        elif self.ipid_mode == "per-ip":
-            if ip not in self.ip_id_per_host:
-                self.ip_id_per_host[ip] = random.randint(0, 65535)
-            self.ip_id_per_host[ip] = (self.ip_id_per_host[ip] + 1) % 65536
-            return self.ip_id_per_host[ip]
         return 0
+
+    def get_timestamp(self, ip: str):
+        now = time.time()
+        if ip not in self.timestamp_base:
+            base = int(now - random.uniform(1, 10))
+            self.timestamp_base[ip] = base
+        drifted = int((now - self.timestamp_base[ip]) * 1000)
+        return drifted
 
     def get_tcp_options(self, src_ip: str, ts_echo=0):
         options = []
@@ -152,7 +129,7 @@ class OsDeceiver:
             if opt.startswith("MSS="):
                 options.append(("MSS", int(opt.split("=")[1])))
             elif opt.startswith("WS="):
-                options.append(("WScale", int(opt.split("=")[1])))
+                options.append(("WS", int(opt.split("=")[1])))
             elif opt == "TS":
                 ts_val = self.get_timestamp(src_ip)
                 options.append(("Timestamp", (ts_val, ts_echo)))
@@ -162,31 +139,45 @@ class OsDeceiver:
                 options.append(("NOP", None))
         return options
 
-    # Other methods unchanged...
+    def os_deceive(self, timeout_minutes: int = 5):
+        logging.info("🌀 Starting OS deception loop...")
+        templates = {ptype: self.load_file(ptype) for ptype in ["tcp", "icmp", "udp", "arp"]}
+        timeout = datetime.now() + timedelta(minutes=timeout_minutes)
 
-    def save_record(self, proto: str, data: dict):
-        filename = os.path.join(self.os_record_path, f"{proto}_record.txt")
-        with open(filename, "w") as f:
-            json.dump({base64.b64encode(k).decode(): base64.b64encode(v).decode() for k, v in data.items()}, f, indent=2)
+        while datetime.now() < timeout:
+            try:
+                raw, addr = self.conn.sock.recvfrom(65565)
+                ip_str = addr[0]
+                pkt = Packet(raw)
+                pkt.interface = self.nic
+                pkt.unpack()
+
+                proto = pkt.l4 if pkt.l4 else pkt.l3
+                key, _ = gen_key(proto, pkt.packet)
+                template = templates.get(proto, {}).get(key)
+
+                if template:
+                    response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window, deceiver=self)
+                    if response:
+                        self.conn.sock.send(response)
+                        logging.info(f"📤 Sent {proto.upper()} response to {ip_str}")
+                else:
+                    logging.warning(f"⚠️ No template for {proto.upper()} key")
+
+            except Exception as e:
+                logging.error(f"❌ Deception loop error: {e}")
 
     def load_file(self, proto: str):
-        filename = os.path.join(self.os_record_path, f"{proto}_record.txt")
-        if not os.path.exists(filename):
-            return {}
-        with open(filename, "r") as f:
-            raw = json.load(f)
-        return {base64.b64decode(k): base64.b64decode(v) for k, v in raw.items()}
-
-    def export_state_log(self):
-        log_path = os.path.join(self.os_record_path, "stats_log.json")
-        try:
-            stats = {
-                "active_ips": list(self.ip_state.keys()),
-                "timestamp_base": self.timestamp_base,
-                "ipid_mode": self.ipid_mode
-            }
-            with open(log_path, "w") as f:
-                json.dump(stats, f, indent=2)
-            logging.info(f"📈 Exported deception state to {log_path}")
-        except Exception as e:
-            logging.error(f"❌ Failed to export state log: {e}")
+        path = os.path.join(self.os_record_path, f"{proto}_record.txt")
+        result = {}
+        if os.path.exists(path):
+            with open(path, "r") as f:
+                data = json.load(f)
+                for k, v in data.items():
+                    try:
+                        key = base64.b64decode(k.encode())
+                        val = base64.b64decode(v.encode())
+                        result[key] = val
+                    except Exception as e:
+                        logging.warning(f"⚠️ Failed to decode {proto} template: {e}")
+        return result
