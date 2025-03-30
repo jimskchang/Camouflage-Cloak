@@ -13,7 +13,7 @@ import src.settings as settings
 from src.settings import get_os_fingerprint
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.response import synthesize_response  # Make sure this exists and supports TTL/window
+from src.response import synthesize_response  # Make sure this exists and supports TTL/window + deceiver
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -82,7 +82,6 @@ def gen_arp_key(packet: bytes):
 
 class OsDeceiver:
     def __init__(self, target_host: str, target_os: str, dest=None, nic: str = None):
-        self.timestamp_base = {}  # 用來記錄每個 IP 的模擬時間基準
         self.host = target_host
         self.os = target_os
         self.nic = nic or settings.NIC_PROBE
@@ -112,10 +111,19 @@ class OsDeceiver:
         self.ttl = os_template.get("ttl")
         self.window = os_template.get("window")
         self.ip_state = {}
+        self.timestamp_base = {}  # ⬅️ Clock drift base per IP
 
         logging.info(f"🎭 TTL and Window Spoofing -> TTL={self.ttl}, Window={self.window}")
         logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
         logging.info(f"📁 Using OS template path: {self.os_record_path}")
+
+    def get_timestamp(self, ip: str):
+        now = time.time()
+        if ip not in self.timestamp_base:
+            base = int(now - random.uniform(1, 10))  # drift in seconds
+            self.timestamp_base[ip] = base
+        drifted = int((now - self.timestamp_base[ip]) * 1000)  # ms
+        return drifted
 
     def save_record(self, pkt_type: str, record: Dict[bytes, bytes]):
         file_path = os.path.join(self.os_record_path, f"{pkt_type}_record.txt")
@@ -183,7 +191,8 @@ class OsDeceiver:
                         if proto == 'icmp':
                             time.sleep(random.uniform(0.25, 0.5))  # Fake ICMP latency
 
-                        response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window)
+                        # ⬇️ Pass self as deceiver
+                        response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window, deceiver=self)
                         if response:
                             self.conn.sock.send(response)
                             counter += 1
@@ -201,15 +210,6 @@ class OsDeceiver:
 
             except Exception as e:
                 logging.error(f"❌ Error in deception loop: {e}")
-
-    def get_timestamp(self, ip: str):
-        now = time.time()
-        if ip not in self.timestamp_base:
-            # 每個 IP 有不同的模擬 timestamp 起始值（模擬 clock drift）
-            base = int(now - random.uniform(1, 10))  # 模擬 clock drift 秒差
-            self.timestamp_base[ip] = base
-        drifted = int((now - self.timestamp_base[ip]) * 1000)  # 毫秒
-        return drifted
 
         self.export_state_log()
 
