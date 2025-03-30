@@ -189,6 +189,19 @@ def list_supported_os():
         for alias, base in settings.OS_ALIASES.items():
             print(f"  - {alias} → {base}")
 
+# (Everything above remains the same)
+
+import getpass
+
+# --- Fix file/folder ownership ---
+def fix_permissions(path):
+    try:
+        username = getpass.getuser()
+        subprocess.run(["chown", "-R", f"{username}:{username}", path], check=True)
+        logging.info(f"🔓 Fixed ownership for {path}")
+    except Exception as e:
+        logging.warning(f"⚠ Failed to fix ownership: {e}")
+
 # --- Main Logic ---
 def main():
     parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak: OS & Port Deception Engine")
@@ -245,6 +258,9 @@ def main():
 
         # 📡 Capture
         collect_fingerprint(args.host, dest_path, args.nic)
+
+        # 🔓 Fix ownership if run as root
+        fix_permissions(dest_path)
 
         # 🛠️ Convert & ✅ Validate
         for proto in ["arp", "icmp", "tcp", "udp"]:
