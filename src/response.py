@@ -1,7 +1,7 @@
 from scapy.all import Ether, IP, TCP, UDP, ICMP, ARP
 import logging
 
-def synthesize_response(pkt, template: bytes, ttl: int = 64, window: int = 8192) -> bytes:
+def synthesize_response(pkt, template: bytes, ttl: int = 64, window: int = 8192, deceiver=None) -> bytes:
     try:
         scapy_pkt = Ether(template)
 
@@ -19,6 +19,23 @@ def synthesize_response(pkt, template: bytes, ttl: int = 64, window: int = 8192)
             scapy_pkt[TCP].window = window
             scapy_pkt[TCP].flags = "SA"  # SYN+ACK default
             del scapy_pkt[TCP].chksum
+
+            # Add TCP Options with Timestamp if deceiver is provided
+            if deceiver:
+                src_ip = pkt.l3_field.get("src_IP")
+                if src_ip:
+                    src_ip_str = pkt.l3_field.get("src_IP_str", pkt.src_ip)
+                    ts_val = deceiver.get_timestamp(src_ip_str)
+                    ts_echo = pkt.tcp_options.get("TSval", 0) if hasattr(pkt, 'tcp_options') else 0
+                    scapy_pkt[TCP].options = [
+                        ("MSS", 1460),
+                        ("NOP", None),
+                        ("WS", 7),
+                        ("NOP", None),
+                        ("NOP", None),
+                        ("Timestamp", (ts_val, ts_echo)),
+                        ("SAckOK", b"")
+                    ]
 
         # UDP spoofing
         if UDP in scapy_pkt:
