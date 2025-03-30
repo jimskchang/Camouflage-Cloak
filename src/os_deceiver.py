@@ -82,6 +82,7 @@ def gen_arp_key(packet: bytes):
 
 class OsDeceiver:
     def __init__(self, target_host: str, target_os: str, dest=None, nic: str = None):
+        self.timestamp_base = {}  # 用來記錄每個 IP 的模擬時間基準
         self.host = target_host
         self.os = target_os
         self.nic = nic or settings.NIC_PROBE
@@ -200,6 +201,15 @@ class OsDeceiver:
 
             except Exception as e:
                 logging.error(f"❌ Error in deception loop: {e}")
+
+    def get_timestamp(self, ip: str):
+        now = time.time()
+        if ip not in self.timestamp_base:
+            # 每個 IP 有不同的模擬 timestamp 起始值（模擬 clock drift）
+            base = int(now - random.uniform(1, 10))  # 模擬 clock drift 秒差
+            self.timestamp_base[ip] = base
+        drifted = int((now - self.timestamp_base[ip]) * 1000)  # 毫秒
+        return drifted
 
         self.export_state_log()
 
