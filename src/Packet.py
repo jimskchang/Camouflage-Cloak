@@ -1,3 +1,4 @@
+# ✅ 修正後的 Packet.py
 import logging
 import socket
 import struct
@@ -99,149 +100,35 @@ class Packet:
         except Exception as e:
             logging.error(f"[IP] Error unpacking: {e}")
 
-    def unpack_tcp_header(self) -> None:
+    def unpack_udp_header(self) -> None:
         try:
             start = len(self.l2_header) + settings.IP_HEADER_LEN
-            self.l4_header = self.packet[start:start + settings.TCP_HEADER_LEN]
-            fields = struct.unpack('!HHLLBBHHH', self.l4_header)
-            offset = (fields[4] >> 4) * 4
-            flags = fields[5]
+            self.l4_header = self.packet[start:start + settings.UDP_HEADER_LEN]
+            fields = struct.unpack('!HHHH', self.l4_header)
             self.l4_field = {
                 'src_port': fields[0],
                 'dest_port': fields[1],
-                'seq': fields[2],
-                'ack_num': fields[3],
-                'offset': offset,
-                'flags': flags,
-                'window': self.window_override if self.window_override is not None else fields[6],
-                'checksum': fields[7],
-                'urgent_ptr': fields[8],
-                'flag_str': self.decode_tcp_flags(flags),
-                'option_field': {}
+                'length': fields[2],
+                'checksum': fields[3],
             }
-
-            options_raw = self.packet[start + settings.TCP_HEADER_LEN:start + offset]
-            i = 0
-            while i < len(options_raw):
-                kind = options_raw[i]
-                if kind == 0:
-                    break
-                elif kind == 1:
-                    i += 1
-                    continue
-                else:
-                    if i + 1 >= len(options_raw): break
-                    length = options_raw[i + 1]
-                    value = options_raw[i + 2:i + length]
-                    if kind == 2 and len(value) >= 2:
-                        self.l4_field['option_field']['mss'] = struct.unpack('!H', value[:2])[0]
-                    elif kind == 3 and len(value) >= 1:
-                        self.l4_field['option_field']['ws'] = struct.unpack('!B', value[:1])[0]
-                    elif kind == 8 and len(value) >= 8:
-                        self.l4_field['option_field']['ts_val'], self.l4_field['option_field']['ts_echo_reply'] = struct.unpack('!II', value[:8])
-                    i += length
         except Exception as e:
-            logging.error(f"[TCP] Error unpacking: {e}")
+            logging.error(f"[UDP] Error unpacking: {e}")
 
-    def decode_tcp_flags(self, flags: int) -> str:
-        names = ['FIN', 'SYN', 'RST', 'PSH', 'ACK', 'URG', 'ECE', 'CWR']
-        bits = bin(flags)[2:].zfill(8)[-8:]
-        return ','.join(name for bit, name in zip(reversed(bits), names) if bit == '1')
-
-    def pack(self) -> None:
+    def unpack_arp_header(self) -> None:
         try:
-            src_ip = self.l3_field.get('src_IP', b'\x00\x00\x00\x00')
-            dst_ip = self.l3_field.get('dest_IP', b'\x00\x00\x00\x00')
-            ttl = self.l3_field.get('ttl', 64)
-            tos = self.l3_field.get('TYPE_OF_SERVICE', 0)
-            proto = self.l3_field.get('PROTOCOL', 6)
-            window = self.l4_field.get('window', 8192)
-
-            # TCP
-            options = b''
-            opt = self.l4_field.get('option_field', {})
-            if 'mss' in opt:
-                options += struct.pack('!BBH', 2, 4, opt['mss'])
-            if 'ws' in opt:
-                options += struct.pack('!BBB', 3, 3, opt['ws'])
-            if 'ts_val' in opt and 'ts_echo_reply' in opt:
-                options += struct.pack('!BBII', 8, 10, opt['ts_val'], opt['ts_echo_reply'])
-
-            while len(options) % 4 != 0:
-                options += b'\x00'
-
-            offset = 5 + len(options) // 4
-            tcp_header = struct.pack('!HHLLBBHHH',
-                self.l4_field['src_port'],
-                self.l4_field['dest_port'],
-                self.l4_field['seq'],
-                self.l4_field['ack_num'],
-                offset << 4,
-                self.l4_field.get('flags', 0x12),
-                window,
-                0,
-                self.l4_field.get('urgent_ptr', 0)
-            )
-
-            pseudo = struct.pack('!4s4sBBH', src_ip, dst_ip, 0, 6, len(tcp_header + options))
-            checksum = self.getTCPChecksum(pseudo + tcp_header + options)
-            tcp_header = struct.pack('!HHLLBBHHH',
-                self.l4_field['src_port'],
-                self.l4_field['dest_port'],
-                self.l4_field['seq'],
-                self.l4_field['ack_num'],
-                offset << 4,
-                self.l4_field.get('flags', 0x12),
-                window,
-                checksum,
-                self.l4_field.get('urgent_ptr', 0)
-            )
-
-            total_len = settings.IP_HEADER_LEN + len(tcp_header) + len(options)
-            ip_header = struct.pack('!BBHHHBBH4s4s',
-                0x45,
-                tos,
-                total_len,
-                self.l3_field.get('pktID', 54321),
-                self.l3_field.get('FRAGMENT_STATUS', 0),
-                ttl,
-                proto,
-                0,
-                src_ip,
-                dst_ip
-            )
-            ip_checksum = self.getTCPChecksum(ip_header)
-            ip_header = struct.pack('!BBHHHBBH4s4s',
-                0x45,
-                tos,
-                total_len,
-                self.l3_field.get('pktID', 54321),
-                self.l3_field.get('FRAGMENT_STATUS', 0),
-                ttl,
-                proto,
-                ip_checksum,
-                src_ip,
-                dst_ip
-            )
-            self.packet = ip_header + tcp_header + options
+            start = len(self.l2_header)
+            self.l3_header = self.packet[start:start + settings.ARP_HEADER_LEN]
+            fields = struct.unpack('!HHBBH6s4s6s4s', self.l3_header)
+            self.l3_field = {
+                'hw_type': fields[0],
+                'proto_type': fields[1],
+                'hw_size': fields[2],
+                'proto_size': fields[3],
+                'opcode': fields[4],
+                'sender_mac': fields[5],
+                'sender_ip': fields[6],
+                'recv_mac': fields[7],
+                'recv_ip': fields[8],
+            }
         except Exception as e:
-            logging.error(f"[Packet] Packing error: {e}")
-
-    @staticmethod
-    def getTCPChecksum(packet: bytes) -> int:
-        if len(packet) % 2 != 0:
-            packet += b'\0'
-        res = sum(array.array("H", packet))
-        res = (res >> 16) + (res & 0xFFFF)
-        res += res >> 16
-        return (~res) & 0xFFFF
-
-    @staticmethod
-    def getUDPChecksum(data: bytes) -> int:
-        checksum = 0
-        if len(data) % 2:
-            data += b'\0'
-        for i in range(0, len(data), 2):
-            checksum += (data[i] << 8) + data[i+1]
-        checksum = (checksum >> 16) + (checksum & 0xFFFF)
-        return ~checksum & 0xFFFF
+            logging.error(f"[ARP] Error unpacking: {e}")
