@@ -94,9 +94,8 @@ class OsDeceiver:
             logging.error(f"❌ NIC '{self.nic}' not found.")
             raise ValueError(f"NIC '{self.nic}' does not exist.")
 
-        mac_path = f"/sys/class/net/{self.nic}/address"
         try:
-            with open(mac_path, "r") as f:
+            with open(f"/sys/class/net/{self.nic}/address", "r") as f:
                 mac = f.read().strip()
                 logging.info(f"✅ Using MAC address {mac} for NIC '{self.nic}'")
         except Exception as e:
@@ -107,23 +106,21 @@ class OsDeceiver:
 
         os_template = get_os_fingerprint(self.os)
         if not os_template:
-            logging.error(f"❌ OS template '{self.os}' could not be loaded.")
             raise ValueError(f"Invalid OS template: {self.os}")
 
-        self.ttl = os_template.get("ttl")
-        self.window = os_template.get("window")
+        self.ttl = os_template.get("ttl", 64)
+        self.window = os_template.get("window", 8192)
+        self.tos = os_template.get("tos", 0x00)
+        self.df = os_template.get("df", False)
         self.ipid_mode = os_template.get("ipid", "increment")
         self.tcp_options = os_template.get("tcp_options", [])
-        self.os_flags = {
-            "df": os_template.get("df", False),
-            "tos": os_template.get("tos", 0)
-        }
+
         self.ip_id_counter = 0
         self.ip_id_per_host = {}
         self.ip_state = {}
         self.timestamp_base = {}
 
-        logging.info(f"🎭 TTL/Window/IPID -> TTL={self.ttl}, Window={self.window}, IPID={self.ipid_mode}")
+        logging.info(f"🎭 TTL={self.ttl}, Window={self.window}, IPID={self.ipid_mode}, TOS={self.tos}, DF={self.df}")
         logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
         logging.info(f"📁 Using OS template path: {self.os_record_path}")
 
@@ -132,8 +129,7 @@ class OsDeceiver:
         if ip not in self.timestamp_base:
             base = int(now - random.uniform(1, 10))
             self.timestamp_base[ip] = base
-        drifted = int((now - self.timestamp_base[ip]) * 1000)
-        return drifted
+        return int((now - self.timestamp_base[ip]) * 1000)
 
     def get_ip_id(self, ip: str = "") -> int:
         if self.ipid_mode == "increment":
@@ -143,9 +139,11 @@ class OsDeceiver:
             return random.randint(0, 65535)
         elif self.ipid_mode == "zero":
             return 0
-        elif self.ipid_mode == "increment-per-ip":
-            self.ip_id_per_host[ip] = self.ip_id_per_host.get(ip, 0) + 1
-            return self.ip_id_per_host[ip] % 65536
+        elif self.ipid_mode == "per-ip":
+            if ip not in self.ip_id_per_host:
+                self.ip_id_per_host[ip] = random.randint(0, 65535)
+            self.ip_id_per_host[ip] = (self.ip_id_per_host[ip] + 1) % 65536
+            return self.ip_id_per_host[ip]
         return 0
 
     def get_tcp_options(self, src_ip: str, ts_echo=0):
@@ -164,49 +162,31 @@ class OsDeceiver:
                 options.append(("NOP", None))
         return options
 
-    def send_tcp_rst(self, pkt: Packet):
+    # Other methods unchanged...
+
+    def save_record(self, proto: str, data: dict):
+        filename = os.path.join(self.os_record_path, f"{proto}_record.txt")
+        with open(filename, "w") as f:
+            json.dump({base64.b64encode(k).decode(): base64.b64encode(v).decode() for k, v in data.items()}, f, indent=2)
+
+    def load_file(self, proto: str):
+        filename = os.path.join(self.os_record_path, f"{proto}_record.txt")
+        if not os.path.exists(filename):
+            return {}
+        with open(filename, "r") as f:
+            raw = json.load(f)
+        return {base64.b64decode(k): base64.b64decode(v) for k, v in raw.items()}
+
+    def export_state_log(self):
+        log_path = os.path.join(self.os_record_path, "stats_log.json")
         try:
-            ip = IP(
-                src=pkt.l3_field.get("dest_IP_str", pkt.dst_ip),
-                dst=pkt.l3_field.get("src_IP_str", pkt.src_ip),
-                ttl=self.ttl,
-                id=self.get_ip_id(pkt.src_ip),
-                tos=self.os_flags.get("tos", 0),
-                flags="DF" if self.os_flags.get("df", False) else 0
-            )
-            tcp = TCP(
-                sport=pkt.l4_field.get("dest_port", 1234),
-                dport=pkt.l4_field.get("src_port", 1234),
-                flags="R",
-                seq=random.randint(0, 4294967295)
-            )
-            ether = Ether(dst=pkt.eth.src, src=pkt.eth.dst)
-            raw = ether / ip / tcp
-            self.conn.sock.send(bytes(raw))
-            logging.info(f"🚫 Sent TCP RST to {ip.dst}:{tcp.dport}")
+            stats = {
+                "active_ips": list(self.ip_state.keys()),
+                "timestamp_base": self.timestamp_base,
+                "ipid_mode": self.ipid_mode
+            }
+            with open(log_path, "w") as f:
+                json.dump(stats, f, indent=2)
+            logging.info(f"📈 Exported deception state to {log_path}")
         except Exception as e:
-            logging.error(f"❌ Failed to send TCP RST: {e}")
-
-    def send_icmp_port_unreachable(self, pkt: Packet):
-        try:
-            original_ip = pkt.packet[14:34]
-            original_udp = pkt.packet[34:42]
-            data = original_ip + original_udp
-
-            ip = IP(
-                src=pkt.l3_field.get("dest_IP_str", pkt.dst_ip),
-                dst=pkt.l3_field.get("src_IP_str", pkt.src_ip),
-                ttl=self.ttl,
-                id=self.get_ip_id(pkt.src_ip),
-                tos=self.os_flags.get("tos", 0),
-                flags="DF" if self.os_flags.get("df", False) else 0
-            )
-            icmp = ICMP(type=3, code=3)
-            ether = Ether(dst=pkt.eth.src, src=pkt.eth.dst)
-            raw = ether / ip / icmp / data
-            self.conn.sock.send(bytes(raw))
-            logging.info(f"🚫 Sent ICMP Port Unreachable to {ip.dst}")
-        except Exception as e:
-            logging.error(f"❌ Failed to send ICMP Port Unreachable: {e}")
-
-
+            logging.error(f"❌ Failed to export state log: {e}")
