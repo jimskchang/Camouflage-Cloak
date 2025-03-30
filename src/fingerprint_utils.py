@@ -1,7 +1,6 @@
 import logging
 import struct
 
-# --- Key Normalization Helpers ---
 def gen_key(proto: str, packet: bytes):
     if proto == 'tcp':
         return gen_tcp_key(packet)
@@ -57,7 +56,7 @@ def gen_arp_key(packet: bytes):
         fields = struct.unpack('!HHBBH6s4s6s4s', arp_header)
         key = struct.pack('!HHBBH6s4s6s4s',
                           fields[0], fields[1], fields[2], fields[3], fields[4],
-                          b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
+                          b'\x00' * 6, b'\x00' * 4, b'\x00' * 6, b'\x00' * 4)
         return key, None
     except Exception as e:
         logging.warning(f"⚠️ gen_arp_key failed: {e}")
