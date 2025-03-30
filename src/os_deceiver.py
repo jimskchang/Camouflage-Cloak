@@ -114,7 +114,12 @@ class OsDeceiver:
         self.window = os_template.get("window")
         self.ipid_mode = os_template.get("ipid", "increment")
         self.tcp_options = os_template.get("tcp_options", [])
+        self.os_flags = {
+            "df": os_template.get("df", False),
+            "tos": os_template.get("tos", 0)
+        }
         self.ip_id_counter = 0
+        self.ip_id_per_host = {}
         self.ip_state = {}
         self.timestamp_base = {}
 
@@ -138,6 +143,9 @@ class OsDeceiver:
             return random.randint(0, 65535)
         elif self.ipid_mode == "zero":
             return 0
+        elif self.ipid_mode == "increment-per-ip":
+            self.ip_id_per_host[ip] = self.ip_id_per_host.get(ip, 0) + 1
+            return self.ip_id_per_host[ip] % 65536
         return 0
 
     def get_tcp_options(self, src_ip: str, ts_echo=0):
@@ -146,7 +154,7 @@ class OsDeceiver:
             if opt.startswith("MSS="):
                 options.append(("MSS", int(opt.split("=")[1])))
             elif opt.startswith("WS="):
-                options.append(("WS", int(opt.split("=")[1])))
+                options.append(("WScale", int(opt.split("=")[1])))
             elif opt == "TS":
                 ts_val = self.get_timestamp(src_ip)
                 options.append(("Timestamp", (ts_val, ts_echo)))
@@ -162,7 +170,9 @@ class OsDeceiver:
                 src=pkt.l3_field.get("dest_IP_str", pkt.dst_ip),
                 dst=pkt.l3_field.get("src_IP_str", pkt.src_ip),
                 ttl=self.ttl,
-                id=self.get_ip_id()
+                id=self.get_ip_id(pkt.src_ip),
+                tos=self.os_flags.get("tos", 0),
+                flags="DF" if self.os_flags.get("df", False) else 0
             )
             tcp = TCP(
                 sport=pkt.l4_field.get("dest_port", 1234),
@@ -187,7 +197,9 @@ class OsDeceiver:
                 src=pkt.l3_field.get("dest_IP_str", pkt.dst_ip),
                 dst=pkt.l3_field.get("src_IP_str", pkt.src_ip),
                 ttl=self.ttl,
-                id=self.get_ip_id()
+                id=self.get_ip_id(pkt.src_ip),
+                tos=self.os_flags.get("tos", 0),
+                flags="DF" if self.os_flags.get("df", False) else 0
             )
             icmp = ICMP(type=3, code=3)
             ether = Ether(dst=pkt.eth.src, src=pkt.eth.dst)
@@ -196,101 +208,5 @@ class OsDeceiver:
             logging.info(f"🚫 Sent ICMP Port Unreachable to {ip.dst}")
         except Exception as e:
             logging.error(f"❌ Failed to send ICMP Port Unreachable: {e}")
-
-    
-    def os_deceive(self, timeout_minutes: int = 5):
-        logging.info("🌀 Starting OS deception loop...")
-        templates = {ptype: self.load_file(ptype) for ptype in ["tcp", "icmp", "udp", "arp"]}
-        timeout = datetime.now() + timedelta(minutes=timeout_minutes)
-        counter = 0
-
-        while datetime.now() < timeout:
-            try:
-                raw, addr = self.conn.sock.recvfrom(65565)
-                ip_str = addr[0]
-                logging.debug(f"📥 Raw packet received: {len(raw)} bytes")
-
-                pkt = Packet(raw)
-                pkt.interface = self.nic
-                pkt.unpack()
-
-                dest_ip = pkt.l3_field.get('dest_IP', b'\x00\x00\x00\x00')
-                safe_ip = socket.inet_ntoa(dest_ip) if len(dest_ip) == 4 else "INVALID_IP"
-                logging.info(f"Parsed Packet - L3: {pkt.l3}, L4: {pkt.l4}, Dest IP: {safe_ip}")
-
-                proto = pkt.l4 if pkt.l4 else pkt.l3
-                self.track_ip_state(ip_str, proto)
-
-                if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
-                    continue
-
-                if (pkt.l3 == 'ip' and dest_ip == socket.inet_aton(self.host)) or \
-                   (pkt.l3 == 'arp' and pkt.l3_field.get('recv_ip') == socket.inet_aton(self.host)):
-
-                    key, _ = gen_key(proto, pkt.packet)
-                    template = templates.get(proto, {}).get(key)
-
-                    if not template:
-                        logging.warning(f"⚠️ No exact template match for {proto} key (len={len(key)}). Trying fuzzy match...")
-                        for k in templates.get(proto, {}):
-                            if key.startswith(k[:16]):
-                                template = templates[proto][k]
-                                logging.info(f"🔍 Fuzzy match hit for {proto.upper()} template (prefix match)!")
-                                break
-
-                    if not template:
-                        default_key = f"default_{proto}_response".encode()
-                        template = templates.get(proto, {}).get(default_key)
-                        if template:
-                            logging.info(f"✨ Using default_{proto}_response fallback template")
-
-                    if template:
-                        if proto == 'icmp':
-                            time.sleep(random.uniform(0.25, 0.5))
-                        response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window, deceiver=self)
-                        if response:
-                            self.conn.sock.send(response)
-                            counter += 1
-                            logging.info(f"📤 Sent {proto.upper()} response #{counter}")
-                        continue
-
-                    # Fallback behavior: no template found at all
-                    if proto == 'udp':
-                        self.send_icmp_port_unreachable(pkt)
-                    elif proto == 'tcp':
-                        self.send_tcp_rst(pkt)
-
-                    if settings.AUTO_LEARN_MISSING:
-                        logging.info(f"🧠 Learning new {proto.upper()} template on the fly")
-                        templates[proto][key] = pkt.packet
-                        self.save_record(proto, templates[proto])
-                    elif DEBUG_MODE:
-                        with open(UNMATCHED_LOG, "a") as f:
-                            f.write(f"[{proto}] {key.hex()}\n")
-
-            except Exception as e:
-                logging.error(f"❌ Error in deception loop: {e}")
-
-        self.export_state_log()
-
-    def generate_default_template(self, proto: str, pkt: Packet):
-        try:
-            key = f"default_{proto}_response".encode()
-            filename = os.path.join(self.os_record_path, f"{proto}_record.txt")
-            if os.path.exists(filename):
-                with open(filename, "r") as f:
-                    data = json.load(f)
-            else:
-                data = {}
-
-            encoded_key = base64.b64encode(key).decode()
-            encoded_val = base64.b64encode(pkt.packet).decode()
-            data[encoded_key] = encoded_val
-
-            with open(filename, "w") as f:
-                json.dump(data, f, indent=2)
-            logging.info(f"✅ Generated default {proto.upper()} template and saved to {filename}")
-        except Exception as e:
-            logging.error(f"❌ Failed to generate default template for {proto}: {e}")
 
 
