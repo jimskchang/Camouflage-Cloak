@@ -4,6 +4,8 @@ import struct
 import array
 import logging
 import os
+from scapy.all import Ether, IP, TCP
+
 import src.settings as settings
 
 
@@ -11,10 +13,6 @@ class TcpConnect:
     def __init__(self, host: str, nic: str = None):
         """
         Initializes a raw socket connection for TCP packet manipulation.
-
-        Args:
-            host (str): Target IP address.
-            nic (str): Network interface card to bind (defaults to NIC_PROBE).
         """
         self.dip = host
         self.nic = nic or settings.NIC_PROBE  # Default to NIC_PROBE
@@ -53,19 +51,6 @@ class TcpConnect:
     ) -> bytes:
         """
         Builds a TCP header with proper checksum for spoofed replies.
-
-        Args:
-            tcp_len (int): TCP header length in bytes.
-            seq (int): Sequence number.
-            ack_num (int): Acknowledgment number.
-            src_port (int): Source port.
-            dest_port (int): Destination port.
-            src_IP (bytes): Source IP address (4 bytes).
-            dest_IP (bytes): Destination IP address (4 bytes).
-            flags (int): TCP flags byte.
-
-        Returns:
-            bytes: A fully formed TCP header.
         """
         try:
             offset = (tcp_len // 4) << 4
@@ -82,19 +67,44 @@ class TcpConnect:
             logging.error(f"❌ TCP Header build error: {e}")
             return b''
 
+    def send_packet(self, ether_pkt: bytes):
+        """
+        Sends a fully formed Ethernet packet via raw socket.
+        """
+        try:
+            self.sock.send(ether_pkt)
+            logging.debug("📤 Sent raw Ethernet packet.")
+        except Exception as e:
+            logging.error(f"❌ Failed to send raw packet: {e}")
+
+    def build_tcp_rst(self, pkt) -> bytes:
+        """
+        Build a TCP RST packet from a captured Packet object.
+        """
+        try:
+            ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
+            ip = IP(
+                src=pkt.l3_field['dest_IP_str'],
+                dst=pkt.l3_field['src_IP_str'],
+                ttl=64,
+                id=random.randint(0, 65535)
+            )
+            tcp = TCP(
+                sport=pkt.l4_field['dest_port'],
+                dport=pkt.l4_field['src_port'],
+                flags="R",
+                seq=pkt.l4_field.get('ack_num', 0)
+            )
+            return bytes(ether / ip / tcp)
+        except Exception as e:
+            logging.error(f"❌ Failed to build TCP RST: {e}")
+            return b''
+
 
 # --- Utility Functions ---
 
 def check_nic_exists_and_up(nic: str) -> bool:
-    """
-    Checks if a NIC exists and is in UP state.
-
-    Args:
-        nic (str): NIC name (e.g. 'ens224')
-
-    Returns:
-        bool: True if NIC exists and is UP
-    """
+    """Check if a NIC exists and is up."""
     nic_path = f"/sys/class/net/{nic}"
     operstate_path = os.path.join(nic_path, "operstate")
     try:
@@ -110,7 +120,6 @@ def getTCPChecksum(packet: bytes) -> int:
     """Computes TCP checksum from pseudo-header + TCP header."""
     if len(packet) % 2 != 0:
         packet += b'\0'
-
     res = sum(array.array("H", packet))
     res = (res >> 16) + (res & 0xffff)
     res += res >> 16
@@ -121,14 +130,13 @@ def getIPChecksum(packet: bytes) -> int:
     """Computes IP header checksum."""
     if len(packet) % 2:
         packet += b'\0'
-
     checksum = sum(struct.unpack("!" + "H" * (len(packet) // 2), packet))
     checksum = (checksum >> 16) + (checksum & 0xFFFF)
     return ~checksum & 0xFFFF
 
 
 def byte2mac(mac_byte: bytes) -> str:
-    """Converts MAC from byte form to colon-separated string."""
+    """Convert MAC bytes to colon-separated string."""
     if len(mac_byte) != 6:
         logging.error("Invalid MAC length.")
         return "00:00:00:00:00:00"
@@ -136,7 +144,7 @@ def byte2mac(mac_byte: bytes) -> str:
 
 
 def byte2ip(ip_byte: bytes) -> str:
-    """Converts IP from byte format to dotted-quad string."""
+    """Convert IP bytes to dotted-decimal string."""
     try:
         return socket.inet_ntoa(ip_byte)
     except socket.error as e:
