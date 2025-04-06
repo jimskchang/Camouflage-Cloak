@@ -200,3 +200,14 @@ def log_os_template(os_name: str):
     win = template.get("window")
     opts = template.get("tcp_options", [])
     logging.debug(f"🧬 OS Template '{os_name}' → TTL={ttl}, Window={win}, TCP_Options={opts}")
+
+def print_interface_summary():
+    for nic in [NIC_TARGET, NIC_PROBE]:
+        try:
+            mac = get_mac_address(nic)
+            ip = IP_TARGET if nic == NIC_TARGET else IP_PROBE
+            gw = GATEWAY_MAP.get(nic)
+            vlan = VLAN_MAP.get(nic)
+            logging.info(f"🔌 NIC: {nic} | IP: {ip} | MAC: {mac} | GW: {gw} | VLAN: {vlan}")
+        except Exception as e:
+            logging.warning(f"⚠ Failed to load NIC '{nic}': {e}")
