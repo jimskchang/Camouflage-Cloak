@@ -8,7 +8,7 @@ import json
 import base64
 import socket
 from collections import defaultdict
-from scapy.all import sniff, wrpcap, rdpcap
+from scapy.all import sniff, wrpcap, rdpcap, get_if_hwaddr
 
 # --- Ensure src is in sys.path ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,23 +31,10 @@ try:
     from src.fingerprint_utils import gen_key
     from src.os_recorder import templateSynthesis
     from src.Packet import Packet
-    from src.settings import MAC, VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES, get_mac_address
+    from src.settings import VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
 except ImportError as e:
     logging.error(f"\u274c Import Error: {e}")
     sys.exit(1)
-
-# --- Cross-platform NIC detection ---
-def get_interface_ip_map():
-    ip_map = {}
-    try:
-        hostname = socket.gethostname()
-        host_ips = socket.gethostbyname_ex(hostname)[2]
-        for ip in host_ips:
-            if not ip.startswith("127."):
-                ip_map[f"interface_{len(ip_map)}"] = ip
-    except Exception as e:
-        logging.warning(f"\u26a0 NIC auto-detection failed: {e}")
-    return ip_map
 
 # --- Utility Functions ---
 def ensure_directory_exists(directory: str):
@@ -58,23 +45,14 @@ def ensure_directory_exists(directory: str):
         logging.error(f"\u274c Failed to create directory {directory}: {e}")
         sys.exit(1)
 
-def ensure_file_permissions(file_path: str):
-    try:
-        if os.path.exists(file_path):
-            os.chmod(file_path, 0o644)
-            logging.info(f"\ud83d\udd10 Set permissions for {file_path}")
-    except Exception as e:
-        logging.error(f"\u274c Failed to set permissions for {file_path}: {e}")
-
 def validate_nic(nic: str):
     path = f"/sys/class/net/{nic}"
     if not os.path.exists(path):
         logging.error(f"\u274c Network interface {nic} not found.")
         sys.exit(1)
     try:
-        with open(f"{path}/address", "r") as f:
-            mac = f.read().strip()
-            logging.info(f"\u2705 NIC {nic} MAC address: {mac}")
+        mac = get_if_hwaddr(nic)
+        logging.info(f"\u2705 NIC {nic} MAC address: {mac}")
     except Exception as e:
         logging.warning(f"\u26a0 Could not read MAC address for NIC {nic}: {e}")
 
@@ -93,7 +71,15 @@ def set_promiscuous_mode(nic: str):
         logging.error(f"\u274c Failed to set promiscuous mode: {e}")
         sys.exit(1)
 
-# --- New function for --scan ts using os_recorder ---
+def get_ip_for_nic(nic: str) -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+
+# --- Template Learning ---
 def collect_and_build_templates(host_ip, dest_path, nic):
     template_dict = defaultdict(dict)
     pair_dict = {}
@@ -156,14 +142,10 @@ def main():
     validate_nic(args.nic)
 
     if not args.host:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-                s.connect(("8.8.8.8", 80))
-                args.host = s.getsockname()[0]
-                logging.info(f"\ud83e\udde0 Auto-detected host IP from NIC: {args.host}")
-        except Exception:
-            logging.warning("\u26a0 Could not auto-detect host IP, defaulting to 127.0.0.1")
-            args.host = "127.0.0.1"
+        args.host = get_ip_for_nic(args.nic)
+        logging.info(f"\ud83e\udde0 Auto-detected host IP for NIC {args.nic}: {args.host}")
+
+    mac = get_if_hwaddr(args.nic)
 
     if args.scan == "ts":
         dest_path = os.path.abspath(args.dest or settings.OS_RECORD_PATH)
@@ -174,8 +156,7 @@ def main():
         if not args.os or args.te is None:
             logging.error("\u274c Missing --os or --te")
             return
-        os_name = args.os.lower()
-        record_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, os_name))
+        record_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, args.os.lower()))
         deceiver = OsDeceiver(
             target_host=args.host,
             target_os=args.os,
@@ -190,9 +171,10 @@ def main():
             return
         deceiver = PortDeceiver(
             interface_ip=args.host,
-            nic=args.nic,
             os_name=args.os,
-            ports_config=json.loads(args.status) if args.status.startswith('{') else None
+            ports_config=json.loads(args.status) if args.status else {},
+            nic=args.nic,
+            mac=mac
         )
         deceiver.run()
 
