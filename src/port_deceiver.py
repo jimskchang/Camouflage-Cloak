@@ -1,3 +1,5 @@
+# port_deceiver.py
+
 import os
 import time
 import random
@@ -10,7 +12,7 @@ from collections import defaultdict
 from datetime import datetime
 from scapy.all import IP, TCP, UDP, ICMP, Ether, send, sniff, wrpcap, get_if_hwaddr
 
-from src.settings import get_os_fingerprint, OS_RECORD_PATH
+from src.settings import get_os_fingerprint, OS_RECORD_PATH, CUSTOM_RULES
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +40,6 @@ class PortDeceiver:
 
         self.protocol_stats = {"TCP": 0, "UDP": 0, "ICMP": 0}
         self.sent_packets = []
-        self.sessions = {}
         self.session_log = {}
 
         self._init_plot()
@@ -67,7 +68,32 @@ class PortDeceiver:
             options = options[:-1]
         return options
 
-    def craft_response(self, src_ip, src_port, dst_port, flag, proto='tcp'):
+    def match_custom_rule(self, proto, port=None, flags=None, icmp_type=None):
+        for rule in CUSTOM_RULES:
+            if rule.get("proto", "").upper() != proto.upper():
+                continue
+            if "port" in rule and port != rule["port"]:
+                continue
+            if "flags" in rule and flags != rule["flags"]:
+                continue
+            if "type" in rule and icmp_type != rule["type"]:
+                continue
+            return rule
+        return None
+
+    def craft_response(self, src_ip, src_port, dst_port, flag, proto='tcp', icmp_type=None):
+        rule = self.match_custom_rule(proto, port=dst_port, flags=flag, icmp_type=icmp_type)
+        if rule:
+            if rule.get("log"):
+                logger.info(f"⚙️ Custom Rule: {rule['log']}")
+            if rule["action"] == "drop":
+                return None
+            if rule["action"] == "icmp_unreachable":
+                ether = Ether(src=self.local_mac)
+                ip = IP(src=self.local_ip, dst=src_ip, ttl=self.default_ttl)
+                icmp = ICMP(type=3, code=3)
+                return ether / ip / icmp / (ip / UDP(sport=src_port, dport=dst_port))[:28]
+
         time.sleep(self.simulate_timing(dst_port))
         ether = Ether(src=self.local_mac)
         ip = IP(src=self.local_ip, dst=src_ip, ttl=self.default_ttl)
@@ -94,7 +120,6 @@ class PortDeceiver:
             if self.timestamp_enabled:
                 ts_val = int(time.time() * 1000) & 0xFFFFFFFF
                 options.append(('Timestamp', (ts_val, 0)))
-            if self.timestamp_enabled:
                 options.append(('SAckOK', ''))
             tcp.options = self.fuzz_tcp_options(options)
             self.session_log[session_key] = {"state": "half-open" if state == 'open' else "rejected", "time": now}
@@ -103,7 +128,7 @@ class PortDeceiver:
         elif proto == 'udp':
             state = self.ports_config.get(dst_port, 'closed')
             if state == 'closed':
-                icmp = ICMP(type=3, code=3)  # Port Unreachable
+                icmp = ICMP(type=3, code=3)
                 self.session_log[session_key] = {"state": "udp-unreachable", "time": now}
                 return ether / ip / icmp / (ip / UDP(sport=src_port, dport=dst_port))[:28]
             else:
@@ -135,7 +160,7 @@ class PortDeceiver:
                     if response:
                         self.protocol_stats["UDP"] += 1
                 elif pkt.haslayer(ICMP) and pkt[ICMP].type == 8:
-                    response = self.craft_response(ip.src, 0, 0, 'S', proto='icmp')
+                    response = self.craft_response(ip.src, 0, 0, 'S', proto='icmp', icmp_type=8)
                     if response:
                         self.protocol_stats["ICMP"] += 1
 
