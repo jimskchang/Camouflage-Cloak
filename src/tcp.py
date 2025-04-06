@@ -1,86 +1,61 @@
 import socket
-import binascii
 import struct
 import array
+import binascii
 import logging
 import os
+import random
+import time
 from scapy.all import Ether, IP, TCP
 
 import src.settings as settings
 
-
 class TcpConnect:
-    def __init__(self, host: str, nic: str = None):
-        """
-        Initializes a raw socket connection for TCP packet manipulation.
-        """
+    def __init__(self, host: str, nic: str = None, drop_chance: float = 0.0, delay_range=(0, 0)):
         self.dip = host
-        self.nic = nic or settings.NIC_PROBE  # Default to NIC_PROBE
+        self.nic = nic or settings.NIC_PROBE
+        self.drop_chance = drop_chance
+        self.delay_range = delay_range  # in seconds, e.g. (0.01, 0.05)
 
         if not check_nic_exists_and_up(self.nic):
             raise RuntimeError(f"❌ NIC {self.nic} does not exist or is not UP.")
 
-        mac_path = f"/sys/class/net/{self.nic}/address"
-        try:
-            with open(mac_path, 'r') as f:
-                mac = f.readline().strip()
-                if not mac:
-                    raise ValueError(f"MAC address file {mac_path} is empty.")
-                self.mac = binascii.unhexlify(mac.replace(':', ''))  # Convert to binary
-                logging.info(f"✅ Using MAC address for {self.nic}: {mac}")
-        except FileNotFoundError:
-            raise ValueError(f"❌ Error: MAC address file not found for NIC: {self.nic}")
-        except Exception as e:
-            raise RuntimeError(f"❌ Unexpected error reading MAC address: {e}")
+        self.mac = self._get_mac_bytes(self.nic)
 
         try:
             self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
             self.sock.bind((self.nic, 0))
-            logging.info(f"✅ Bound raw socket to NIC: {self.nic}")
+            logging.info(f"✅ Raw socket bound to {self.nic}")
         except PermissionError:
-            logging.error("❌ Root privileges are required to create raw sockets.")
-            raise
+            raise RuntimeError("❌ Root privileges required for raw socket.")
         except socket.error as e:
-            logging.error(f"❌ Failed to create or bind socket: {e}")
-            raise
+            raise RuntimeError(f"❌ Socket error: {e}")
 
-    def build_tcp_header_from_reply(
-        self, tcp_len: int, seq: int, ack_num: int,
-        src_port: int, dest_port: int, src_IP: bytes,
-        dest_IP: bytes, flags: int
-    ) -> bytes:
-        """
-        Builds a TCP header with proper checksum for spoofed replies.
-        """
+    def _get_mac_bytes(self, nic):
+        try:
+            with open(f"/sys/class/net/{nic}/address", "r") as f:
+                mac = f.read().strip()
+                logging.info(f"✅ MAC of {nic}: {mac}")
+                return binascii.unhexlify(mac.replace(':', ''))
+        except Exception as e:
+            raise RuntimeError(f"❌ Failed to read MAC for {nic}: {e}")
+
+    def build_tcp_header_from_reply(self, tcp_len, seq, ack_num, src_port, dest_port, src_ip, dest_ip, flags):
         try:
             offset = (tcp_len // 4) << 4
-            reply_tcp_header = struct.pack('!HHIIBBHHH',
-                                           src_port, dest_port, seq, ack_num,
-                                           offset, flags, 0, 0, 0)
+            tcp_header = struct.pack("!HHIIBBHHH",
+                                     src_port, dest_port, seq, ack_num,
+                                     offset, flags, 0, 0, 0)
 
-            pseudo_hdr = struct.pack('!4s4sBBH', src_IP, dest_IP, 0, socket.IPPROTO_TCP, len(reply_tcp_header))
-            checksum = getTCPChecksum(pseudo_hdr + reply_tcp_header)
-
-            reply_tcp_header = reply_tcp_header[:16] + struct.pack('!H', checksum) + reply_tcp_header[18:]
-            return reply_tcp_header
-        except struct.error as e:
-            logging.error(f"❌ TCP Header build error: {e}")
+            pseudo_hdr = struct.pack("!4s4sBBH", src_ip, dest_ip, 0, socket.IPPROTO_TCP, len(tcp_header))
+            checksum = getTCPChecksum(pseudo_hdr + tcp_header)
+            tcp_header = tcp_header[:16] + struct.pack("!H", checksum) + tcp_header[18:]
+            return tcp_header
+        except Exception as e:
+            logging.error(f"❌ Error building TCP header: {e}")
             return b''
 
-    def send_packet(self, ether_pkt: bytes):
-        """
-        Sends a fully formed Ethernet packet via raw socket.
-        """
-        try:
-            self.sock.send(ether_pkt)
-            logging.debug("📤 Sent raw Ethernet packet.")
-        except Exception as e:
-            logging.error(f"❌ Failed to send raw packet: {e}")
-
-    def build_tcp_rst(self, pkt) -> bytes:
-        """
-        Build a TCP RST packet from a captured Packet object.
-        """
+    def build_tcp_rst(self, pkt, flags="R", seq=None, ack=None) -> bytes:
         try:
             ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
             ip = IP(
@@ -92,61 +67,91 @@ class TcpConnect:
             tcp = TCP(
                 sport=pkt.l4_field['dest_port'],
                 dport=pkt.l4_field['src_port'],
-                flags="R",
-                seq=pkt.l4_field.get('ack_num', 0)
+                flags=flags,
+                seq=seq if seq is not None else pkt.l4_field.get("ack_num", 0),
+                ack=ack if ack is not None else 0,
+                window=settings.FALLBACK_WINDOW
             )
             return bytes(ether / ip / tcp)
         except Exception as e:
-            logging.error(f"❌ Failed to build TCP RST: {e}")
+            logging.error(f"❌ Failed to build TCP {flags}: {e}")
             return b''
 
+    def build_tcp_response(self, pkt, flags="SA", ts=False, ts_echo=0, seq=None) -> bytes:
+        try:
+            ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
+            ip = IP(
+                src=pkt.l3_field['dest_IP_str'],
+                dst=pkt.l3_field['src_IP_str'],
+                ttl=64,
+                id=random.randint(0, 65535)
+            )
+            tcp = TCP(
+                sport=pkt.l4_field['dest_port'],
+                dport=pkt.l4_field['src_port'],
+                flags=flags,
+                seq=seq if seq else random.randint(0, 0xFFFFFFFF),
+                ack=pkt.l4_field.get("seq", 0) + 1,
+                window=settings.FALLBACK_WINDOW
+            )
+
+            options = [("MSS", 1460)]
+            if ts:
+                tsval = int(time.time() * 1000) & 0xFFFFFFFF
+                options += [("NOP", None), ("NOP", None), ("Timestamp", (tsval, ts_echo))]
+            options += [("SAckOK", b''), ("WScale", 7)]
+            tcp.options = options
+
+            return bytes(ether / ip / tcp)
+        except Exception as e:
+            logging.error(f"❌ Failed to build TCP response: {e}")
+            return b''
+
+    def send_packet(self, ether_pkt: bytes):
+        if self.drop_chance > 0 and random.random() < self.drop_chance:
+            logging.warning("🚫 Simulated packet drop.")
+            return
+
+        delay = random.uniform(*self.delay_range)
+        if delay > 0:
+            time.sleep(delay)
+
+        try:
+            self.sock.send(ether_pkt)
+            logging.debug("📤 Sent raw Ethernet packet.")
+        except Exception as e:
+            logging.error(f"❌ Failed to send raw packet: {e}")
 
 # --- Utility Functions ---
 
 def check_nic_exists_and_up(nic: str) -> bool:
-    """Check if a NIC exists and is up."""
-    nic_path = f"/sys/class/net/{nic}"
-    operstate_path = os.path.join(nic_path, "operstate")
+    path = f"/sys/class/net/{nic}/operstate"
     try:
-        with open(operstate_path, 'r') as f:
-            status = f.read().strip()
-        return status == 'up'
-    except Exception as e:
-        logging.error(f"❌ Error checking NIC status: {e}")
+        with open(path, "r") as f:
+            return f.read().strip() == "up"
+    except Exception:
         return False
 
-
 def getTCPChecksum(packet: bytes) -> int:
-    """Computes TCP checksum from pseudo-header + TCP header."""
-    if len(packet) % 2 != 0:
+    if len(packet) % 2:
         packet += b'\0'
     res = sum(array.array("H", packet))
-    res = (res >> 16) + (res & 0xffff)
+    res = (res >> 16) + (res & 0xFFFF)
     res += res >> 16
-    return (~res) & 0xffff
-
+    return (~res) & 0xFFFF
 
 def getIPChecksum(packet: bytes) -> int:
-    """Computes IP header checksum."""
     if len(packet) % 2:
         packet += b'\0'
     checksum = sum(struct.unpack("!" + "H" * (len(packet) // 2), packet))
     checksum = (checksum >> 16) + (checksum & 0xFFFF)
     return ~checksum & 0xFFFF
 
-
 def byte2mac(mac_byte: bytes) -> str:
-    """Convert MAC bytes to colon-separated string."""
-    if len(mac_byte) != 6:
-        logging.error("Invalid MAC length.")
-        return "00:00:00:00:00:00"
-    return ":".join(f"{b:02x}" for b in mac_byte)
-
+    return ":".join(f"{b:02x}" for b in mac_byte) if len(mac_byte) == 6 else "00:00:00:00:00:00"
 
 def byte2ip(ip_byte: bytes) -> str:
-    """Convert IP bytes to dotted-decimal string."""
     try:
         return socket.inet_ntoa(ip_byte)
-    except socket.error as e:
-        logging.error(f"❌ Invalid IP bytes: {e}")
+    except Exception:
         return "0.0.0.0"
