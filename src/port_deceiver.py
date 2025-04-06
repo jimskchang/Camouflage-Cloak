@@ -1,15 +1,13 @@
-# port_deceiver.py
-
 import os
 import time
 import random
 import logging
 import threading
 import json
+from datetime import datetime
+from collections import defaultdict
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
-from collections import defaultdict
-from datetime import datetime
 from scapy.all import IP, TCP, UDP, ICMP, Ether, send, sniff, wrpcap, get_if_hwaddr
 
 from src.settings import get_os_fingerprint, OS_RECORD_PATH, CUSTOM_RULES
@@ -17,10 +15,10 @@ from src.settings import get_os_fingerprint, OS_RECORD_PATH, CUSTOM_RULES
 logger = logging.getLogger(__name__)
 
 class PortDeceiver:
-    def __init__(self, local_ip, nic, os_name=None, ports_config=None):
+    def __init__(self, local_ip, nic, os_name=None, ports_config=None, mac=None):
         self.local_ip = local_ip
         self.nic = nic
-        self.local_mac = get_if_hwaddr(nic)
+        self.local_mac = mac or get_if_hwaddr(nic)
         self.os_name = os_name
         self.ports_config = ports_config or {}
         self.record_path = os.path.join(OS_RECORD_PATH, os_name or "unknown")
@@ -38,8 +36,9 @@ class PortDeceiver:
         self.mss_value = fingerprint.get('mss', 1460)
         self.timestamp_enabled = fingerprint.get('timestamp', False) or fingerprint.get('ts', False)
 
-        self.protocol_stats = {"TCP": 0, "UDP": 0, "ICMP": 0}
+        self.protocol_stats = defaultdict(int)
         self.sent_packets = []
+        self.sessions = {}
         self.session_log = {}
 
         self._init_plot()
@@ -68,50 +67,53 @@ class PortDeceiver:
             options = options[:-1]
         return options
 
-    def match_custom_rule(self, proto, port=None, flags=None, icmp_type=None):
+    def apply_custom_rules(self, proto, port, flags=None, dscp=None):
         for rule in CUSTOM_RULES:
             if rule.get("proto", "").upper() != proto.upper():
                 continue
-            if "port" in rule and port != rule["port"]:
+            if rule.get("port") and rule["port"] != port:
                 continue
-            if "flags" in rule and flags != rule["flags"]:
+            if rule.get("flags") and rule["flags"] != flags:
                 continue
-            if "type" in rule and icmp_type != rule["type"]:
+            if rule.get("dscp") and rule["dscp"] != dscp:
                 continue
-            return rule
+
+            action = rule.get("action", "drop")
+            if rule.get("log"):
+                logger.info(rule["log"])
+            return action
         return None
 
-    def craft_response(self, src_ip, src_port, dst_port, flag, proto='tcp', icmp_type=None):
-        rule = self.match_custom_rule(proto, port=dst_port, flags=flag, icmp_type=icmp_type)
-        if rule:
-            if rule.get("log"):
-                logger.info(f"⚙️ Custom Rule: {rule['log']}")
-            if rule["action"] == "drop":
-                return None
-            if rule["action"] == "icmp_unreachable":
-                ether = Ether(src=self.local_mac)
-                ip = IP(src=self.local_ip, dst=src_ip, ttl=self.default_ttl)
-                icmp = ICMP(type=3, code=3)
-                return ether / ip / icmp / (ip / UDP(sport=src_port, dport=dst_port))[:28]
-
+    def craft_response(self, src_ip, src_port, dst_port, flag, proto='tcp', dscp=None):
         time.sleep(self.simulate_timing(dst_port))
         ether = Ether(src=self.local_mac)
-        ip = IP(src=self.local_ip, dst=src_ip, ttl=self.default_ttl)
+        ip = IP(src=self.local_ip, dst=src_ip, ttl=self.default_ttl, tos=(dscp or 0))
         if self.df_flag:
             ip.flags |= 0x2
 
         now = datetime.utcnow().isoformat()
         session_key = f"{src_ip}:{src_port}->{dst_port}"
 
+        # Check custom rules
+        rule_action = self.apply_custom_rules(proto, dst_port, flag, dscp)
+        if rule_action == "drop":
+            return None
+        elif rule_action == "rst":
+            rst = TCP(sport=dst_port, dport=src_port, flags='R', window=self.default_window)
+            self.session_log[session_key] = {"state": "rst", "time": now}
+            return ether / ip / rst
+        elif rule_action == "icmp_unreachable":
+            icmp = ICMP(type=3, code=3)
+            self.session_log[session_key] = {"state": "icmp-unreachable", "time": now}
+            return ether / ip / icmp / (ip / UDP(sport=src_port, dport=dst_port))[:28]
+
         if proto == 'tcp':
             if flag != 'S':
                 return None
             state = self.ports_config.get(dst_port, 'closed')
-            tcp = TCP(
-                sport=dst_port, dport=src_port,
-                flags='SA' if state == 'open' else 'R',
-                window=self.default_window
-            )
+            tcp = TCP(sport=dst_port, dport=src_port,
+                      flags='SA' if state == 'open' else 'R',
+                      window=self.default_window)
             options = []
             if self.mss_value:
                 options.append(('MSS', self.mss_value))
@@ -120,6 +122,7 @@ class PortDeceiver:
             if self.timestamp_enabled:
                 ts_val = int(time.time() * 1000) & 0xFFFFFFFF
                 options.append(('Timestamp', (ts_val, 0)))
+            if self.timestamp_enabled:
                 options.append(('SAckOK', ''))
             tcp.options = self.fuzz_tcp_options(options)
             self.session_log[session_key] = {"state": "half-open" if state == 'open' else "rejected", "time": now}
@@ -147,20 +150,22 @@ class PortDeceiver:
         def _handler(pkt):
             if pkt.haslayer(IP) and pkt[IP].dst == self.local_ip:
                 ip = pkt[IP]
+                dscp = ip.tos >> 2
                 response = None
 
                 if pkt.haslayer(TCP):
                     tcp = pkt[TCP]
-                    response = self.craft_response(ip.src, tcp.sport, tcp.dport, tcp.flags, proto='tcp')
+                    flag = tcp.sprintf("%TCP.flags%")
+                    response = self.craft_response(ip.src, tcp.sport, tcp.dport, flag, proto='tcp', dscp=dscp)
                     if response:
                         self.protocol_stats["TCP"] += 1
                 elif pkt.haslayer(UDP):
                     udp = pkt[UDP]
-                    response = self.craft_response(ip.src, udp.sport, udp.dport, 'S', proto='udp')
+                    response = self.craft_response(ip.src, udp.sport, udp.dport, 'S', proto='udp', dscp=dscp)
                     if response:
                         self.protocol_stats["UDP"] += 1
                 elif pkt.haslayer(ICMP) and pkt[ICMP].type == 8:
-                    response = self.craft_response(ip.src, 0, 0, 'S', proto='icmp', icmp_type=8)
+                    response = self.craft_response(ip.src, 0, 0, 'S', proto='icmp', dscp=dscp)
                     if response:
                         self.protocol_stats["ICMP"] += 1
 
