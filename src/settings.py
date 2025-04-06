@@ -28,6 +28,32 @@ L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
 
 # =======================
+# Customer Rule
+# =======================
+CUSTOM_RULES = [
+    {
+        "proto": "TCP",
+        "port": 80,
+        "flags": "S",
+        "action": "drop",  # or "respond", "template", "rst", etc.
+        "log": "🔒 Dropping TCP SYN to port 80"
+    },
+    {
+        "proto": "UDP",
+        "port": 53,
+        "action": "icmp_unreachable",
+        "log": "📛 Faking ICMP Unreachable for UDP 53"
+    },
+    {
+        "proto": "ICMP",
+        "type": 8,
+        "action": "template",
+        "log": "💬 Handling ICMP Echo using template"
+    }
+]
+
+
+# =======================
 # Network Interface Setup
 # =======================
 
