@@ -16,7 +16,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
         if proto_type == "TCP":
             pair = (src_ip, dst_ip, src_port, dst_port)
         elif proto_type == "ICMP":
-            pair = packet.l4_field.get("icmp_id", 0)
+            pair = packet.l4_field.get("ID", 0)
         elif proto_type == "ARP":
             pair = (src_ip, dst_ip)
         elif proto_type == "UDP":
@@ -26,7 +26,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
 
         # Incoming request
         if dst_ip == host_ip:
-            key = packet.get_signature(proto_type)  # ✅ Instance method call
+            key = packet.get_signature(proto_type)  # ✅ Correct usage
             pair_dict[pair] = key
             if key not in template_dict[proto_type]:
                 template_dict[proto_type][key] = None
@@ -34,7 +34,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
         # Outgoing response
         elif src_ip == host_ip and pair in pair_dict:
             if proto_type == "ICMP" and packet.l4_field.get("icmp_type") == 3:
-                key = packet.get_signature("UDP")  # Special case for ICMP port unreachable
+                key = packet.get_signature("UDP")  # ✅ Correct usage
                 if key not in template_dict["UDP"]:
                     template_dict["UDP"][key] = None
             else:
