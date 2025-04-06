@@ -31,44 +31,40 @@ try:
     from src.fingerprint_utils import gen_key
     from src.os_recorder import templateSynthesis
     from src.Packet import Packet
-    from src.settings import VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
+    from src.settings import VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES, CUSTOM_RULES
 except ImportError as e:
-    logging.error(f"❌ Import Error: {e}")
+    logging.error(f"\u274c Import Error: {e}")
     sys.exit(1)
 
 # --- Utilities ---
 def ensure_directory_exists(directory: str):
-    try:
-        os.makedirs(directory, exist_ok=True)
-        logging.info(f"📁 Ensured directory exists: {directory}")
-    except Exception as e:
-        logging.error(f"❌ Failed to create directory {directory}: {e}")
-        sys.exit(1)
+    os.makedirs(directory, exist_ok=True)
+    logging.info(f"\ud83d\udcc1 Ensured directory exists: {directory}")
 
 def validate_nic(nic: str):
     path = f"/sys/class/net/{nic}"
     if not os.path.exists(path):
-        logging.error(f"❌ Network interface {nic} not found.")
+        logging.error(f"\u274c Network interface {nic} not found.")
         sys.exit(1)
     try:
         mac = get_if_hwaddr(nic)
-        logging.info(f"✅ NIC {nic} MAC address: {mac}")
+        logging.info(f"\u2705 NIC {nic} MAC address: {mac}")
     except Exception as e:
-        logging.warning(f"⚠ Could not read MAC for NIC {nic}: {e}")
+        logging.warning(f"\u26a0 Could not read MAC for NIC {nic}: {e}")
 
     vlan = VLAN_MAP.get(nic)
     gateway = GATEWAY_MAP.get(nic)
     if vlan:
-        logging.info(f"🔷 VLAN Tag on {nic}: {vlan}")
+        logging.info(f"\ud83d\udd38 VLAN Tag on {nic}: {vlan}")
     if gateway:
-        logging.info(f"🔷 Gateway for {nic}: {gateway}")
+        logging.info(f"\ud83d\udd38 Gateway for {nic}: {gateway}")
 
 def set_promiscuous_mode(nic: str):
     try:
         subprocess.run(["ip", "link", "set", nic, "promisc", "on"], check=True)
-        logging.info(f"🔁 Promiscuous mode enabled for {nic}")
+        logging.info(f"\ud83d\udd01 Promiscuous mode enabled for {nic}")
     except subprocess.CalledProcessError as e:
-        logging.error(f"❌ Failed to enable promiscuous mode: {e}")
+        logging.error(f"\u274c Failed to enable promiscuous mode: {e}")
         sys.exit(1)
 
 def get_ip_for_nic(nic: str) -> str:
@@ -77,7 +73,7 @@ def get_ip_for_nic(nic: str) -> str:
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
     except Exception:
-        logging.warning("⚠ Fallback to 127.0.0.1 for host IP")
+        logging.warning("\u26a0 Fallback to 127.0.0.1 for host IP")
         return "127.0.0.1"
 
 # --- Template Builder ---
@@ -95,7 +91,7 @@ def collect_and_build_templates(host_ip, dest_path, nic):
         except Exception as e:
             logging.debug(f"Failed to parse packet: {e}")
 
-    logging.info(f"📡 Starting template learning on {nic} for 300s...")
+    logging.info(f"\ud83d\udcf1 Starting template learning on {nic} for 300s...")
     validate_nic(nic)
     set_promiscuous_mode(nic)
     time.sleep(1)
@@ -109,48 +105,45 @@ def collect_and_build_templates(host_ip, dest_path, nic):
         }
         with open(output_txt, "w") as f:
             json.dump(encoded, f, indent=2)
-        logging.info(f"📦 Saved {proto.upper()} templates to {output_txt}")
+        logging.info(f"\ud83d\udcc2 Saved {proto.upper()} templates to {output_txt}")
 
 # --- Main Entry ---
 def main():
-    parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak: OS & Port Deception Engine")
+    parser = argparse.ArgumentParser(description="\ud83d\udee1\ufe0f Camouflage Cloak: OS & Port Deception Engine")
     parser.add_argument("--host")
     parser.add_argument("--nic")
-    parser.add_argument("--scan", choices=["ts", "od", "pd"])
+    parser.add_argument("--scan", choices=["ts", "od", "pd", "replay", "interactive"])
     parser.add_argument("--os")
     parser.add_argument("--te", type=int)
     parser.add_argument("--status")
     parser.add_argument("--dest")
+    parser.add_argument("--profile")
     parser.add_argument("--list-os", action="store_true")
     parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
-        logging.debug("🔎 Debug logging enabled.")
+        logging.debug("\ud83d\udd0e Debug logging enabled.")
 
     if args.list_os:
-        print("\n🧠 Supported OS templates:")
+        print("\n\ud83e\uddf0 Supported OS templates:")
         for name in settings.BASE_OS_TEMPLATES:
             print(f"  - {name} (TTL={settings.BASE_OS_TEMPLATES[name]['ttl']}, Window={settings.BASE_OS_TEMPLATES[name]['window']})")
         return
 
-    # Default NIC
     if not args.nic:
         args.nic = settings.NIC_PROBE
-        logging.info(f"🔌 Defaulting to NIC: {args.nic}")
+        logging.info(f"\ud83d\udd0c Defaulting to NIC: {args.nic}")
 
     validate_nic(args.nic)
 
-    # Default host IP
     if not args.host:
         args.host = get_ip_for_nic(args.nic)
-        logging.info(f"🧠 Auto-detected host IP for NIC {args.nic}: {args.host}")
+        logging.info(f"\ud83e\udde0 Auto-detected host IP for NIC {args.nic}: {args.host}")
 
-    # MAC
     mac = get_if_hwaddr(args.nic)
 
-    # --- Handle modes ---
     if args.scan == "ts":
         dest_path = os.path.abspath(args.dest or settings.OS_RECORD_PATH)
         ensure_directory_exists(dest_path)
@@ -158,7 +151,7 @@ def main():
 
     elif args.scan == "od":
         if not args.os or args.te is None:
-            logging.error("❌ Missing --os or --te")
+            logging.error("\u274c Missing --os or --te")
             return
         record_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, args.os.lower()))
         deceiver = OsDeceiver(
@@ -167,16 +160,18 @@ def main():
             dest=record_path,
             nic=args.nic
         )
+        if args.profile:
+            deceiver.load_profile(args.profile)
         deceiver.os_deceive(timeout_minutes=args.te)
 
     elif args.scan == "pd":
         if not args.status or args.te is None:
-            logging.error("❌ Missing --status or --te")
+            logging.error("\u274c Missing --status or --te")
             return
         try:
             port_map = json.loads(args.status)
         except Exception as e:
-            logging.error(f"❌ Invalid --status JSON: {e}")
+            logging.error(f"\u274c Invalid --status JSON: {e}")
             return
         deceiver = PortDeceiver(
             interface_ip=args.host,
@@ -186,6 +181,45 @@ def main():
             mac=mac
         )
         deceiver.run()
+
+    elif args.scan == "replay":
+        if not args.os:
+            logging.error("\u274c --os is required for --replay mode")
+            return
+        record_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, args.os.lower()))
+        deceiver = OsDeceiver(
+            target_host=args.host,
+            target_os=args.os,
+            dest=record_path,
+            nic=args.nic
+        )
+        deceiver.replay_templates()
+
+    elif args.scan == "interactive":
+        print("\n🛠️ Entering interactive rule editor...")
+        from src.settings import CUSTOM_RULES
+        import pprint
+        while True:
+            pprint.pprint(CUSTOM_RULES)
+            cmd = input("Edit rule [add/del/show/exit]> ").strip()
+            if cmd == "exit":
+                break
+            elif cmd == "show":
+                pprint.pprint(CUSTOM_RULES)
+            elif cmd.startswith("add"):
+                try:
+                    rule = json.loads(cmd[3:].strip())
+                    CUSTOM_RULES.append(rule)
+                    print("✅ Rule added.")
+                except Exception as e:
+                    print(f"❌ Failed to parse rule: {e}")
+            elif cmd.startswith("del"):
+                try:
+                    index = int(cmd[3:].strip())
+                    CUSTOM_RULES.pop(index)
+                    print("✅ Rule deleted.")
+                except Exception as e:
+                    print(f"❌ Invalid index: {e}")
 
 if __name__ == '__main__':
     main()
