@@ -1,14 +1,17 @@
 import logging
 import random
 import time
-from scapy.all import IP, TCP, UDP, ICMP, send, sniff
-from settings import get_os_fingerprint
+import socket
+from scapy.all import IP, TCP, UDP, ICMP, send, sniff, get_if_addr
+from settings import get_os_fingerprint, get_mac_address
 
 logger = logging.getLogger(__name__)
 
 class PortDeceiver:
-    def __init__(self, interface_ip, os_name=None, ports_config=None):
-        self.local_ip = interface_ip
+    def __init__(self, interface_ip=None, nic=None, os_name=None, ports_config=None):
+        self.nic = nic
+        self.local_ip = interface_ip or get_if_addr(nic)
+        self.mac = get_mac_address(nic) if nic else None
         self.os_name = os_name
         self.ports_config = ports_config or {}
 
@@ -25,6 +28,8 @@ class PortDeceiver:
         self.timestamp_enabled = fingerprint.get('timestamp', False) or fingerprint.get('ts', False)
 
         self.sessions = {}
+
+        logger.info(f"🧩 PortDeceiver initialized on NIC='{self.nic}' IP={self.local_ip} MAC={self.mac}")
 
     def craft_response(self, src_ip, src_port, dst_port, flag, proto='tcp'):
         delay = self.simulate_timing(dst_port)
