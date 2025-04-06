@@ -211,3 +211,19 @@ def print_interface_summary():
             logging.info(f"🔌 NIC: {nic} | IP: {ip} | MAC: {mac} | GW: {gw} | VLAN: {vlan}")
         except Exception as e:
             logging.warning(f"⚠ Failed to load NIC '{nic}': {e}")
+
+def get_ip_from_nic(nic: str) -> str:
+    import socket
+    import fcntl
+    import struct
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        return socket.inet_ntoa(fcntl.ioctl(
+            s.fileno(),
+            0x8915,  # SIOCGIFADDR
+            struct.pack('256s', nic.encode('utf-8')[:15])
+        )[20:24])
+    except Exception as e:
+        logging.warning(f"⚠ Failed to get IP for NIC '{nic}': {e}")
+        return None
