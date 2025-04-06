@@ -129,24 +129,25 @@ class OsDeceiver:
                 options.append(("NOP", None))
         return options
 
-    def match_custom_rule(self, pkt: Packet, proto: str):
+    def apply_custom_rules(self, pkt: Packet, proto: str) -> str:
         for rule in CUSTOM_RULES:
-            if rule.get("proto", "").upper() != proto.upper():
+            if rule.get("proto", "").lower() != proto.lower():
                 continue
-            if "port" in rule:
-                port = pkt.l4_field.get("dest_port")
-                if port != rule["port"]:
-                    continue
-            if "flags" in rule:
-                flags = pkt.l4_field.get("flags")
-                if flags != rule["flags"]:
-                    continue
-            if "type" in rule:
-                icmp_type = pkt.l4_field.get("icmp_type")
-                if icmp_type != rule["type"]:
-                    continue
-            return rule
-        return None
+            port = pkt.l4_field.get("dest_port")
+            flags = pkt.l4_field.get("flags")
+            icmp_type = pkt.l4_field.get("icmp_type")
+            dscp = pkt.l3_field.get("TYPE_OF_SERVICE")
+
+            if proto == "tcp" and rule.get("port") == port and rule.get("flags") == chr(flags):
+                logging.info(rule.get("log", "Matched TCP rule"))
+                return rule.get("action", "")
+            elif proto == "udp" and rule.get("port") == port:
+                logging.info(rule.get("log", "Matched UDP rule"))
+                return rule.get("action", "")
+            elif proto == "icmp" and rule.get("type") == icmp_type:
+                logging.info(rule.get("log", "Matched ICMP rule"))
+                return rule.get("action", "")
+        return ""
 
     def os_deceive(self, timeout_minutes: int = 5):
         logging.info("🌀 Starting OS deception loop...")
@@ -165,19 +166,17 @@ class OsDeceiver:
                 proto = pkt.l4 if pkt.l4 else pkt.l3
                 self.track_ip_state(ip_str, proto)
 
-                rule = self.match_custom_rule(pkt, proto)
-                if rule:
-                    logging.info(f"⚙️ Custom Rule: {rule.get('log')}")
-                    if rule["action"] == "drop":
-                        continue
-                    elif rule["action"] == "icmp_unreachable":
-                        self.send_icmp_port_unreachable(pkt)
-                        continue
-                    elif rule["action"] == "rst":
-                        self.send_tcp_rst(pkt)
-                        continue
-
                 if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
+                    continue
+
+                action = self.apply_custom_rules(pkt, proto)
+                if action == "drop":
+                    continue
+                elif action == "rst":
+                    self.send_tcp_rst(pkt)
+                    continue
+                elif action == "icmp_unreachable":
+                    self.send_icmp_port_unreachable(pkt)
                     continue
 
                 key, _ = gen_key(proto, pkt.packet)
@@ -226,12 +225,31 @@ class OsDeceiver:
         self.export_sent_packets()
 
     def send_tcp_rst(self, pkt: Packet):
-        # Placeholder for TCP RST response
-        pass
+        try:
+            ether = Ether(src=self.mac)
+            ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=self.ttl)
+            tcp = TCP(
+                sport=pkt.l4_field['dest_port'],
+                dport=pkt.l4_field['src_port'],
+                flags='R',
+                seq=pkt.l4_field.get('ack_num', 0)
+            )
+            rst_pkt = ether / ip / tcp
+            self.conn.sock.send(bytes(rst_pkt))
+            logging.debug("🚫 Sent TCP RST packet")
+        except Exception as e:
+            logging.warning(f"⚠ Failed to send TCP RST: {e}")
 
     def send_icmp_port_unreachable(self, pkt: Packet):
-        # Placeholder for ICMP Port Unreachable
-        pass
+        try:
+            ether = Ether(src=self.mac)
+            ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=self.ttl)
+            icmp = ICMP(type=3, code=3)  # Port unreachable
+            unreachable = ether / ip / icmp / bytes(pkt.packet[:28])
+            self.conn.sock.send(bytes(unreachable))
+            logging.debug("🚫 Sent ICMP Port Unreachable")
+        except Exception as e:
+            logging.warning(f"⚠ Failed to send ICMP Unreachable: {e}")
 
     def load_file(self, proto):
         filename = os.path.join(self.os_record_path, f"{proto}_record.txt")
