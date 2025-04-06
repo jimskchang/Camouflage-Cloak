@@ -1,54 +1,19 @@
-"""
-This __init__.py file makes the 'src' directory a Python package.
-It allows importing modules from 'src' such as settings, tcp, port_deceiver, os_deceiver, and Packet.
+# src/__init__.py
 
-Enhancements:
-- Proper exception handling for missing dependencies.
-- Exposed key classes and functions for simplified imports.
-- Ensured modules load properly even if dependencies are missing.
-"""
-
-import logging
-
-__all__ = []
-missing_modules = []
-
-try:
-    from . import settings
-    __all__.append("settings")
-except ImportError:
-    missing_modules.append("settings")
-
-try:
-    from . import tcp
-    from .tcp import TcpConnect, getTCPChecksum, getIPChecksum, byte2mac, byte2ip
-    __all__.extend(["tcp", "TcpConnect", "getTCPChecksum", "getIPChecksum", "byte2mac", "byte2ip"])
-except ImportError:
-    missing_modules.append("tcp")
-
-try:
-    from . import port_deceiver
-    from .port_deceiver import PortDeceiver
-    __all__.extend(["port_deceiver", "PortDeceiver"])
-except ImportError:
-    missing_modules.append("port_deceiver")
-
-try:
-    from . import os_deceiver
-    from .os_deceiver import OsDeceiver
-    __all__.extend(["os_deceiver", "OsDeceiver"])
-except ImportError:
-    missing_modules.append("os_deceiver")
-
-try:
-    from . import Packet
-    from .Packet import Packet as PacketClass
-    Packet = PacketClass
-    __all__.extend(["Packet"])
-except ImportError:
-    missing_modules.append("Packet")
-
-if missing_modules:
-    logging.warning(f"⚠ Some modules failed to import: {missing_modules}")
-else:
-    logging.info("✅ All src package modules imported successfully.")
+from .tcp import TcpConnect, getTCPChecksum, getIPChecksum
+from .Packet import Packet
+from .settings import (
+    get_mac_address,
+    get_os_fingerprint,
+    CUSTOM_RULES,
+    BASE_OS_TEMPLATES,
+    list_all_templates,
+    print_interface_summary,
+    MAC,
+    NIC_TARGET,
+    NIC_PROBE,
+    VLAN_MAP,
+    GATEWAY_MAP
+)
+from .response import synthesize_response
+from .fingerprint_utils import gen
