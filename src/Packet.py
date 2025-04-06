@@ -3,6 +3,7 @@ import socket
 import struct
 import array
 import src.settings as settings
+from src.fingerprint_utils import generateKey
 
 class Packet:
     def __init__(self, packet=b'', proc=None, l2_field=None, l3_field=None, l4_field=None, data='', ttl=None, window=None):
