@@ -20,7 +20,7 @@ from src.settings import get_os_fingerprint, get_mac_address
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
-from src.fingerprint_utils import gen_key, generateKey
+from src.fingerprint_utils import generateKey
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -149,7 +149,7 @@ class OsDeceiver:
                 if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
                     continue
 
-                key, _ = gen_key(proto, pkt.packet)
+                key = pkt.get_signature(proto.upper())
                 template = templates.get(proto, {}).get(key)
 
                 if not template:
@@ -181,7 +181,7 @@ class OsDeceiver:
                     self.send_tcp_rst(pkt)
 
                 if settings.AUTO_LEARN_MISSING:
-                    logging.info(f"🧠 Learning new {proto.upper()} template")
+                    logging.info(f"🥠 Learning new {proto.upper()} template")
                     templates[proto][key] = pkt.packet
                     self.save_record(proto, templates[proto])
                 elif DEBUG_MODE:
