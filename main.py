@@ -6,8 +6,8 @@ import sys
 import subprocess
 import json
 import base64
-import getpass
-
+import socket
+from collections import defaultdict
 from scapy.all import sniff, wrpcap, rdpcap
 
 # --- Ensure src is in sys.path ---
@@ -29,12 +29,25 @@ try:
     from src.port_deceiver import PortDeceiver
     from src.os_deceiver import OsDeceiver
     from src.fingerprint_utils import gen_key
-    from src.os_recorder import templateSynthesis  # <-- new import
+    from src.os_recorder import templateSynthesis
     from src.Packet import Packet
     from src.settings import MAC, VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
 except ImportError as e:
     logging.error(f"\u274c Import Error: {e}")
     sys.exit(1)
+
+# --- Cross-platform NIC detection ---
+def get_interface_ip_map():
+    ip_map = {}
+    try:
+        hostname = socket.gethostname()
+        host_ips = socket.gethostbyname_ex(hostname)[2]
+        for ip in host_ips:
+            if not ip.startswith("127."):
+                ip_map[f"interface_{len(ip_map)}"] = ip
+    except Exception as e:
+        logging.warning(f"\u26a0 NIC auto-detection failed: {e}")
+    return ip_map
 
 # --- Utility Functions ---
 def ensure_directory_exists(directory: str):
@@ -82,7 +95,6 @@ def set_promiscuous_mode(nic: str):
 
 # --- New function for --scan ts using os_recorder ---
 def collect_and_build_templates(host_ip, dest_path, nic):
-    from collections import defaultdict
     template_dict = defaultdict(dict)
     pair_dict = {}
 
@@ -137,16 +149,23 @@ def main():
             print(f"  - {name} (TTL={settings.BASE_OS_TEMPLATES[name]['ttl']}, Window={settings.BASE_OS_TEMPLATES[name]['window']})")
         return
 
-    if not args.nic or not args.scan:
-        logging.error("\u274c Missing required arguments: --nic and --scan")
-        parser.print_help()
-        return
+    # Auto fallback for NIC
+    if not args.nic:
+        args.nic = settings.NIC_PROBE
+        logging.info(f"\ud83d\udd0c Defaulting to NIC: {args.nic}")
 
     validate_nic(args.nic)
 
+    # Auto-detect IP for given NIC (fallback method)
     if not args.host:
-        args.host = settings.IP_PROBE if args.nic == settings.NIC_PROBE else settings.IP_TARGET
-        logging.info(f"\ud83e\udde0 Auto-detected host IP: {args.host}")
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                args.host = s.getsockname()[0]
+                logging.info(f"\ud83e\udde0 Auto-detected host IP from NIC: {args.host}")
+        except Exception:
+            logging.warning("\u26a0 Could not auto-detect host IP, defaulting to 127.0.0.1")
+            args.host = "127.0.0.1"
 
     if args.scan == "ts":
         dest_path = os.path.abspath(args.dest or settings.OS_RECORD_PATH)
