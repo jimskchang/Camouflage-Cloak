@@ -1,4 +1,5 @@
 # src/os_recorder.py
+
 import logging
 from datetime import datetime
 
@@ -8,6 +9,8 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
     key, TTL, window, options, VLAN, TCP flags, timestamps.
     """
     try:
+        from src.Packet import Packet  # 👈 LOCAL IMPORT to avoid circular import
+
         src_ip = packet.l3_field.get("src_IP_str")
         dst_ip = packet.l3_field.get("dest_IP_str")
         src_port = packet.l4_field.get("src_port")
@@ -21,9 +24,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
         options = packet.l4_field.get("option_field") if proto_type == "TCP" else {}
 
         # Define packet pair
-        if proto_type == "TCP":
-            pair = (src_ip, dst_ip, src_port, dst_port)
-        elif proto_type == "UDP":
+        if proto_type in ("TCP", "UDP"):
             pair = (src_ip, dst_ip, src_port, dst_port)
         elif proto_type == "ICMP":
             pair = packet.l4_field.get("ID", 0)
@@ -34,7 +35,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
 
         # Incoming request
         if dst_ip == host_ip:
-            key = packet.get_signature(proto_type)  # ✅ Instance method
+            key = packet.get_signature(proto_type)
             pair_dict[pair] = key
             if key not in template_dict[proto_type]:
                 template_dict[proto_type][key] = None
@@ -47,7 +48,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
         # Outgoing response
         elif src_ip == host_ip and pair in pair_dict:
             if proto_type == "ICMP" and packet.l4_field.get("icmp_type") == 3:
-                key = packet.get_signature("UDP")  # ✅ Correct fallback key
+                key = packet.get_signature("UDP")
                 if key not in template_dict["UDP"]:
                     template_dict["UDP"][key] = None
                     logging.debug(
@@ -63,6 +64,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
                     f"Window: {window} | TCP Flags: {flags} | "
                     f"Options: {options} | Data: {hex_preview}"
                 )
+
         return template_dict
 
     except Exception as e:
