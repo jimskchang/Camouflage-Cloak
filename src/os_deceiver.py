@@ -16,11 +16,11 @@ import matplotlib.animation as animation
 from scapy.all import IP, TCP, ICMP, Ether, wrpcap, get_if_addr
 
 import src.settings as settings
-from src.settings import get_os_fingerprint, get_mac_address
+from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
-from src.fingerprint_utils import generateKey
+from src.fingerprint_utils import gen_key, generateKey
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -129,6 +129,24 @@ class OsDeceiver:
                 options.append(("NOP", None))
         return options
 
+    def check_custom_rules(self, proto, packet):
+        for rule in CUSTOM_RULES:
+            if rule.get("proto", "").lower() != proto.lower():
+                continue
+            if proto == "tcp":
+                if packet.l4_field.get("dest_port") != rule.get("port"):
+                    continue
+                if packet.l4_field.get("flags") != rule.get("flags"):
+                    continue
+            elif proto == "udp":
+                if packet.l4_field.get("dest_port") != rule.get("port"):
+                    continue
+            elif proto == "icmp":
+                if packet.l4_field.get("icmp_type") != rule.get("type"):
+                    continue
+            return rule
+        return None
+
     def os_deceive(self, timeout_minutes: int = 5):
         logging.info("🌀 Starting OS deception loop...")
         templates = {ptype: self.load_file(ptype) for ptype in ["tcp", "icmp", "udp", "arp"]}
@@ -146,10 +164,24 @@ class OsDeceiver:
                 proto = pkt.l4 if pkt.l4 else pkt.l3
                 self.track_ip_state(ip_str, proto)
 
+                rule = self.check_custom_rules(proto, pkt)
+                if rule:
+                    logging.info(rule.get("log", "🛠 Custom rule matched"))
+                    if rule["action"] == "drop":
+                        continue
+                    elif rule["action"] == "icmp_unreachable":
+                        self.send_icmp_port_unreachable(pkt)
+                        continue
+                    elif rule["action"] == "rst":
+                        self.send_tcp_rst(pkt)
+                        continue
+                    elif rule["action"] == "template":
+                        pass  # fall through to template matching
+
                 if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
                     continue
 
-                key = pkt.get_signature(proto.upper())
+                key, _ = gen_key(proto, pkt.packet)
                 template = templates.get(proto, {}).get(key)
 
                 if not template:
@@ -181,7 +213,7 @@ class OsDeceiver:
                     self.send_tcp_rst(pkt)
 
                 if settings.AUTO_LEARN_MISSING:
-                    logging.info(f"🥠 Learning new {proto.upper()} template")
+                    logging.info(f"🧠 Learning new {proto.upper()} template")
                     templates[proto][key] = pkt.packet
                     self.save_record(proto, templates[proto])
                 elif DEBUG_MODE:
