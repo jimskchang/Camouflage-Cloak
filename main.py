@@ -8,22 +8,22 @@ import json
 import base64
 import socket
 from collections import defaultdict
-from scapy.all import sniff, wrpcap, rdpcap, get_if_hwaddr
+from scapy.all import sniff, wrpcap, get_if_hwaddr
 
-# --- Ensure src is in sys.path ---
+# --- Setup path ---
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(BASE_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# --- Initial Basic Logging ---
+# --- Logging ---
 logging.basicConfig(
     format='%(asctime)s [%(levelname)s]: %(message)s',
     datefmt='%-y-%m-%d %H:%M:%S',
     level=logging.INFO
 )
 
-# --- Safe Imports ---
+# --- Imports ---
 try:
     import src.settings as settings
     from src.port_deceiver import PortDeceiver
@@ -33,42 +33,42 @@ try:
     from src.Packet import Packet
     from src.settings import VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
 except ImportError as e:
-    logging.error(f"\u274c Import Error: {e}")
+    logging.error(f"❌ Import Error: {e}")
     sys.exit(1)
 
-# --- Utility Functions ---
+# --- Utilities ---
 def ensure_directory_exists(directory: str):
     try:
         os.makedirs(directory, exist_ok=True)
-        logging.info(f"\ud83d\udcc1 Ensured directory exists: {directory}")
+        logging.info(f"📁 Ensured directory exists: {directory}")
     except Exception as e:
-        logging.error(f"\u274c Failed to create directory {directory}: {e}")
+        logging.error(f"❌ Failed to create directory {directory}: {e}")
         sys.exit(1)
 
 def validate_nic(nic: str):
     path = f"/sys/class/net/{nic}"
     if not os.path.exists(path):
-        logging.error(f"\u274c Network interface {nic} not found.")
+        logging.error(f"❌ Network interface {nic} not found.")
         sys.exit(1)
     try:
         mac = get_if_hwaddr(nic)
-        logging.info(f"\u2705 NIC {nic} MAC address: {mac}")
+        logging.info(f"✅ NIC {nic} MAC address: {mac}")
     except Exception as e:
-        logging.warning(f"\u26a0 Could not read MAC address for NIC {nic}: {e}")
+        logging.warning(f"⚠ Could not read MAC for NIC {nic}: {e}")
 
     vlan = VLAN_MAP.get(nic)
     gateway = GATEWAY_MAP.get(nic)
     if vlan:
-        logging.info(f"\ud83d\udd38 VLAN Tag on {nic}: {vlan}")
+        logging.info(f"🔷 VLAN Tag on {nic}: {vlan}")
     if gateway:
-        logging.info(f"\ud83d\udd38 Gateway for {nic}: {gateway}")
+        logging.info(f"🔷 Gateway for {nic}: {gateway}")
 
 def set_promiscuous_mode(nic: str):
     try:
         subprocess.run(["ip", "link", "set", nic, "promisc", "on"], check=True)
-        logging.info(f"\ud83d\udd01 Promiscuous mode enabled for {nic}")
+        logging.info(f"🔁 Promiscuous mode enabled for {nic}")
     except subprocess.CalledProcessError as e:
-        logging.error(f"\u274c Failed to set promiscuous mode: {e}")
+        logging.error(f"❌ Failed to enable promiscuous mode: {e}")
         sys.exit(1)
 
 def get_ip_for_nic(nic: str) -> str:
@@ -77,9 +77,10 @@ def get_ip_for_nic(nic: str) -> str:
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
     except Exception:
+        logging.warning("⚠ Fallback to 127.0.0.1 for host IP")
         return "127.0.0.1"
 
-# --- Template Learning ---
+# --- Template Builder ---
 def collect_and_build_templates(host_ip, dest_path, nic):
     template_dict = defaultdict(dict)
     pair_dict = {}
@@ -94,7 +95,7 @@ def collect_and_build_templates(host_ip, dest_path, nic):
         except Exception as e:
             logging.debug(f"Failed to parse packet: {e}")
 
-    logging.info(f"\ud83d\udcf1 Starting template learning on {nic} for 300s...")
+    logging.info(f"📡 Starting template learning on {nic} for 300s...")
     validate_nic(nic)
     set_promiscuous_mode(nic)
     time.sleep(1)
@@ -108,11 +109,11 @@ def collect_and_build_templates(host_ip, dest_path, nic):
         }
         with open(output_txt, "w") as f:
             json.dump(encoded, f, indent=2)
-        logging.info(f"\ud83d\udcc2 Saved {proto.upper()} templates to {output_txt}")
+        logging.info(f"📦 Saved {proto.upper()} templates to {output_txt}")
 
-# --- Main Logic ---
+# --- Main Entry ---
 def main():
-    parser = argparse.ArgumentParser(description="\ud83d\udee1\ufe0f Camouflage Cloak: OS & Port Deception Engine")
+    parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak: OS & Port Deception Engine")
     parser.add_argument("--host")
     parser.add_argument("--nic")
     parser.add_argument("--scan", choices=["ts", "od", "pd"])
@@ -122,31 +123,34 @@ def main():
     parser.add_argument("--dest")
     parser.add_argument("--list-os", action="store_true")
     parser.add_argument("--debug", action="store_true")
-
     args = parser.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
-        logging.debug("\ud83d\udd0e Debug logging enabled.")
+        logging.debug("🔎 Debug logging enabled.")
 
     if args.list_os:
-        print("\n\ud83e\uddf0 Supported OS templates:")
+        print("\n🧠 Supported OS templates:")
         for name in settings.BASE_OS_TEMPLATES:
             print(f"  - {name} (TTL={settings.BASE_OS_TEMPLATES[name]['ttl']}, Window={settings.BASE_OS_TEMPLATES[name]['window']})")
         return
 
+    # Default NIC
     if not args.nic:
         args.nic = settings.NIC_PROBE
-        logging.info(f"\ud83d\udd0c Defaulting to NIC: {args.nic}")
+        logging.info(f"🔌 Defaulting to NIC: {args.nic}")
 
     validate_nic(args.nic)
 
+    # Default host IP
     if not args.host:
         args.host = get_ip_for_nic(args.nic)
-        logging.info(f"\ud83e\udde0 Auto-detected host IP for NIC {args.nic}: {args.host}")
+        logging.info(f"🧠 Auto-detected host IP for NIC {args.nic}: {args.host}")
 
+    # MAC
     mac = get_if_hwaddr(args.nic)
 
+    # --- Handle modes ---
     if args.scan == "ts":
         dest_path = os.path.abspath(args.dest or settings.OS_RECORD_PATH)
         ensure_directory_exists(dest_path)
@@ -154,7 +158,7 @@ def main():
 
     elif args.scan == "od":
         if not args.os or args.te is None:
-            logging.error("\u274c Missing --os or --te")
+            logging.error("❌ Missing --os or --te")
             return
         record_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, args.os.lower()))
         deceiver = OsDeceiver(
@@ -167,12 +171,17 @@ def main():
 
     elif args.scan == "pd":
         if not args.status or args.te is None:
-            logging.error("\u274c Missing --status or --te")
+            logging.error("❌ Missing --status or --te")
+            return
+        try:
+            port_map = json.loads(args.status)
+        except Exception as e:
+            logging.error(f"❌ Invalid --status JSON: {e}")
             return
         deceiver = PortDeceiver(
             interface_ip=args.host,
             os_name=args.os,
-            ports_config=json.loads(args.status) if args.status else {},
+            ports_config=port_map,
             nic=args.nic,
             mac=mac
         )
