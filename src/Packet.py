@@ -23,12 +23,23 @@ class Packet:
 
     def unpack(self) -> None:
         try:
-            self.unpack_l2_header()
-            self.unpack_l3_header(self.l3)
-            if self.l4:
-                self.unpack_l4_header(self.l4)
+            self.setL2Header(self.packet)
+            self.setL3Header(self.packet)
+            self.setL4Header(self.packet)
         except Exception as e:
             logging.error(f"[Packet] General unpack error: {e}")
+
+    def setL2Header(self, raw_packet: bytes):
+        self.packet = raw_packet
+        self.unpack_l2_header()
+
+    def setL3Header(self, raw_packet: bytes):
+        self.packet = raw_packet
+        self.unpack_l3_header(self.l3)
+
+    def setL4Header(self, raw_packet: bytes):
+        self.packet = raw_packet
+        self.unpack_l4_header(self.l4)
 
     def unpack_l2_header(self) -> None:
         if len(self.packet) < settings.ETH_HEADER_LEN:
@@ -113,6 +124,8 @@ class Packet:
                 'check_sum_of_hdr': fields[7],
                 'src_IP': fields[8],
                 'dest_IP': fields[9],
+                'src_IP_str': socket.inet_ntoa(fields[8]),
+                'dest_IP_str': socket.inet_ntoa(fields[9]),
                 'options': self.packet[start + 20:start + ihl * 4] if ihl > 5 else b''
             }
         except Exception as e:
@@ -189,8 +202,6 @@ class Packet:
             }
         except Exception as e:
             logging.error(f"[ICMP] Error unpacking: {e}")
-
-    # Add enhanced .pack() if needed
 
     @staticmethod
     def getTCPChecksum(packet: bytes) -> int:
