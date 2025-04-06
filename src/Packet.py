@@ -55,10 +55,12 @@ class Packet:
             return
         try:
             eth_dMAC, eth_sMAC, eth_type = struct.unpack('!6s6sH', self.packet[:14])
+
             if eth_type == 0x8100 and len(self.packet) >= 18:
                 vlan_tag = struct.unpack('!H', self.packet[14:16])[0]
                 real_eth_type = struct.unpack('!H', self.packet[16:18])[0]
                 vlan_id = vlan_tag & 0x0FFF
+
                 self.l2_field = {
                     'dMAC': eth_dMAC,
                     'sMAC': eth_sMAC,
@@ -224,6 +226,6 @@ class Packet:
         if len(data) % 2:
             data += b'\0'
         for i in range(0, len(data), 2):
-            checksum += (data[i] << 8) + data[i + 1]
+            checksum += (data[i] << 8) + data[i+1]
         checksum = (checksum >> 16) + (checksum & 0xFFFF)
         return ~checksum & 0xFFFF
