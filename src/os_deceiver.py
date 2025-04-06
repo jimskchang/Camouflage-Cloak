@@ -3,10 +3,15 @@ import json
 import base64
 import logging
 import socket
+import struct
 import time
 import random
 from datetime import datetime, timedelta
+from typing import Dict
 from collections import defaultdict
+import threading
+import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 
 from scapy.all import IP, TCP, ICMP, Ether, wrpcap
 
@@ -15,11 +20,10 @@ from src.settings import get_os_fingerprint
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
-from src.fingerprint_utils import gen_key, generateKey
+from src.fingerprint_utils import gen_key
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
-PCAP_OUTPUT_PATH = "/mnt/data/camouflage_cloak_output/deceptive_responses.pcap"
 
 class OsDeceiver:
     def __init__(self, target_host: str, target_os: str, dest=None, nic: str = None):
@@ -33,16 +37,15 @@ class OsDeceiver:
             logging.error(f"❌ NIC '{self.nic}' not found.")
             raise ValueError(f"NIC '{self.nic}' does not exist.")
 
+        mac_path = f"/sys/class/net/{self.nic}/address"
         try:
-            with open(f"/sys/class/net/{self.nic}/address", "r") as f:
+            with open(mac_path, "r") as f:
                 mac = f.read().strip()
                 logging.info(f"✅ Using MAC address {mac} for NIC '{self.nic}'")
         except Exception as e:
             logging.warning(f"⚠️ Unable to read MAC address: {e}")
 
         os.makedirs(self.os_record_path, exist_ok=True)
-        os.makedirs(os.path.dirname(PCAP_OUTPUT_PATH), exist_ok=True)
-
         self.conn = TcpConnect(self.host, nic=self.nic)
 
         os_template = get_os_fingerprint(self.os)
@@ -65,20 +68,41 @@ class OsDeceiver:
         self.ip_id_counter = 0
         self.ip_state = {}
         self.timestamp_base = {}
-        self.response_stats = defaultdict(lambda: defaultdict(int))
-        self.sent_responses = []
+        self.protocol_stats = defaultdict(int)
+        self.sent_packets = []
 
         logging.info(f"🎭 TTL/Window/IPID -> TTL={self.ttl}, Window={self.window}, IPID={self.ipid_mode}")
+        logging.info(f"🧬 TCP Options: {self.tcp_options}")
         logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
         logging.info(f"📁 Using OS template path: {self.os_record_path}")
+
+        self._init_plot()
+
+    def _init_plot(self):
+        self.fig, self.ax = plt.subplots()
+        self.line, = self.ax.plot([], [], lw=2)
+        self.ani = animation.FuncAnimation(
+            self.fig, self._update_plot, interval=1000, blit=False)
+        threading.Thread(target=plt.show, daemon=True).start()
+
+    def _update_plot(self, frame):
+        self.ax.clear()
+        labels = list(self.protocol_stats.keys())
+        values = [self.protocol_stats[l] for l in labels]
+        self.ax.bar(labels, values)
+        self.ax.set_title("Live Deception Packet Count")
+        self.ax.set_ylabel("Packets Sent")
+        self.ax.set_ylim(0, max(values + [1]))
 
     def get_timestamp(self, ip: str):
         now = time.time()
         if ip not in self.timestamp_base:
-            self.timestamp_base[ip] = int(now - random.uniform(1, 10))
-        return int((now - self.timestamp_base[ip]) * 1000)
+            base = int(now - random.uniform(1, 10))
+            self.timestamp_base[ip] = base
+        drifted = int((now - self.timestamp_base[ip]) * 1000)
+        return drifted
 
-    def get_ip_id(self) -> int:
+    def get_ip_id(self, ip: str = "") -> int:
         if self.ipid_mode == "increment":
             self.ip_id_counter = (self.ip_id_counter + 1) % 65536
             return self.ip_id_counter
@@ -103,52 +127,6 @@ class OsDeceiver:
             elif opt == "NOP":
                 options.append(("NOP", None))
         return options
-
-    def send_tcp_rst(self, pkt: Packet):
-        try:
-            ip = IP(
-                src=pkt.l3_field.get("dest_IP_str"),
-                dst=pkt.l3_field.get("src_IP_str"),
-                ttl=self.ttl,
-                id=self.get_ip_id(),
-                tos=self.os_flags.get("tos", 0),
-                options=self.os_flags.get("ip_options", b"")
-            )
-            if self.os_flags.get("df"):
-                ip.flags = "DF"
-
-            tcp = TCP(
-                sport=pkt.l4_field.get("dest_port", 1234),
-                dport=pkt.l4_field.get("src_port", 1234),
-                flags="R",
-                seq=random.randint(0, 4294967295),
-                reserved=self.os_flags.get("reserved", 0)
-            )
-            ether = Ether(dst=pkt.l2_field.get("sMAC", b""), src=pkt.l2_field.get("dMAC", b""))
-            raw = ether / ip / tcp
-            self.conn.sock.send(bytes(raw))
-            self.sent_responses.append(raw)
-            logging.info(f"🚫 Sent TCP RST to {ip.dst}:{tcp.dport}")
-        except Exception as e:
-            logging.error(f"❌ Failed to send TCP RST: {e}")
-
-    def send_icmp_port_unreachable(self, pkt: Packet):
-        try:
-            data = pkt.packet[14:42]
-            ip = IP(
-                src=pkt.l3_field.get("dest_IP_str"),
-                dst=pkt.l3_field.get("src_IP_str"),
-                ttl=self.ttl,
-                id=self.get_ip_id()
-            )
-            icmp = ICMP(type=3, code=3)
-            ether = Ether(dst=pkt.l2_field.get("sMAC", b""), src=pkt.l2_field.get("dMAC", b""))
-            raw = ether / ip / icmp / data
-            self.conn.sock.send(bytes(raw))
-            self.sent_responses.append(raw)
-            logging.info(f"🚫 Sent ICMP Port Unreachable to {ip.dst}")
-        except Exception as e:
-            logging.error(f"❌ Failed to send ICMP Port Unreachable: {e}")
 
     def os_deceive(self, timeout_minutes: int = 5):
         logging.info("🌀 Starting OS deception loop...")
@@ -195,8 +173,8 @@ class OsDeceiver:
                         response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window, deceiver=self)
                         if response:
                             self.conn.sock.send(response)
-                            self.sent_responses.append(response)
-                            self.response_stats[ip_str][proto] += 1
+                            self.protocol_stats[proto.upper()] += 1
+                            self.sent_packets.append(response)
                             counter += 1
                             logging.info(f"📤 Sent {proto.upper()} response #{counter}")
                         continue
@@ -218,7 +196,7 @@ class OsDeceiver:
                 logging.error(f"❌ Error in deception loop: {e}")
 
         self.export_state_log()
-        self.export_pcap()
+        self.export_sent_packets()
 
     def load_file(self, proto):
         filename = os.path.join(self.os_record_path, f"{proto}_record.txt")
@@ -246,13 +224,13 @@ class OsDeceiver:
         except Exception as e:
             logging.warning(f"⚠ Failed to export IP state: {e}")
 
-    def export_pcap(self):
+    def export_sent_packets(self):
         try:
-            if self.sent_responses:
-                wrpcap(PCAP_OUTPUT_PATH, self.sent_responses)
-                logging.info(f"💾 Exported {len(self.sent_responses)} deceptive packets to {PCAP_OUTPUT_PATH}")
+            pcap_file = os.path.join(self.os_record_path, "sent_responses.pcap")
+            wrpcap(pcap_file, self.sent_packets)
+            logging.info(f"📦 Exported sent deception packets to {pcap_file}")
         except Exception as e:
-            logging.error(f"❌ Failed to export deceptive PCAP: {e}")
+            logging.error(f"❌ Failed to export PCAP: {e}")
 
     def track_ip_state(self, ip: str, proto: str):
         now = datetime.utcnow().isoformat()
