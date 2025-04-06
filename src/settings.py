@@ -193,3 +193,10 @@ def get_os_fingerprint(os_name: str) -> dict:
 def list_all_templates() -> dict:
     all_keys = set(BASE_OS_TEMPLATES.keys()) | set(OS_ALIASES.keys())
     return {k: get_os_fingerprint(k) for k in sorted(all_keys)}
+
+def log_os_template(os_name: str):
+    template = get_os_fingerprint(os_name)
+    ttl = template.get("ttl")
+    win = template.get("window")
+    opts = template.get("tcp_options", [])
+    logging.debug(f"🧬 OS Template '{os_name}' → TTL={ttl}, Window={win}, TCP_Options={opts}")
