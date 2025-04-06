@@ -31,7 +31,7 @@ try:
     from src.fingerprint_utils import gen_key
     from src.os_recorder import templateSynthesis
     from src.Packet import Packet
-    from src.settings import MAC, VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
+    from src.settings import MAC, VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES, get_mac_address
 except ImportError as e:
     logging.error(f"\u274c Import Error: {e}")
     sys.exit(1)
@@ -149,14 +149,12 @@ def main():
             print(f"  - {name} (TTL={settings.BASE_OS_TEMPLATES[name]['ttl']}, Window={settings.BASE_OS_TEMPLATES[name]['window']})")
         return
 
-    # Auto fallback for NIC
     if not args.nic:
         args.nic = settings.NIC_PROBE
         logging.info(f"\ud83d\udd0c Defaulting to NIC: {args.nic}")
 
     validate_nic(args.nic)
 
-    # Auto-detect IP for given NIC (fallback method)
     if not args.host:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -190,8 +188,13 @@ def main():
         if not args.status or args.te is None:
             logging.error("\u274c Missing --status or --te")
             return
-        deceiver = PortDeceiver(args.host, nic=args.nic)
-        deceiver.deceive_ps_hs(args.status)
+        deceiver = PortDeceiver(
+            interface_ip=args.host,
+            nic=args.nic,
+            os_name=args.os,
+            ports_config=json.loads(args.status) if args.status.startswith('{') else None
+        )
+        deceiver.run()
 
 if __name__ == '__main__':
     main()
