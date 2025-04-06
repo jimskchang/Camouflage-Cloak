@@ -7,6 +7,7 @@ import struct
 import time
 import random
 from datetime import datetime, timedelta
+from typing import Dict
 from collections import defaultdict
 import threading
 import matplotlib.pyplot as plt
@@ -15,11 +16,11 @@ import matplotlib.animation as animation
 from scapy.all import IP, TCP, ICMP, Ether, wrpcap, get_if_addr
 
 import src.settings as settings
-from src.settings import get_os_fingerprint, get_mac_address
+from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
-from src.fingerprint_utils import gen_key
+from src.fingerprint_utils import gen_key, generateKey
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -128,38 +129,24 @@ class OsDeceiver:
                 options.append(("NOP", None))
         return options
 
-    def match_custom_rules(self, pkt: Packet, proto: str) -> dict:
-        for rule in settings.CUSTOM_RULES:
+    def match_custom_rule(self, pkt: Packet, proto: str):
+        for rule in CUSTOM_RULES:
             if rule.get("proto", "").upper() != proto.upper():
                 continue
-
-            port = rule.get("port")
-            if port and pkt.l4_field.get("dest_port") != port:
-                continue
-
-            flags = rule.get("flags")
-            if flags:
-                pkt_flags = pkt.l4_field.get("flags")
-                if not pkt_flags or chr(pkt_flags) != flags:
+            if "port" in rule:
+                port = pkt.l4_field.get("dest_port")
+                if port != rule["port"]:
                     continue
-
-            if "tos" in rule:
-                if pkt.l3_field.get("TYPE_OF_SERVICE") != rule["tos"]:
+            if "flags" in rule:
+                flags = pkt.l4_field.get("flags")
+                if flags != rule["flags"]:
                     continue
-
-            if "ecn" in rule:
-                tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
-                pkt_ecn = tos & 0x03
-                if pkt_ecn != rule["ecn"]:
+            if "type" in rule:
+                icmp_type = pkt.l4_field.get("icmp_type")
+                if icmp_type != rule["type"]:
                     continue
-
-            if rule.get("frag_offset"):
-                frag = pkt.l3_field.get("FRAGMENT_STATUS", 0)
-                if frag == 0:
-                    continue
-
             return rule
-        return {}
+        return None
 
     def os_deceive(self, timeout_minutes: int = 5):
         logging.info("🌀 Starting OS deception loop...")
@@ -178,19 +165,20 @@ class OsDeceiver:
                 proto = pkt.l4 if pkt.l4 else pkt.l3
                 self.track_ip_state(ip_str, proto)
 
-                rule = self.match_custom_rules(pkt, proto)
+                rule = self.match_custom_rule(pkt, proto)
                 if rule:
-                    action = rule.get("action")
-                    log_msg = rule.get("log", f"📌 Custom rule matched: {rule}")
-                    logging.info(log_msg)
-                    if action == "drop":
+                    logging.info(f"⚙️ Custom Rule: {rule.get('log')}")
+                    if rule["action"] == "drop":
                         continue
-                    elif action == "icmp_unreachable":
+                    elif rule["action"] == "icmp_unreachable":
                         self.send_icmp_port_unreachable(pkt)
                         continue
-                    elif action == "rst":
+                    elif rule["action"] == "rst":
                         self.send_tcp_rst(pkt)
                         continue
+
+                if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
+                    continue
 
                 key, _ = gen_key(proto, pkt.packet)
                 template = templates.get(proto, {}).get(key)
@@ -238,9 +226,11 @@ class OsDeceiver:
         self.export_sent_packets()
 
     def send_tcp_rst(self, pkt: Packet):
+        # Placeholder for TCP RST response
         pass
 
     def send_icmp_port_unreachable(self, pkt: Packet):
+        # Placeholder for ICMP Port Unreachable
         pass
 
     def load_file(self, proto):
