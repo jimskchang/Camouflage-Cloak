@@ -7,7 +7,6 @@ import struct
 import time
 import random
 from datetime import datetime, timedelta
-from typing import Dict
 from collections import defaultdict
 import threading
 import matplotlib.pyplot as plt
@@ -16,11 +15,11 @@ import matplotlib.animation as animation
 from scapy.all import IP, TCP, ICMP, Ether, wrpcap, get_if_addr
 
 import src.settings as settings
-from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES
+from src.settings import get_os_fingerprint, get_mac_address
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
-from src.fingerprint_utils import gen_key, generateKey
+from src.fingerprint_utils import gen_key
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -129,23 +128,38 @@ class OsDeceiver:
                 options.append(("NOP", None))
         return options
 
-    def check_custom_rules(self, proto, packet):
-        for rule in CUSTOM_RULES:
-            if rule.get("proto", "").lower() != proto.lower():
+    def match_custom_rules(self, pkt: Packet, proto: str) -> dict:
+        for rule in settings.CUSTOM_RULES:
+            if rule.get("proto", "").upper() != proto.upper():
                 continue
-            if proto == "tcp":
-                if packet.l4_field.get("dest_port") != rule.get("port"):
+
+            port = rule.get("port")
+            if port and pkt.l4_field.get("dest_port") != port:
+                continue
+
+            flags = rule.get("flags")
+            if flags:
+                pkt_flags = pkt.l4_field.get("flags")
+                if not pkt_flags or chr(pkt_flags) != flags:
                     continue
-                if packet.l4_field.get("flags") != rule.get("flags"):
+
+            if "tos" in rule:
+                if pkt.l3_field.get("TYPE_OF_SERVICE") != rule["tos"]:
                     continue
-            elif proto == "udp":
-                if packet.l4_field.get("dest_port") != rule.get("port"):
+
+            if "ecn" in rule:
+                tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
+                pkt_ecn = tos & 0x03
+                if pkt_ecn != rule["ecn"]:
                     continue
-            elif proto == "icmp":
-                if packet.l4_field.get("icmp_type") != rule.get("type"):
+
+            if rule.get("frag_offset"):
+                frag = pkt.l3_field.get("FRAGMENT_STATUS", 0)
+                if frag == 0:
                     continue
+
             return rule
-        return None
+        return {}
 
     def os_deceive(self, timeout_minutes: int = 5):
         logging.info("🌀 Starting OS deception loop...")
@@ -164,22 +178,19 @@ class OsDeceiver:
                 proto = pkt.l4 if pkt.l4 else pkt.l3
                 self.track_ip_state(ip_str, proto)
 
-                rule = self.check_custom_rules(proto, pkt)
+                rule = self.match_custom_rules(pkt, proto)
                 if rule:
-                    logging.info(rule.get("log", "🛠 Custom rule matched"))
-                    if rule["action"] == "drop":
+                    action = rule.get("action")
+                    log_msg = rule.get("log", f"📌 Custom rule matched: {rule}")
+                    logging.info(log_msg)
+                    if action == "drop":
                         continue
-                    elif rule["action"] == "icmp_unreachable":
+                    elif action == "icmp_unreachable":
                         self.send_icmp_port_unreachable(pkt)
                         continue
-                    elif rule["action"] == "rst":
+                    elif action == "rst":
                         self.send_tcp_rst(pkt)
                         continue
-                    elif rule["action"] == "template":
-                        pass  # fall through to template matching
-
-                if proto == 'tcp' and pkt.l4_field.get('dest_port') in settings.FREE_PORT:
-                    continue
 
                 key, _ = gen_key(proto, pkt.packet)
                 template = templates.get(proto, {}).get(key)
