@@ -13,10 +13,10 @@ import threading
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 
-from scapy.all import IP, TCP, ICMP, Ether, wrpcap
+from scapy.all import IP, TCP, ICMP, Ether, wrpcap, get_if_addr
 
 import src.settings as settings
-from src.settings import get_os_fingerprint
+from src.settings import get_os_fingerprint, get_mac_address
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
@@ -27,22 +27,30 @@ UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
 
 class OsDeceiver:
     def __init__(self, target_host: str, target_os: str, dest=None, nic: str = None):
-        self.host = target_host
-        self.os = target_os
         self.nic = nic or settings.NIC_PROBE
-        self.dest = dest
-        self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
 
         if not os.path.exists(f"/sys/class/net/{self.nic}"):
-            logging.error(f"\u274c NIC '{self.nic}' not found.")
+            logging.error(f"❌ NIC '{self.nic}' not found.")
             raise ValueError(f"NIC '{self.nic}' does not exist.")
 
+        try:
+            self.mac = get_mac_address(self.nic)
+            self.host = get_if_addr(self.nic)
+            logging.info(f"🔌 Interface {self.nic} -> IP: {self.host}, MAC: {self.mac}")
+        except Exception as e:
+            logging.error(f"❌ Failed to get IP/MAC for {self.nic}: {e}")
+            raise
+
+        self.os = target_os
+        self.dest = dest
+        self.os_record_path = self.dest or os.path.join(settings.OS_RECORD_PATH, self.os)
         os.makedirs(self.os_record_path, exist_ok=True)
+
         self.conn = TcpConnect(self.host, nic=self.nic)
 
         os_template = get_os_fingerprint(self.os)
         if not os_template:
-            logging.error(f"\u274c OS template '{self.os}' could not be loaded.")
+            logging.error(f"❌ OS template '{self.os}' could not be loaded.")
             raise ValueError(f"Invalid OS template: {self.os}")
 
         self.ttl = os_template.get("ttl")
@@ -65,10 +73,10 @@ class OsDeceiver:
         self.template_dict = defaultdict(dict)
         self.pair_dict = {}
 
-        logging.info(f"\U0001f3ad TTL/Window/IPID -> TTL={self.ttl}, Window={self.window}, IPID={self.ipid_mode}")
-        logging.info(f"\U0001f9ec TCP Options: {self.tcp_options}")
-        logging.info(f"\U0001f6e1\ufe0f OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
-        logging.info(f"\U0001f4c1 Using OS template path: {self.os_record_path}")
+        logging.info(f"🎭 TTL/Window/IPID -> TTL={self.ttl}, Window={self.window}, IPID={self.ipid_mode}")
+        logging.info(f"🧬 TCP Options: {self.tcp_options}")
+        logging.info(f"🛡️ OS Deception initialized for '{self.os}' via NIC '{self.nic}'")
+        logging.info(f"📁 Using OS template path: {self.os_record_path}")
 
         self._init_plot()
 
@@ -122,7 +130,7 @@ class OsDeceiver:
         return options
 
     def os_deceive(self, timeout_minutes: int = 5):
-        logging.info("\U0001f300 Starting OS deception loop...")
+        logging.info("🌀 Starting OS deception loop...")
         templates = {ptype: self.load_file(ptype) for ptype in ["tcp", "icmp", "udp", "arp"]}
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
         counter = 0
@@ -148,14 +156,14 @@ class OsDeceiver:
                     for k in templates.get(proto, {}):
                         if key.startswith(k[:16]):
                             template = templates[proto][k]
-                            logging.info(f"\U0001f50d Fuzzy match hit for {proto.upper()} template")
+                            logging.info(f"🔍 Fuzzy match hit for {proto.upper()} template")
                             break
 
                 if not template:
                     default_key = f"default_{proto}_response".encode()
                     template = templates.get(proto, {}).get(default_key)
                     if template:
-                        logging.info(f"\u2728 Using default {proto} fallback template")
+                        logging.info(f"✨ Using default {proto} fallback template")
 
                 if template:
                     response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window, deceiver=self)
@@ -164,7 +172,7 @@ class OsDeceiver:
                         self.protocol_stats[proto.upper()] += 1
                         self.sent_packets.append(response)
                         counter += 1
-                        logging.info(f"\U0001f4e4 Sent {proto.upper()} response #{counter}")
+                        logging.info(f"📤 Sent {proto.upper()} response #{counter}")
                     continue
 
                 if proto == 'udp':
@@ -173,7 +181,7 @@ class OsDeceiver:
                     self.send_tcp_rst(pkt)
 
                 if settings.AUTO_LEARN_MISSING:
-                    logging.info(f"\U0001f9e0 Learning new {proto.upper()} template")
+                    logging.info(f"🧠 Learning new {proto.upper()} template")
                     templates[proto][key] = pkt.packet
                     self.save_record(proto, templates[proto])
                 elif DEBUG_MODE:
@@ -181,16 +189,16 @@ class OsDeceiver:
                         f.write(f"[{proto}] {key.hex()}\n")
 
             except Exception as e:
-                logging.error(f"\u274c Error in deception loop: {e}")
+                logging.error(f"❌ Error in deception loop: {e}")
 
         self.export_state_log()
         self.export_sent_packets()
 
     def send_tcp_rst(self, pkt: Packet):
-        pass  # Assume already implemented
+        pass
 
     def send_icmp_port_unreachable(self, pkt: Packet):
-        pass  # Assume already implemented
+        pass
 
     def load_file(self, proto):
         filename = os.path.join(self.os_record_path, f"{proto}_record.txt")
@@ -214,7 +222,7 @@ class OsDeceiver:
         try:
             with open(state_file, "w") as f:
                 json.dump(self.ip_state, f, indent=2)
-            logging.info(f"\U0001f4dd Exported per-IP state log to {state_file}")
+            logging.info(f"📝 Exported per-IP state log to {state_file}")
         except Exception as e:
             logging.warning(f"⚠ Failed to export IP state: {e}")
 
