@@ -1,27 +1,9 @@
 # src/fingerprint_utils.py
 import struct
 import logging
-import copy
-from src.Packet import Packet
 
-def generateKey(packet_bytes: bytes, proto_type: str):
-    """
-    Normalize and extract a fingerprint key from a Packet object.
-    """
-    try:
-        pkt = Packet(packet_bytes)
-        pkt.unpack()
-        key = pkt.get_signature(proto_type)
-        return key
-    except Exception as e:
-        logging.warning(f"⚠️ generateKey() failed: {e}")
-        return b''
 
 def gen_key(proto: str, packet: bytes):
-    """
-    Dispatches protocol-specific key generation.
-    """
-    proto = proto.lower()
     if proto == 'tcp':
         return gen_tcp_key(packet)
     elif proto == 'icmp':
@@ -31,6 +13,7 @@ def gen_key(proto: str, packet: bytes):
     elif proto == 'arp':
         return gen_arp_key(packet)
     return b'', None
+
 
 def gen_tcp_key(packet: bytes):
     try:
@@ -43,8 +26,9 @@ def gen_tcp_key(packet: bytes):
         tcp_key = struct.pack('!HHLLH', 0, dest_port, 0, 0, offset_flags) + tcp_header[14:20]
         return ip_key + tcp_key + payload, None
     except Exception as e:
-        logging.warning(f"⚠️ gen_tcp_key failed: {e}")
+        logging.warning(f"\u26a0\ufe0f gen_tcp_key failed: {e}")
         return b'', None
+
 
 def gen_udp_key(packet: bytes):
     try:
@@ -55,8 +39,9 @@ def gen_udp_key(packet: bytes):
         udp_key = struct.pack('!HHH', 0, 0, 8) + b'\x00\x00'
         return ip_key + udp_key + payload, None
     except Exception as e:
-        logging.warning(f"⚠️ gen_udp_key failed: {e}")
+        logging.warning(f"\u26a0\ufe0f gen_udp_key failed: {e}")
         return b'', None
+
 
 def gen_icmp_key(packet: bytes):
     try:
@@ -67,8 +52,9 @@ def gen_icmp_key(packet: bytes):
         icmp_key = struct.pack('!BBHHH', icmp_type, code, 0, 0, 0)
         return ip_key + icmp_key, None
     except Exception as e:
-        logging.warning(f"⚠️ gen_icmp_key failed: {e}")
+        logging.warning(f"\u26a0\ufe0f gen_icmp_key failed: {e}")
         return b'', None
+
 
 def gen_arp_key(packet: bytes):
     try:
@@ -79,5 +65,5 @@ def gen_arp_key(packet: bytes):
                           b'\x00'*6, b'\x00'*4, b'\x00'*6, b'\x00'*4)
         return key, None
     except Exception as e:
-        logging.warning(f"⚠️ gen_arp_key failed: {e}")
+        logging.warning(f"\u26a0\ufe0f gen_arp_key failed: {e}")
         return b'', None
