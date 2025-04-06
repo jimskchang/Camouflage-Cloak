@@ -22,20 +22,12 @@ class Packet:
         self.ttl_override = ttl
         self.window_override = window
 
-    from src.fingerprint_utils import generateKey
-
     def get_signature(self, proto_type: str) -> bytes:
-    """
-    Generate a normalized signature key for this packet.
-    Used for OS fingerprinting template matching.
-    """
-    from src.fingerprint_utils import generateKey
-    try:
-        return generateKey(self, proto_type)
-    except Exception as e:
-        import logging
-        logging.warning(f"[Packet] Failed to get signature for {proto_type}: {e}")
-        return b''
+        try:
+            return generateKey(self, proto_type)
+        except Exception as e:
+            logging.warning(f"[Packet] Failed to get signature for {proto_type}: {e}")
+            return b''
 
     def unpack(self) -> None:
         try:
