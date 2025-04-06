@@ -29,6 +29,8 @@ try:
     from src.port_deceiver import PortDeceiver
     from src.os_deceiver import OsDeceiver
     from src.fingerprint_utils import gen_key
+    from src.os_recorder import templateSynthesis  # <-- new import
+    from src.Packet import Packet
     from src.settings import MAC, VLAN_MAP, GATEWAY_MAP, BASE_OS_TEMPLATES
 except ImportError as e:
     logging.error(f"\u274c Import Error: {e}")
@@ -78,72 +80,37 @@ def set_promiscuous_mode(nic: str):
         logging.error(f"\u274c Failed to set promiscuous mode: {e}")
         sys.exit(1)
 
-def collect_fingerprint(target_host, dest, nic):
-    logging.info(f"\ud83d\udcf1 Starting OS fingerprint collection on {target_host} via {nic}")
-    ensure_directory_exists(dest)
+# --- New function for --scan ts using os_recorder ---
+def collect_and_build_templates(host_ip, dest_path, nic):
+    from collections import defaultdict
+    template_dict = defaultdict(dict)
+    pair_dict = {}
 
-    file_paths = {
-        "arp": os.path.join(dest, "arp_record.pcap"),
-        "icmp": os.path.join(dest, "icmp_record.pcap"),
-        "tcp": os.path.join(dest, "tcp_record.pcap"),
-        "udp": os.path.join(dest, "udp_record.pcap")
-    }
+    def handle_packet(pkt):
+        try:
+            packet = Packet(bytes(pkt))
+            packet.interface = nic
+            packet.unpack()
+            proto = packet.l4 if packet.l4 else packet.l3
+            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip)
+        except Exception as e:
+            logging.debug(f"Failed to parse packet: {e}")
 
-    packet_buffers = {k: [] for k in file_paths}
-
-    def classify_and_store(pkt):
-        if pkt.haslayer("ARP"):
-            packet_buffers["arp"].append(pkt)
-        elif pkt.haslayer("IP"):
-            if pkt.haslayer("TCP"):
-                packet_buffers["tcp"].append(pkt)
-            elif pkt.haslayer("UDP"):
-                packet_buffers["udp"].append(pkt)
-            elif pkt.haslayer("ICMP"):
-                packet_buffers["icmp"].append(pkt)
-
+    logging.info(f"\ud83d\udcf1 Starting template learning on {nic} for 300s...")
     validate_nic(nic)
     set_promiscuous_mode(nic)
-    time.sleep(2)
+    time.sleep(1)
+    sniff(iface=nic, timeout=300, prn=handle_packet, store=False)
 
-    logging.info("\ud83d\udce5 Sniffing packets for 600 seconds...")
-    sniff(iface=nic, timeout=600, prn=classify_and_store, store=False)
-    logging.info("\u2705 Packet capture completed.")
-
-    total = 0
-    for proto, pkts in packet_buffers.items():
-        wrpcap(file_paths[proto], pkts)
-        ensure_file_permissions(file_paths[proto])
-        logging.info(f"\ud83d\udcc2 Saved {len(pkts)} {proto.upper()} packets to {file_paths[proto]}")
-        total += len(pkts)
-
-    logging.info(f"\u2705 Total packets saved: {total}")
-
-def convert_raw_packets_to_template(file_path: str, proto: str):
-    from src.fingerprint_utils import gen_key
-    template_dict = {}
-
-    try:
-        packets = rdpcap(file_path)
-        for pkt in packets:
-            raw = bytes(pkt)
-            if len(raw) < 42:
-                continue
-            key, _ = gen_key(proto, raw)
-            template_dict[key] = raw
-
+    for proto in template_dict:
+        output_txt = os.path.join(dest_path, f"{proto.lower()}_record.txt")
         encoded = {
             base64.b64encode(k).decode(): base64.b64encode(v).decode()
-            for k, v in template_dict.items()
+            for k, v in template_dict[proto].items() if v is not None
         }
-
-        output_txt = file_path.replace(".pcap", ".txt")
         with open(output_txt, "w") as f:
             json.dump(encoded, f, indent=2)
-
-        logging.info(f"\u2705 Converted {proto.upper()} packets to template: {output_txt}")
-    except Exception as e:
-        logging.error(f"\u274c Failed to convert {file_path}: {e}")
+        logging.info(f"\ud83d\udcc2 Saved {proto.upper()} templates to {output_txt}")
 
 # --- Main Logic ---
 def main():
@@ -183,16 +150,8 @@ def main():
 
     if args.scan == "ts":
         dest_path = os.path.abspath(args.dest or settings.OS_RECORD_PATH)
-        for proto in ["arp", "icmp", "tcp", "udp"]:
-            for ext in [".pcap", ".txt"]:
-                path = os.path.join(dest_path, f"{proto}_record{ext}")
-                if os.path.exists(path):
-                    os.remove(path)
-        collect_fingerprint(args.host, dest_path, args.nic)
-        for proto in ["arp", "icmp", "tcp", "udp"]:
-            pcap = os.path.join(dest_path, f"{proto}_record.pcap")
-            if os.path.exists(pcap):
-                convert_raw_packets_to_template(pcap, proto)
+        ensure_directory_exists(dest_path)
+        collect_and_build_templates(args.host, dest_path, args.nic)
 
     elif args.scan == "od":
         if not args.os or args.te is None:
@@ -200,9 +159,6 @@ def main():
             return
         os_name = args.os.lower()
         record_path = os.path.abspath(os.path.join(settings.OS_RECORD_PATH, os_name))
-        for proto in ["arp", "icmp", "tcp", "udp"]:
-            full_path = os.path.join(record_path, f"{proto}_record.pcap")
-            convert_raw_packets_to_template(full_path, proto)
         deceiver = OsDeceiver(
             target_host=args.host,
             target_os=args.os,
