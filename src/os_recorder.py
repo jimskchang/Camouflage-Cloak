@@ -3,36 +3,26 @@
 import logging
 import os
 from datetime import datetime
-from scapy.all import wrpcap, Ether
 from src.fingerprint_gen import generateKey
-from src.settings import OS_RECORD_PATH
+from scapy.utils import wrpcap
 
-
-def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
+def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, base_path=None):
     """
-    Enhanced template synthesis with:
-    ✅ Normalized + hashed keys (SHA256)
-    ✅ Per-template PCAP saving
-    ✅ Collision detection
-    ✅ Future extension: DNS/HTTP awareness
+    Synthesizes a fingerprint template from observed packets.
+    Supports per-template export (.pcap), VLAN detection, and future L7 extensions.
     """
     try:
         src_ip = packet.l3_field.get("src_IP_str")
         dst_ip = packet.l3_field.get("dest_IP_str")
         src_port = packet.l4_field.get("src_port")
         dst_port = packet.l4_field.get("dest_port")
-
-        timestamp = datetime.utcnow().isoformat()
         vlan = packet.l2_field.get("vlan")
-        flags = packet.l4_field.get("flags") if proto_type == "TCP" else None
         ttl = packet.l3_field.get("ttl")
-        window = packet.l4_field.get("window") if proto_type == "TCP" else None
+        flags = packet.l4_field.get("flags") if proto_type == "TCP" else None
         options = packet.l4_field.get("option_field") if proto_type == "TCP" else {}
+        ja3 = packet.l7_field.get("ja3") if hasattr(packet, "l7_field") else None
+        timestamp = datetime.utcnow().isoformat()
 
-        # Future hook: application layer detection
-        app_proto = "dns" if dst_port == 53 or src_port == 53 else "http" if dst_port in [80, 8080, 443] else None
-
-        # Correlation pair
         if proto_type in ("TCP", "UDP"):
             pair = (src_ip, dst_ip, src_port, dst_port)
         elif proto_type == "ICMP":
@@ -42,47 +32,41 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip):
         else:
             return template_dict
 
-        # Probe
+        # Incoming request → generate key
         if dst_ip == host_ip:
-            key = generateKey(packet, proto_type)
-            if not key:
-                return template_dict
-
-            if key in template_dict[proto_type] and template_dict[proto_type][key] is not None:
-                logging.warning(f"⚠️ Collision: key already recorded for {proto_type.upper()} | {key.hex()[:16]}")
-
+            key = generateKey(packet, proto_type, use_hash=True)
             pair_dict[pair] = key
             if key not in template_dict[proto_type]:
                 template_dict[proto_type][key] = None
-
                 logging.debug(
                     f"🟢 [REQ][{proto_type}] {timestamp} | Key: {key.hex()[:32]} | "
-                    f"{src_ip}:{src_port} ➔ {dst_ip}:{dst_port} | VLAN: {vlan} | TTL: {ttl}"
+                    f"From {src_ip}:{src_port} → {dst_ip}:{dst_port} | TTL={ttl} | VLAN={vlan}"
                 )
+            else:
+                logging.warning(f"⚠️ [COLLISION] Key already exists for {proto_type}: {key.hex()[:16]}")
 
-        # Response
+        # Outgoing response → store template
         elif src_ip == host_ip and pair in pair_dict:
             key = pair_dict[pair]
-            existing = template_dict[proto_type].get(key)
-            if existing and existing != packet.packet:
-                logging.warning(f"⚠️ Collision: hash matched but payloads differ for {proto_type.upper()} key")
-
             template_dict[proto_type][key] = packet.packet
-
             hex_preview = packet.packet.hex()[:64] + ("..." if len(packet.packet.hex()) > 64 else "")
             logging.debug(
                 f"📤 [RESP][{proto_type}] {timestamp} | Key: {key.hex()[:32]} | "
-                f"To {dst_ip}:{dst_port} | TCP Flags: {flags} | Window: {window} | VLAN: {vlan} | Data: {hex_preview}"
+                f"To {dst_ip}:{dst_port} | TTL={ttl} | Flags={flags} | Options={options} | VLAN={vlan} | "
+                f"Data: {hex_preview}"
             )
 
-            # Save individual .pcap
-            out_dir = os.path.join(OS_RECORD_PATH, "pcap", proto_type.lower())
-            os.makedirs(out_dir, exist_ok=True)
-            out_path = os.path.join(out_dir, f"{key.hex()[:32]}.pcap")
-            try:
-                wrpcap(out_path, [Ether(packet.packet)])
-            except Exception as e:
-                logging.warning(f"⚠️ Failed to save per-template PCAP: {e}")
+            # Optionally export to .pcap for replay
+            if base_path:
+                proto_dir = os.path.join(base_path, proto_type.lower())
+                os.makedirs(proto_dir, exist_ok=True)
+                fname = f"{proto_type}_{key.hex()[:16]}.pcap"
+                fpath = os.path.join(proto_dir, fname)
+                try:
+                    wrpcap(fpath, packet.packet)
+                    logging.debug(f"📦 Saved response to {fpath}")
+                except Exception as e:
+                    logging.warning(f"⚠️ Failed to write pcap for key={key.hex()[:16]}: {e}")
 
         return template_dict
 
