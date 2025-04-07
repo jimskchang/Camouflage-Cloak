@@ -6,7 +6,7 @@ import logging
 import os
 import random
 import time
-from scapy.all import Ether, IP, TCP
+from scapy.all import Ether, IP, TCP, IPv6, IPv6ExtHdrHopByHop
 
 import src.settings as settings
 
@@ -15,7 +15,7 @@ class TcpConnect:
         self.dip = host
         self.nic = nic or settings.NIC_PROBE
         self.drop_chance = drop_chance
-        self.delay_range = delay_range  # in seconds, e.g. (0.01, 0.05)
+        self.delay_range = delay_range
 
         if not check_nic_exists_and_up(self.nic):
             raise RuntimeError(f"❌ NIC {self.nic} does not exist or is not UP.")
@@ -40,30 +40,23 @@ class TcpConnect:
         except Exception as e:
             raise RuntimeError(f"❌ Failed to read MAC for {nic}: {e}")
 
-    def build_tcp_header_from_reply(self, tcp_len, seq, ack_num, src_port, dest_port, src_ip, dest_ip, flags):
-        try:
-            offset = (tcp_len // 4) << 4
-            tcp_header = struct.pack("!HHIIBBHHH",
-                                     src_port, dest_port, seq, ack_num,
-                                     offset, flags, 0, 0, 0)
-
-            pseudo_hdr = struct.pack("!4s4sBBH", src_ip, dest_ip, 0, socket.IPPROTO_TCP, len(tcp_header))
-            checksum = getTCPChecksum(pseudo_hdr + tcp_header)
-            tcp_header = tcp_header[:16] + struct.pack("!H", checksum) + tcp_header[18:]
-            return tcp_header
-        except Exception as e:
-            logging.error(f"❌ Error building TCP header: {e}")
-            return b''
-
-    def build_tcp_rst(self, pkt, flags="R", seq=None, ack=None) -> bytes:
+    def build_tcp_rst(self, pkt, flags="R", seq=None, ack=None, vlan=None, ipv6=False) -> bytes:
         try:
             ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
-            ip = IP(
-                src=pkt.l3_field['dest_IP_str'],
-                dst=pkt.l3_field['src_IP_str'],
-                ttl=64,
-                id=random.randint(0, 65535)
-            )
+            if vlan:
+                ether.type = 0x8100
+                ether.add_payload(struct.pack("!H", vlan))
+
+            if ipv6:
+                ip = IPv6(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'])
+            else:
+                ip = IP(
+                    src=pkt.l3_field['dest_IP_str'],
+                    dst=pkt.l3_field['src_IP_str'],
+                    ttl=64,
+                    id=random.randint(0, 65535)
+                )
+
             tcp = TCP(
                 sport=pkt.l4_field['dest_port'],
                 dport=pkt.l4_field['src_port'],
@@ -75,36 +68,6 @@ class TcpConnect:
             return bytes(ether / ip / tcp)
         except Exception as e:
             logging.error(f"❌ Failed to build TCP {flags}: {e}")
-            return b''
-
-    def build_tcp_response(self, pkt, flags="SA", ts=False, ts_echo=0, seq=None) -> bytes:
-        try:
-            ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
-            ip = IP(
-                src=pkt.l3_field['dest_IP_str'],
-                dst=pkt.l3_field['src_IP_str'],
-                ttl=64,
-                id=random.randint(0, 65535)
-            )
-            tcp = TCP(
-                sport=pkt.l4_field['dest_port'],
-                dport=pkt.l4_field['src_port'],
-                flags=flags,
-                seq=seq if seq else random.randint(0, 0xFFFFFFFF),
-                ack=pkt.l4_field.get("seq", 0) + 1,
-                window=settings.FALLBACK_WINDOW
-            )
-
-            options = [("MSS", 1460)]
-            if ts:
-                tsval = int(time.time() * 1000) & 0xFFFFFFFF
-                options += [("NOP", None), ("NOP", None), ("Timestamp", (tsval, ts_echo))]
-            options += [("SAckOK", b''), ("WScale", 7)]
-            tcp.options = options
-
-            return bytes(ether / ip / tcp)
-        except Exception as e:
-            logging.error(f"❌ Failed to build TCP response: {e}")
             return b''
 
     def send_packet(self, ether_pkt: bytes):
@@ -122,7 +85,16 @@ class TcpConnect:
         except Exception as e:
             logging.error(f"❌ Failed to send raw packet: {e}")
 
-# --- Utility Functions ---
+    def extract_ja3_fingerprint(self, pkt):
+        try:
+            if b"\x16\x03" in pkt.packet and b"\x01" in pkt.packet[5:6]:
+                client_hello = pkt.packet[pkt.packet.find(b"\x16\x03"):]
+                # Stub for future JA3 hashing
+                return "stub_ja3_hash"
+        except Exception as e:
+            logging.warning(f"⚠️ JA3 parsing error: {e}")
+        return None
+
 
 def check_nic_exists_and_up(nic: str) -> bool:
     path = f"/sys/class/net/{nic}/operstate"
