@@ -3,8 +3,6 @@ import json
 import base64
 import logging
 import time
-import random
-import socket
 from datetime import datetime, timedelta
 from collections import defaultdict
 import threading
@@ -15,6 +13,7 @@ from scapy.all import IP, TCP, UDP, ICMP, Ether, wrpcap, send, get_if_addr
 
 import src.settings as settings
 from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES
+from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
 from src.fingerprint_utils import gen_key
@@ -73,8 +72,33 @@ class OsDeceiver:
         self.ax.set_ylabel("Sent Packets")
         self.ax.set_ylim(0, max(values + [1]))
 
+    def get_ip_id(self, ip: str = "") -> int:
+        if self.ipid_mode == "increment":
+            self.ip_id_counter = (self.ip_id_counter + 1) % 65536
+            return self.ip_id_counter
+        elif self.ipid_mode == "random":
+            return random.randint(0, 65535)
+        elif self.ipid_mode == "zero":
+            return 0
+        return 0
+
+    def get_tcp_options(self, src_ip: str, ts_echo=0):
+        options = []
+        for opt in self.tcp_options:
+            if opt.startswith("MSS="):
+                options.append(("MSS", int(opt.split("=")[1])))
+            elif opt.startswith("WS="):
+                options.append(("WS", int(opt.split("=")[1])))
+            elif opt == "TS":
+                ts_val = int(time.time() * 1000) & 0xFFFFFFFF
+                options.append(("Timestamp", (ts_val, ts_echo)))
+            elif opt == "SACK":
+                options.append(("SAckOK", b""))
+            elif opt == "NOP":
+                options.append(("NOP", None))
+        return options
+
     def os_deceive(self, timeout_minutes: int = 5):
-        from src.Packet import Packet  # ✅ Delayed import
         logging.info("🚦 Starting OS deception loop")
         templates = {ptype: self.load_file(ptype) for ptype in ["tcp", "icmp", "udp", "arp"]}
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
@@ -85,7 +109,6 @@ class OsDeceiver:
                 pkt = Packet(raw)
                 pkt.interface = self.nic
                 pkt.unpack()
-
                 proto = pkt.l4 if pkt.l4 else pkt.l3
                 src_ip = pkt.l3_field.get("src_IP_str")
                 dst_ip = pkt.l3_field.get("dest_IP_str")
@@ -94,7 +117,7 @@ class OsDeceiver:
                 frag = pkt.l3_field.get("FRAGMENT_STATUS", 0)
                 dst_port = pkt.l4_field.get("dest_port", 0)
 
-                # Apply custom rule filtering
+                # Match CUSTOM_RULES
                 for rule in CUSTOM_RULES:
                     match = rule.get("proto", "").lower() == proto
                     match &= rule.get("port", dst_port) == dst_port if "port" in rule else True
@@ -114,7 +137,7 @@ class OsDeceiver:
                             self.send_icmp_port_unreachable(pkt)
                             continue
                         elif rule["action"] == "template":
-                            break
+                            break  # fallthrough to template lookup
 
                 key, _ = gen_key(proto, pkt.packet)
                 template = templates.get(proto, {}).get(key)
@@ -182,4 +205,4 @@ class OsDeceiver:
         path = os.path.join(self.os_record_path, "os_session_log.json")
         with open(path, "w") as f:
             json.dump(self.session_log, f, indent=2)
-        logging.info(f"📝 OS session log saved: {path}")
+        logging.info(f"🗒 OS session log saved: {path}")
