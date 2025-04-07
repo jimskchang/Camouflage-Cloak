@@ -2,87 +2,94 @@
 
 import copy
 import logging
-import hashlib
-from scapy.all import DNS, Raw
 
-def generateKey(packet, proto_type, use_hash=True):
+def generateKey(packet, proto_type):
     """
-    Generate a normalized fingerprint key from a parsed Packet object.
+    Normalizes the packet structure to generate a deterministic key.
 
     Args:
-        packet: A Packet object with .ip, .tcp, .udp, .icmp, .raw, etc.
-        proto_type (str): "TCP", "UDP", "ICMP", "ARP", etc.
-        use_hash (bool): If True, return SHA256(key), else raw bytes.
+        packet: A parsed Packet object with l2/l3/l4 fields.
+        proto_type: One of "TCP", "UDP", "ICMP", "ARP", etc.
 
     Returns:
-        bytes: A normalized key (SHA256 digest or raw fingerprint bytes).
+        bytes: A normalized byte-string representing the fingerprintable part of the packet.
     """
     try:
         pkt = copy.deepcopy(packet)
 
-        # Normalize IP layer
-        if hasattr(pkt, 'ip') and pkt.ip:
-            pkt.ip.ttl = 0
-            pkt.ip.id = 0
-            pkt.ip.chksum = 0
-            pkt.ip.len = 0
-            pkt.ip.frag = 0
-            pkt.ip.flags = 0
-            pkt.ip.tos = 0
-            if hasattr(pkt.ip, 'options'):
-                pkt.ip.options = b''
+        ip_hdr = pkt.l3_field
+        tcp_hdr = pkt.l4_field if proto_type == "TCP" else None
+        udp_hdr = pkt.l4_field if proto_type == "UDP" else None
+        icmp_hdr = pkt.l4_field if proto_type == "ICMP" else None
 
-        # Normalize VLAN if present
-        if hasattr(pkt, 'dot1q') and pkt.dot1q:
-            pkt.dot1q.vlan = 0
-            pkt.dot1q.prio = 0
-            pkt.dot1q.id = 0
+        fields = []
 
-        # TCP-specific normalization
-        if proto_type == "TCP" and hasattr(pkt, 'tcp') and pkt.tcp:
-            pkt.tcp.seq = 0
-            pkt.tcp.ack = 0
-            pkt.tcp.window = 0
-            pkt.tcp.chksum = 0
-            pkt.tcp.urgptr = 0
-            pkt.tcp.dataofs = 0
-            pkt.tcp.options = [opt for opt in pkt.tcp.options if opt[0] not in ("Timestamp", "SACK")]
+        # --- IP Header Normalization ---
+        if ip_hdr:
+            fields.extend([
+                ip_hdr.get("version", 4),
+                ip_hdr.get("ihl", 5),
+                ip_hdr.get("TYPE_OF_SERVICE", 0) & 0xFC,  # DSCP bits only
+                0,  # total length (normalized)
+                0,  # ID
+                0,  # fragment offset
+                ip_hdr.get("ttl", 0),
+                ip_hdr.get("protocol", 0),
+                0,  # checksum
+                b"\x00" * 4,  # src IP
+                b"\x00" * 4   # dst IP
+            ])
 
-        # UDP-specific normalization
-        elif proto_type == "UDP" and hasattr(pkt, 'udp') and pkt.udp:
-            pkt.udp.len = 0
-            pkt.udp.chksum = 0
+        # --- VLAN / IP Options (Hook) ---
+        if "vlan" in pkt.l2_field:
+            fields.append(pkt.l2_field["vlan"])
+        if ip_hdr and "ip_options" in ip_hdr:
+            fields.append(ip_hdr["ip_options"])
 
-        # ICMP-specific normalization
-        elif proto_type == "ICMP" and hasattr(pkt, 'icmp') and pkt.icmp:
-            pkt.icmp.chksum = 0
-            pkt.icmp.seq = 0
-            pkt.icmp.id = 0
+        # --- TCP Header Normalization ---
+        if proto_type == "TCP" and tcp_hdr:
+            fields.extend([
+                0,  # src_port
+                tcp_hdr.get("dest_port", 0),
+                0,  # seq
+                0,  # ack
+                0x50,  # data offset
+                tcp_hdr.get("flags", 0),
+                0,  # window
+                0,  # checksum
+                0   # urgent pointer
+            ])
+            opts = tcp_hdr.get("option_field", {})
+            options_filtered = {
+                k: v for k, v in opts.items()
+                if k not in ["ts_val", "ts_ecr", "sack"]
+            }
+            fields.append(str(sorted(options_filtered.items())).encode())
 
-        # L7 Application layer (Raw/DNS/HTTP)
-        l7_id = b''
-        if hasattr(pkt, 'dns') and pkt.dns:
-            l7_id = bytes(pkt.dns.qd.qname) if pkt.dns.qd else b'dns'
-        elif hasattr(pkt, 'raw') and pkt.raw:
-            raw_payload = pkt.raw.load.lower()
-            if b"http" in raw_payload:
-                l7_id = b'http'
-            elif b"smb" in raw_payload:
-                l7_id = b'smb'
-            elif b"ftp" in raw_payload:
-                l7_id = b'ftp'
-            elif b"ssh" in raw_payload:
-                l7_id = b'ssh'
-            elif b"sip" in raw_payload:
-                l7_id = b'sip'
+        # --- UDP Header Normalization ---
+        elif proto_type == "UDP" and udp_hdr:
+            fields.extend([
+                0,  # src_port
+                udp_hdr.get("dest_port", 0),
+                0,  # length
+                0   # checksum
+            ])
 
-        # Final byte blob
-        raw_bytes = bytes(pkt.packet) + l7_id
+        # --- ICMP Header Normalization ---
+        elif proto_type == "ICMP" and icmp_hdr:
+            fields.extend([
+                icmp_hdr.get("icmp_type", 0),
+                icmp_hdr.get("code", 0),
+                0, 0  # checksum, id
+            ])
 
-        if use_hash:
-            return hashlib.sha256(raw_bytes).digest()
+        # Return raw bytes
+        raw_bytes = b"".join(
+            x.to_bytes(1, 'big') if isinstance(x, int) else x
+            for x in fields
+        )
         return raw_bytes
 
     except Exception as e:
-        logging.warning(f"⚠️ generateKey failed for {proto_type}: {e}")
+        logging.warning(f"⚠️ generateKey() failed for {proto_type}: {e}")
         return b''
