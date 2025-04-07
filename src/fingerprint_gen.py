@@ -2,14 +2,17 @@
 
 import copy
 import logging
+import hashlib
 
-def generateKey(packet, proto_type):
+
+def generateKey(packet, proto_type, use_hash=True):
     """
     Normalizes the packet structure to generate a deterministic key.
 
     Args:
         packet: A parsed Packet object with l2/l3/l4 fields.
         proto_type: One of "TCP", "UDP", "ICMP", "ARP", etc.
+        use_hash: If True, returns SHA256 of raw key.
 
     Returns:
         bytes: A normalized byte-string representing the fingerprintable part of the packet.
@@ -83,12 +86,23 @@ def generateKey(packet, proto_type):
                 0, 0  # checksum, id
             ])
 
+        # --- DNS / HTTP (L7) Normalization ---
+        if hasattr(pkt, "l7_payload"):
+            l7 = pkt.l7_payload
+            if proto_type == "UDP" and pkt.l4_field.get("dest_port") in (53,):
+                fields.append(b"DNS")
+            elif proto_type == "TCP" and pkt.l4_field.get("dest_port") in (80, 443):
+                if b"HTTP" in l7[:16]:
+                    fields.append(b"HTTP")
+                elif l7.startswith(b"\x16\x03"):
+                    fields.append(b"TLS")
+
         # Return raw bytes
         raw_bytes = b"".join(
             x.to_bytes(1, 'big') if isinstance(x, int) else x
             for x in fields
         )
-        return raw_bytes
+        return hashlib.sha256(raw_bytes).digest() if use_hash else raw_bytes
 
     except Exception as e:
         logging.warning(f"⚠️ generateKey() failed for {proto_type}: {e}")
