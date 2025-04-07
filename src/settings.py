@@ -116,6 +116,14 @@ BASE_OS_TEMPLATES = {
         "ttl": 128, "window": 64240,
         "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
     },
+    "windows2022": {
+        "ttl": 128, "window": 65535,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
+    },
+    "windows2025": {
+        "ttl": 128, "window": 65535,
+        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
+    },
     "mac": {
         "ttl": 64, "window": 65535,
         "ipid": "zero", "df": True,
@@ -125,6 +133,7 @@ BASE_OS_TEMPLATES = {
 
 OS_ALIASES = {
     "windows10": "win10", "windows11": "win11",
+    "windows2022": "windows2022", "windows2025": "windows2025",
     "ubuntu20": "linux", "macos": "mac"
 }
 
