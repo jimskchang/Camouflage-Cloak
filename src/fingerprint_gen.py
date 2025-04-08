@@ -1,109 +1,109 @@
 # src/fingerprint_gen.py
 
 import copy
-import logging
 import hashlib
+import logging
+from scapy.all import DNS, DNSQR, Raw
 
-
-def generateKey(packet, proto_type, use_hash=True):
+def generateKey(packet, proto_type, enable_l7=True, use_hash=True):
     """
-    Normalizes the packet structure to generate a deterministic key.
+    Generate a normalized key based on L3/L4 (and optionally L7) fields.
 
     Args:
-        packet: A parsed Packet object with l2/l3/l4 fields.
-        proto_type: One of "TCP", "UDP", "ICMP", "ARP", etc.
-        use_hash: If True, returns SHA256 of raw key.
+        packet: Parsed Packet object
+        proto_type: "TCP", "UDP", "ICMP", "ARP"
+        enable_l7 (bool): include DNS/HTTP fields
+        use_hash (bool): return SHA256 of key
 
     Returns:
-        bytes: A normalized byte-string representing the fingerprintable part of the packet.
+        bytes: raw or hashed key
     """
     try:
         pkt = copy.deepcopy(packet)
-
-        ip_hdr = pkt.l3_field
-        tcp_hdr = pkt.l4_field if proto_type == "TCP" else None
-        udp_hdr = pkt.l4_field if proto_type == "UDP" else None
-        icmp_hdr = pkt.l4_field if proto_type == "ICMP" else None
-
         fields = []
 
-        # --- IP Header Normalization ---
-        if ip_hdr:
-            fields.extend([
-                ip_hdr.get("version", 4),
-                ip_hdr.get("ihl", 5),
-                ip_hdr.get("TYPE_OF_SERVICE", 0) & 0xFC,  # DSCP bits only
-                0,  # total length (normalized)
-                0,  # ID
-                0,  # fragment offset
-                ip_hdr.get("ttl", 0),
-                ip_hdr.get("protocol", 0),
-                0,  # checksum
-                b"\x00" * 4,  # src IP
-                b"\x00" * 4   # dst IP
-            ])
+        ip = pkt.l3_field
+        l4 = pkt.l4_field
 
-        # --- VLAN / IP Options (Hook) ---
+        # --- IP Header Normalization ---
+        if ip:
+            fields.extend([
+                ip.get("version", 4),
+                ip.get("ihl", 5),
+                ip.get("TYPE_OF_SERVICE", 0) & 0xFC,
+                0,  # total_length
+                0,  # ID
+                0,  # frag offset
+                ip.get("ttl", 0),
+                ip.get("protocol", 0),
+                0,
+                b"\x00" * 4,
+                b"\x00" * 4,
+            ])
+            if "ip_options" in ip:
+                fields.append(ip["ip_options"])
+
         if "vlan" in pkt.l2_field:
             fields.append(pkt.l2_field["vlan"])
-        if ip_hdr and "ip_options" in ip_hdr:
-            fields.append(ip_hdr["ip_options"])
 
-        # --- TCP Header Normalization ---
-        if proto_type == "TCP" and tcp_hdr:
+        # --- TCP ---
+        if proto_type == "TCP":
             fields.extend([
-                0,  # src_port
-                tcp_hdr.get("dest_port", 0),
-                0,  # seq
-                0,  # ack
-                0x50,  # data offset
-                tcp_hdr.get("flags", 0),
-                0,  # window
-                0,  # checksum
-                0   # urgent pointer
+                0,
+                l4.get("dest_port", 0),
+                0, 0,
+                0x50,
+                l4.get("flags", 0),
+                0, 0, 0
             ])
-            opts = tcp_hdr.get("option_field", {})
-            options_filtered = {
-                k: v for k, v in opts.items()
-                if k not in ["ts_val", "ts_ecr", "sack"]
+            opts = l4.get("option_field", {})
+            stripped = {
+                k: v for k, v in opts.items() if k not in ["ts_val", "ts_ecr", "sack"]
             }
-            fields.append(str(sorted(options_filtered.items())).encode())
+            fields.append(str(sorted(stripped.items())).encode())
 
-        # --- UDP Header Normalization ---
-        elif proto_type == "UDP" and udp_hdr:
+        # --- UDP ---
+        elif proto_type == "UDP":
             fields.extend([
-                0,  # src_port
-                udp_hdr.get("dest_port", 0),
-                0,  # length
-                0   # checksum
+                0,
+                l4.get("dest_port", 0),
+                0, 0
             ])
 
-        # --- ICMP Header Normalization ---
-        elif proto_type == "ICMP" and icmp_hdr:
+        # --- ICMP ---
+        elif proto_type == "ICMP":
             fields.extend([
-                icmp_hdr.get("icmp_type", 0),
-                icmp_hdr.get("code", 0),
-                0, 0  # checksum, id
+                l4.get("icmp_type", 0),
+                l4.get("code", 0),
+                0, 0
             ])
 
-        # --- DNS / HTTP (L7) Normalization ---
-        if hasattr(pkt, "l7_payload"):
-            l7 = pkt.l7_payload
-            if proto_type == "UDP" and pkt.l4_field.get("dest_port") in (53,):
-                fields.append(b"DNS")
-            elif proto_type == "TCP" and pkt.l4_field.get("dest_port") in (80, 443):
-                if b"HTTP" in l7[:16]:
-                    fields.append(b"HTTP")
-                elif l7.startswith(b"\x16\x03"):
-                    fields.append(b"TLS")
+        # --- L7 Fingerprint (DNS, HTTP) ---
+        if enable_l7 and hasattr(pkt, "packet"):
+            try:
+                payload = pkt.packet[54:]  # offset past typical IP+TCP
+                if proto_type == "UDP" and l4.get("dest_port") == 53:
+                    dns = DNS(payload)
+                    if dns and dns.qr == 0:
+                        for i in range(min(2, dns.qdcount)):
+                            q = dns[DNSQR][i]
+                            fields.append(q.qname)
+                            fields.append(q.qtype.to_bytes(1, "big"))
+                elif proto_type == "TCP" and l4.get("dest_port") in [80, 443]:
+                    http = Raw(payload).load.decode(errors="ignore")
+                    lines = http.split("\r\n")
+                    for line in lines[:3]:  # first few header lines
+                        fields.append(line.strip().lower().encode())
+            except Exception as e:
+                logging.debug(f"⚠️ L7 parsing skipped: {e}")
 
-        # Return raw bytes
-        raw_bytes = b"".join(
-            x.to_bytes(1, 'big') if isinstance(x, int) else x
-            for x in fields
+        # Convert all to bytes
+        raw = b"".join(
+            x.to_bytes(1, "big") if isinstance(x, int) else x for x in fields
         )
-        return hashlib.sha256(raw_bytes).digest() if use_hash else raw_bytes
+
+        return hashlib.sha256(raw).digest() if use_hash else raw
 
     except Exception as e:
-        logging.warning(f"⚠️ generateKey() failed for {proto_type}: {e}")
-        return b''
+        logging.warning(f"⚠️ generateKey failed for {proto_type}: {e}")
+        return b""
