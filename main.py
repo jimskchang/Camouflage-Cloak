@@ -1,4 +1,5 @@
-# main.py (updated)
+# --- main.py ---
+
 import os
 import sys
 import time
@@ -31,7 +32,7 @@ try:
     from port_deceiver import PortDeceiver
     from fingerprint_gen import generateKey
     from os_recorder import templateSynthesis
-    from ja3_extractor import match_ja3_rule
+    from ja3_extractor import extract_ja3, match_ja3_rule
 except ImportError as e:
     logging.error(f"[ERROR]: Import error: {e}")
     sys.exit(1)
