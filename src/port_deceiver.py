@@ -8,8 +8,7 @@ from src.settings import CUSTOM_RULES, JA3_RULES, get_os_fingerprint
 from src.response import synthesize_response
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.ja3_extractor import extract_ja3
-from src.fingerprint_gen import generateKey
+from src.ja3_extractor import extract_ja3, match_ja3_rule
 
 class PortDeceiver:
     def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False):
@@ -34,10 +33,9 @@ class PortDeceiver:
         self.protocol_stats = {}
         self.session_log = {}
         self.ja3_log = {}
-        self.fingerprint_cache = {}
 
     def run(self):
-        logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
+        logging.info(f"✅ Starting port deception on {self.nic} (IP: {self.interface_ip})")
         sniff(iface=self.nic, prn=self._handle_packet, store=False)
 
     def _handle_packet(self, pkt_raw):
@@ -45,7 +43,6 @@ class PortDeceiver:
             pkt = Packet(bytes(pkt_raw))
             pkt.interface = self.nic
             pkt.unpack()
-
             proto = pkt.l4
             src_ip = pkt.l3_field.get("src_IP_str")
             dst_ip = pkt.l3_field.get("dest_IP_str")
@@ -54,18 +51,20 @@ class PortDeceiver:
             tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
             ja3_hash = None
 
-            # Generate fingerprint key
-            key = generateKey(pkt, proto.upper())
-            if key:
-                logging.debug(f"🧠 Fingerprint key: {key.hex()[:32]} for {proto.upper()}:{dst_port}")
-                self.fingerprint_cache.setdefault(key, []).append(pkt.packet)
-
-            # JA3 detection
+            # JA3 detection if applicable
             if proto == "tcp" and dst_port == 443:
                 ja3_hash = extract_ja3(pkt.packet)
                 if ja3_hash:
                     self.ja3_log.setdefault(src_ip, []).append(ja3_hash)
                     logging.info(f"🔍 JA3 for {src_ip}: {ja3_hash}")
+                    rule = match_ja3_rule(ja3_hash)
+                    if rule:
+                        if rule["action"] == "drop":
+                            logging.info(rule.get("log", f"❌ Dropping by JA3: {ja3_hash}"))
+                            return
+                        elif rule["action"] == "template":
+                            logging.info(rule.get("log", f"📆 Routing to JA3 template: {rule['template_name']}"))
+                            # TODO: respond using template logic
 
             # Custom rule evaluation
             for rule in CUSTOM_RULES:
@@ -87,18 +86,6 @@ class PortDeceiver:
                         return
                     elif rule["action"] == "template":
                         break
-
-            # JA3-specific rule
-            if ja3_hash:
-                for ja3_rule in JA3_RULES:
-                    if ja3_rule["ja3"] == ja3_hash:
-                        if ja3_rule["action"] == "drop":
-                            logging.info(ja3_rule.get("log", f"❌ Dropping by JA3: {ja3_hash}"))
-                            return
-                        elif ja3_rule["action"] == "template":
-                            logging.info(ja3_rule.get("log", f"📦 Routing to JA3 template: {ja3_rule['template_name']}"))
-                            # Hook future response logic here
-                            break
 
             # Fallback response
             response = synthesize_response(pkt, b"", ttl=self.ttl, window=self.window, deceiver=self)
