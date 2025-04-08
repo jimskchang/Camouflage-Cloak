@@ -19,8 +19,8 @@ from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES, JA3_
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
-from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.fingerprint_utils import gen_key
+from src.ja3_extractor import extract_ja3, match_ja3_rule
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -59,11 +59,11 @@ class OsDeceiver:
         self.protocol_stats = defaultdict(int)
         self.sent_packets = []
         self.session_log = {}
-        self.ja3_log = {}
         self.replay = replay
         self.interactive = interactive
         self.enable_dns = enable_dns
         self.enable_ja3 = enable_ja3
+        self.ja3_log = {}
 
         self._init_plot()
 
@@ -100,37 +100,20 @@ class OsDeceiver:
                 frag = pkt.l3_field.get("FRAGMENT_STATUS", 0)
                 dst_port = pkt.l4_field.get("dest_port", 0)
 
-                # JA3 detection
                 ja3_hash = None
                 if self.enable_ja3 and proto == "tcp" and dst_port == 443:
                     ja3_hash = extract_ja3(pkt.packet)
                     if ja3_hash:
                         self.ja3_log.setdefault(src_ip, []).append(ja3_hash)
-                        logging.info(f"🔍 JA3 for {src_ip}: {ja3_hash}")
-
-                        ja3_match = match_ja3_rule(ja3_hash)
-                        if ja3_match:
-                            action = ja3_match.get("action")
-                            logging.info(ja3_match.get("log", f"Matched JA3 rule: {ja3_hash}"))
-                            if action == "drop":
+                        rule = match_ja3_rule(ja3_hash)
+                        if rule:
+                            logging.info(rule.get("log", f"JA3 match for {ja3_hash}"))
+                            if rule["action"] == "drop":
                                 continue
-                            elif action == "template":
-                                template_name = ja3_match.get("template_name")
-                                template_bytes = self.load_ja3_template(template_name)
-                                if template_bytes:
-                                    response = synthesize_response(pkt, template_bytes, ttl=self.ttl, window=self.window, deceiver=self)
-                                    if response:
-                                        self.conn.sock.send(response)
-                                        self.sent_packets.append(response)
-                                        self.protocol_stats[proto.upper()] += 1
-                                        self.session_log.setdefault(src_ip, []).append({
-                                            "proto": proto,
-                                            "time": datetime.utcnow().isoformat(),
-                                            "action": f"ja3:{ja3_hash}"
-                                        })
-                                        continue
+                            elif rule["action"] == "template":
+                                # TODO: respond with JA3-specific TLS template
+                                pass
 
-                # Match CUSTOM_RULES
                 for rule in CUSTOM_RULES:
                     match = rule.get("proto", "").lower() == proto
                     match &= rule.get("port", dst_port) == dst_port if "port" in rule else True
@@ -150,7 +133,7 @@ class OsDeceiver:
                             self.send_icmp_port_unreachable(pkt)
                             continue
                         elif rule["action"] == "template":
-                            break  # fallthrough to template lookup
+                            break
 
                 key, _ = gen_key(proto, pkt.packet)
                 template = templates.get(proto, {}).get(key)
@@ -184,7 +167,6 @@ class OsDeceiver:
 
         self.export_sent_packets()
         self.export_session_log()
-        self.export_ja3_log()
 
     def send_tcp_rst(self, pkt):
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"], ttl=self.ttl)
@@ -210,16 +192,6 @@ class OsDeceiver:
             data = json.load(f)
         return {bytes.fromhex(k): bytes.fromhex(v) for k, v in data.items()}
 
-    def load_ja3_template(self, name):
-        try:
-            path = os.path.join(self.os_record_path, f"{name}.bin")
-            if os.path.exists(path):
-                with open(path, "rb") as f:
-                    return f.read()
-        except Exception as e:
-            logging.warning(f"⚠️ Failed to load JA3 template {name}: {e}")
-        return None
-
     def export_sent_packets(self):
         path = os.path.join(self.os_record_path, "sent_os_responses.pcap")
         wrpcap(path, self.sent_packets)
@@ -230,9 +202,3 @@ class OsDeceiver:
         with open(path, "w") as f:
             json.dump(self.session_log, f, indent=2)
         logging.info(f"📝 OS session log saved: {path}")
-
-    def export_ja3_log(self):
-        path = os.path.join(self.os_record_path, "ja3_log.json")
-        with open(path, "w") as f:
-            json.dump(self.ja3_log, f, indent=2)
-        logging.info(f"🔐 JA3 fingerprint log saved: {path}")
