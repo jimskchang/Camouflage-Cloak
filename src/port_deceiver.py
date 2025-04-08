@@ -2,13 +2,14 @@ import os
 import json
 import logging
 from datetime import datetime
-from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP
+from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP, DNS
 
 from src.settings import CUSTOM_RULES, JA3_RULES, get_os_fingerprint
 from src.response import synthesize_response
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.ja3_extractor import extract_ja3, match_ja3_rule
+from src.fingerprint_utils import gen_key
 
 class PortDeceiver:
     def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False):
@@ -35,7 +36,7 @@ class PortDeceiver:
         self.ja3_log = {}
 
     def run(self):
-        logging.info(f"✅ Starting port deception on {self.nic} (IP: {self.interface_ip})")
+        logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
         sniff(iface=self.nic, prn=self._handle_packet, store=False)
 
     def _handle_packet(self, pkt_raw):
@@ -57,14 +58,18 @@ class PortDeceiver:
                 if ja3_hash:
                     self.ja3_log.setdefault(src_ip, []).append(ja3_hash)
                     logging.info(f"🔍 JA3 for {src_ip}: {ja3_hash}")
-                    rule = match_ja3_rule(ja3_hash)
-                    if rule:
-                        if rule["action"] == "drop":
-                            logging.info(rule.get("log", f"❌ Dropping by JA3: {ja3_hash}"))
+
+                    # JA3 rule matching
+                    matched_rule = match_ja3_rule(ja3_hash)
+                    if matched_rule:
+                        action = matched_rule.get("action")
+                        if action == "drop":
+                            logging.info(matched_rule.get("log", f"❌ Dropping JA3 {ja3_hash}"))
                             return
-                        elif rule["action"] == "template":
-                            logging.info(rule.get("log", f"📆 Routing to JA3 template: {rule['template_name']}"))
-                            # TODO: respond using template logic
+                        elif action == "template":
+                            logging.info(matched_rule.get("log", f"📦 JA3 {ja3_hash} → template: {matched_rule.get('template_name')}"))
+                            # Future support: lookup and use specific TLS template
+                            pass
 
             # Custom rule evaluation
             for rule in CUSTOM_RULES:
@@ -109,7 +114,7 @@ class PortDeceiver:
     def _send_icmp_unreachable(self, pkt):
         from scapy.all import ICMP
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"])
-        icmp = ICMP(type=3, code=3)
+        icmp = ICMP(type=3, code=3)  # Destination Unreachable, Port Unreachable
         inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
         response = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
         self.conn.send_packet(bytes(response))
