@@ -67,7 +67,7 @@ def get_host_ip(nic):
     except Exception:
         return "127.0.0.1"
 
-def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=False):
+def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=False, enable_l7=False):
     template_dict = defaultdict(dict)
     pair_dict = {}
 
@@ -77,7 +77,7 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
             packet.interface = nic
             packet.unpack()
             proto = packet.l4 if packet.l4 else packet.l3
-            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip)
+            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip, base_path=dest_path, enable_l7=enable_l7)
         except Exception as e:
             logging.debug(f"[SKIP]: Failed to unpack packet: {e}")
 
@@ -110,6 +110,7 @@ def main():
     parser.add_argument("--interactive", action="store_true")
     parser.add_argument("--dns", action="store_true")
     parser.add_argument("--ja3", action="store_true")
+    parser.add_argument("--l7", action="store_true")
     args = parser.parse_args()
 
     if not args.nic:
@@ -126,7 +127,7 @@ def main():
     if args.scan == "ts":
         dest = os.path.abspath(args.dest or settings.OS_RECORD_PATH)
         ensure_dir(dest)
-        run_template_learning(args.host, dest, args.nic, enable_dns=args.dns, enable_ja3=args.ja3)
+        run_template_learning(args.host, dest, args.nic, enable_dns=args.dns, enable_ja3=args.ja3, enable_l7=args.l7)
 
     elif args.scan == "od":
         if not args.os:
@@ -161,7 +162,9 @@ def main():
             nic=args.nic,
             mac=mac,
             replay=args.replay,
-            interactive=args.interactive
+            interactive=args.interactive,
+            enable_dns=args.dns,
+            enable_ja3=args.ja3
         )
         deceiver.run()
 
