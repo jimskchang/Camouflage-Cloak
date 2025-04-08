@@ -18,9 +18,9 @@ import src.settings as settings
 from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES, JA3_RULES
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.response import synthesize_response  
-from src.fingerprint_gen import generateKey  # ✅ correct
-from src.ja3_extractor import extract_ja3
+from src.response import synthesize_response
+from src.ja3_extractor import extract_ja3, match_ja3_rule
+from src.fingerprint_utils import gen_key
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
 UNMATCHED_LOG = os.path.join(settings.OS_RECORD_PATH, "unmatched_keys.log")
@@ -53,18 +53,17 @@ class OsDeceiver:
             "ip_options": os_template.get("ip_options", b"")
         }
 
-        self.replay = replay
-        self.interactive = interactive
-        self.enable_dns = enable_dns
-        self.enable_ja3 = enable_ja3
-        self.ja3_per_ip = defaultdict(list)
-
         self.ip_id_counter = 0
         self.ip_state = {}
         self.timestamp_base = {}
         self.protocol_stats = defaultdict(int)
         self.sent_packets = []
         self.session_log = {}
+        self.ja3_log = {}
+        self.replay = replay
+        self.interactive = interactive
+        self.enable_dns = enable_dns
+        self.enable_ja3 = enable_ja3
 
         self._init_plot()
 
@@ -81,28 +80,6 @@ class OsDeceiver:
         self.ax.set_title("OS Deception Stats")
         self.ax.set_ylabel("Sent Packets")
         self.ax.set_ylim(0, max(values + [1]))
-
-    def get_ip_id(self, src_ip):
-        self.ip_id_counter = (self.ip_id_counter + 1) % 65536
-        return self.ip_id_counter
-
-    def get_tcp_options(self, src_ip, ts_echo=0):
-        opts = []
-        for opt in self.tcp_options:
-            if opt.startswith("MSS"):
-                mss_val = int(opt.split("=")[1])
-                opts.append(("MSS", mss_val))
-            elif opt == "SACK":
-                opts.append(("SAckOK", b''))
-            elif opt == "TS":
-                ts_val = int(time.time() * 1000) & 0xFFFFFFFF
-                opts.append(("Timestamp", (ts_val, ts_echo)))
-            elif opt.startswith("WS"):
-                scale = int(opt.split("=")[1])
-                opts.append(("WScale", scale))
-            elif opt == "NOP":
-                opts.append(("NOP", None))
-        return opts
 
     def os_deceive(self, timeout_minutes: int = 5):
         logging.info("🚦 Starting OS deception loop")
@@ -123,19 +100,34 @@ class OsDeceiver:
                 frag = pkt.l3_field.get("FRAGMENT_STATUS", 0)
                 dst_port = pkt.l4_field.get("dest_port", 0)
 
-                if self.enable_ja3 and proto == "tcp" and dst_port in [443, 8443, 10443]:
-                    ja3 = extract_ja3(raw)
-                    if ja3:
-                        self.ja3_per_ip[src_ip].append(ja3)
-                        for rule in JA3_RULES:
-                            if ja3 == rule.get("ja3"):
-                                logging.info(f"🔐 JA3 matched: {ja3} | Action: {rule.get('action')}")
-                                if rule["action"] == "drop":
-                                    continue
-                                elif rule["action"] == "template":
-                                    response = synthesize_response(pkt, templates.get("tcp", {}).get(b"ja3_tls_windows11"), ttl=self.ttl, window=self.window, deceiver=self)
+                # JA3 detection
+                ja3_hash = None
+                if self.enable_ja3 and proto == "tcp" and dst_port == 443:
+                    ja3_hash = extract_ja3(pkt.packet)
+                    if ja3_hash:
+                        self.ja3_log.setdefault(src_ip, []).append(ja3_hash)
+                        logging.info(f"🔍 JA3 for {src_ip}: {ja3_hash}")
+
+                        ja3_match = match_ja3_rule(ja3_hash)
+                        if ja3_match:
+                            action = ja3_match.get("action")
+                            logging.info(ja3_match.get("log", f"Matched JA3 rule: {ja3_hash}"))
+                            if action == "drop":
+                                continue
+                            elif action == "template":
+                                template_name = ja3_match.get("template_name")
+                                template_bytes = self.load_ja3_template(template_name)
+                                if template_bytes:
+                                    response = synthesize_response(pkt, template_bytes, ttl=self.ttl, window=self.window, deceiver=self)
                                     if response:
-                                        self.conn.send_packet(response)
+                                        self.conn.sock.send(response)
+                                        self.sent_packets.append(response)
+                                        self.protocol_stats[proto.upper()] += 1
+                                        self.session_log.setdefault(src_ip, []).append({
+                                            "proto": proto,
+                                            "time": datetime.utcnow().isoformat(),
+                                            "action": f"ja3:{ja3_hash}"
+                                        })
                                         continue
 
                 # Match CUSTOM_RULES
@@ -173,7 +165,7 @@ class OsDeceiver:
                 if template:
                     response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window, deceiver=self)
                     if response:
-                        self.conn.send_packet(response)
+                        self.conn.sock.send(response)
                         self.sent_packets.append(response)
                         self.protocol_stats[proto.upper()] += 1
                         self.session_log.setdefault(src_ip, []).append({
@@ -192,12 +184,14 @@ class OsDeceiver:
 
         self.export_sent_packets()
         self.export_session_log()
-        self.export_ja3_logs()
+        self.export_ja3_log()
 
     def send_tcp_rst(self, pkt):
-        rst = self.conn.build_tcp_rst(pkt)
-        self.conn.send_packet(rst)
-        self.sent_packets.append(rst)
+        ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"], ttl=self.ttl)
+        tcp = TCP(sport=pkt.l4_field["dest_port"], dport=pkt.l4_field["src_port"], flags="R", window=self.window)
+        rst = Ether(src=self.mac) / ip / tcp
+        self.conn.sock.send(bytes(rst))
+        self.sent_packets.append(bytes(rst))
         self.protocol_stats["TCP"] += 1
 
     def send_icmp_port_unreachable(self, pkt):
@@ -205,7 +199,7 @@ class OsDeceiver:
         icmp = ICMP(type=3, code=3)
         inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
         reply = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
-        self.conn.send_packet(bytes(reply))
+        self.conn.sock.send(bytes(reply))
         self.sent_packets.append(bytes(reply))
         self.protocol_stats["ICMP"] += 1
 
@@ -215,6 +209,16 @@ class OsDeceiver:
         with open(filename) as f:
             data = json.load(f)
         return {bytes.fromhex(k): bytes.fromhex(v) for k, v in data.items()}
+
+    def load_ja3_template(self, name):
+        try:
+            path = os.path.join(self.os_record_path, f"{name}.bin")
+            if os.path.exists(path):
+                with open(path, "rb") as f:
+                    return f.read()
+        except Exception as e:
+            logging.warning(f"⚠️ Failed to load JA3 template {name}: {e}")
+        return None
 
     def export_sent_packets(self):
         path = os.path.join(self.os_record_path, "sent_os_responses.pcap")
@@ -227,9 +231,8 @@ class OsDeceiver:
             json.dump(self.session_log, f, indent=2)
         logging.info(f"📝 OS session log saved: {path}")
 
-    def export_ja3_logs(self):
-        if self.enable_ja3 and self.ja3_per_ip:
-            path = os.path.join(self.os_record_path, "ja3_per_ip.json")
-            with open(path, "w") as f:
-                json.dump(self.ja3_per_ip, f, indent=2)
-            logging.info(f"🔐 JA3 per-IP export: {path}")
+    def export_ja3_log(self):
+        path = os.path.join(self.os_record_path, "ja3_log.json")
+        with open(path, "w") as f:
+            json.dump(self.ja3_log, f, indent=2)
+        logging.info(f"🔐 JA3 fingerprint log saved: {path}")
