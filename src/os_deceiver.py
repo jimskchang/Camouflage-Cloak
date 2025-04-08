@@ -18,8 +18,8 @@ import src.settings as settings
 from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES, JA3_RULES
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.response import synthesize_response
-from src.fingerprint_utils import gen_key
+from src.response import synthesize_response  
+from src.fingerprint_gen import generateKey  # ✅ correct
 from src.ja3_extractor import extract_ja3
 
 DEBUG_MODE = os.environ.get("DEBUG", "0") == "1"
