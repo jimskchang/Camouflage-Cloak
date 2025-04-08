@@ -2,12 +2,14 @@ import os
 import json
 import logging
 from datetime import datetime
-from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP, DNS
+from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP
+
 from src.settings import CUSTOM_RULES, JA3_RULES, get_os_fingerprint
 from src.response import synthesize_response
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.ja3_extractor import extract_ja3
+from src.fingerprint_gen import generateKey
 
 class PortDeceiver:
     def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False):
@@ -32,6 +34,7 @@ class PortDeceiver:
         self.protocol_stats = {}
         self.session_log = {}
         self.ja3_log = {}
+        self.fingerprint_cache = {}
 
     def run(self):
         logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
@@ -42,6 +45,7 @@ class PortDeceiver:
             pkt = Packet(bytes(pkt_raw))
             pkt.interface = self.nic
             pkt.unpack()
+
             proto = pkt.l4
             src_ip = pkt.l3_field.get("src_IP_str")
             dst_ip = pkt.l3_field.get("dest_IP_str")
@@ -50,7 +54,13 @@ class PortDeceiver:
             tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
             ja3_hash = None
 
-            # JA3 detection if applicable
+            # Generate fingerprint key
+            key = generateKey(pkt, proto.upper())
+            if key:
+                logging.debug(f"🧠 Fingerprint key: {key.hex()[:32]} for {proto.upper()}:{dst_port}")
+                self.fingerprint_cache.setdefault(key, []).append(pkt.packet)
+
+            # JA3 detection
             if proto == "tcp" and dst_port == 443:
                 ja3_hash = extract_ja3(pkt.packet)
                 if ja3_hash:
@@ -78,7 +88,7 @@ class PortDeceiver:
                     elif rule["action"] == "template":
                         break
 
-            # JA3-specific template rule
+            # JA3-specific rule
             if ja3_hash:
                 for ja3_rule in JA3_RULES:
                     if ja3_rule["ja3"] == ja3_hash:
@@ -87,7 +97,7 @@ class PortDeceiver:
                             return
                         elif ja3_rule["action"] == "template":
                             logging.info(ja3_rule.get("log", f"📦 Routing to JA3 template: {ja3_rule['template_name']}"))
-                            # Future hook: respond with JA3-specific template
+                            # Hook future response logic here
                             break
 
             # Fallback response
@@ -112,7 +122,7 @@ class PortDeceiver:
     def _send_icmp_unreachable(self, pkt):
         from scapy.all import ICMP
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"])
-        icmp = ICMP(type=3, code=3)  # Destination Unreachable, Port Unreachable
+        icmp = ICMP(type=3, code=3)
         inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
         response = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
         self.conn.send_packet(bytes(response))
