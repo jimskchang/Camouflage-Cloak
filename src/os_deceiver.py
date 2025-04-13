@@ -2,7 +2,6 @@
 
 import os
 import json
-import base64
 import logging
 import socket
 import struct
@@ -24,7 +23,6 @@ from src.fingerprint_utils import gen_key
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 
 UNMATCHED_LOG = os.path.join(os.path.dirname(__file__), "..", "os_record", "unmatched_keys.log")
-JA3_TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "..", "os_record")
 
 class OsDeceiver:
     def __init__(self, target_host, target_os, dest=None, nic=None, replay=False, interactive=False, enable_dns=False, enable_ja3=False):
@@ -42,6 +40,7 @@ class OsDeceiver:
         self.enable_ja3 = enable_ja3
         self.ja3_log = {}
 
+        # OS fingerprint config
         os_template = get_os_fingerprint(target_os)
         self.ttl = os_template.get("ttl", 64)
         self.window = os_template.get("window", 8192)
@@ -106,18 +105,12 @@ class OsDeceiver:
                             if rule["action"] == "drop":
                                 continue
                             elif rule["action"] == "template":
-                                ja3_template_file = os.path.join(JA3_TEMPLATE_DIR, f"ja3_{rule['template_name']}.bin")
+                                ja3_template_file = os.path.join(self.dest, f"ja3_{rule['template_name']}.bin")
                                 if os.path.exists(ja3_template_file):
                                     with open(ja3_template_file, "rb") as f:
                                         tls_response = f.read()
                                     self.conn.send_packet(tls_response)
                                     self.protocol_stats["JA3"] += 1
-                                    self.session_log.setdefault(src_ip, []).append({
-                                        "proto": "tls",
-                                        "time": datetime.utcnow().isoformat(),
-                                        "action": "ja3_template",
-                                        "ja3": ja3_hash
-                                    })
                                     continue
 
                 for rule in CUSTOM_RULES:
@@ -173,7 +166,7 @@ class OsDeceiver:
 
         self.export_sent_packets()
         self.export_session_log()
-        self.export_ja3_observed()
+        self.export_ja3_log()
 
     def send_tcp_rst(self, pkt):
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"], ttl=self.ttl)
@@ -211,10 +204,10 @@ class OsDeceiver:
             json.dump(self.session_log, f, indent=2)
         logging.info(f"📝 OS session log saved: {path}")
 
-    def export_ja3_observed(self):
+    def export_ja3_log(self):
         if not self.ja3_log:
             return
         path = os.path.join(self.dest, "ja3_observed.json")
         with open(path, "w") as f:
             json.dump(self.ja3_log, f, indent=2)
-        logging.info(f"🔍 JA3 observations saved: {path}")
+        logging.info(f"🔍 JA3 log exported: {path}")
