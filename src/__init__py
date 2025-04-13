@@ -16,4 +16,7 @@ from .settings import (
     GATEWAY_MAP
 )
 from .response import synthesize_response
-from .fingerprint_utils import gen
+from .fingerprint_utils import gen_key
+from .ja3_extractor import extract_ja3, match_ja3_rule
+from .os_recorder import templateSynthesis
+from .fingerprint_gen import generateKey
