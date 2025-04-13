@@ -1,5 +1,3 @@
-# main.py
-
 import os
 import sys
 import time
@@ -31,7 +29,7 @@ try:
     from os_deceiver import OsDeceiver
     from port_deceiver import PortDeceiver
     from fingerprint_gen import generateKey
-    from os_recorder import templateSynthesis
+    from os_recorder import templateSynthesis, export_ja3_log
     from ja3_extractor import extract_ja3, match_ja3_rule
 except ImportError as e:
     logging.error(f"[ERROR]: Import error: {e}")
@@ -80,7 +78,7 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
             packet.interface = nic
             packet.unpack()
             proto = packet.l4 if packet.l4 else packet.l3
-            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip)
+            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip, base_path=dest_path)
         except Exception as e:
             logging.debug(f"[SKIP]: Failed to unpack packet: {e}")
 
@@ -99,6 +97,8 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
         with open(outfile, "w") as f:
             json.dump(outdata, f, indent=2)
         logging.info(f"📦 Saved {proto} templates: {outfile}")
+
+    export_ja3_log(dest_path, nic)
 
 def main():
     parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak Deception Engine")
