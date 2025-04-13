@@ -208,5 +208,3 @@ class OsDeceiver:
             with open(path, "w") as f:
                 json.dump(self.ja3_log, f, indent=2)
             logging.info(f"🔍 JA3 log exported: {path}")
-        else:
-            logging.info("🔍 No JA3 entries observed during deception.")
