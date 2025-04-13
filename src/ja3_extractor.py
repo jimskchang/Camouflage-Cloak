@@ -1,8 +1,9 @@
 # src/ja3_extractor.py
 
 import hashlib
-import struct
+from scapy.all import TCP, Raw
 import logging
+from src.settings import JA3_RULES
 
 
 def extract_ja3(packet_bytes: bytes) -> str:
@@ -13,6 +14,25 @@ def extract_ja3(packet_bytes: bytes) -> str:
     Returns:
         ja3_string: Comma-separated JA3 string
     """
+    try:
+        pkt = TCP(packet_bytes)
+        if not pkt.haslayer(Raw):
+            return None
+        payload = bytes(pkt[Raw].load)
+        # Example dummy JA3 hash logic – placeholder
+        # In real JA3, parse TLS ClientHello
+        ja3_string = f"771,{pkt.sport}-{pkt.dport},0-10-11,23-24,0"
+        return hashlib.md5(ja3_string.encode()).hexdigest()
+    except Exception as e:
+        logging.warning(f"[JA3] Extraction failed: {e}")
+        return None
+
+def match_ja3_rule(ja3_hash: str) -> dict:
+    for rule in JA3_RULES:
+        if rule["ja3"] == ja3_hash:
+            return rule
+    return None
+    
     try:
         # Search for TLS handshake
         if len(packet_bytes) < 54:
