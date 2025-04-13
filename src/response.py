@@ -1,12 +1,12 @@
-# src/response.py
-
 import logging
 import random
 import time
+import json
 from ipaddress import ip_address, ip_network
+from collections import defaultdict
 
 from scapy.all import Ether, IP, TCP, UDP, ICMP
-from dnslib import DNSRecord, QTYPE, RR, A
+from dnslib import DNSRecord, QTYPE, RR, A, EDNS0
 
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.settings import JA3_RULES
@@ -14,6 +14,9 @@ from src.settings import JA3_RULES
 EXCLUDE_SOURCES = [
     ip_network("192.168.10.0/24"),
 ]
+
+JA3_LOG = defaultdict(list)
+
 
 def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=None):
     try:
@@ -30,14 +33,16 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
 
         # JA3-based handling
         if proto == "tcp":
-            ja3 = extract_ja3_from_packet(pkt)
-            rule = match_ja3_rule(ja3)
-            if rule:
-                logging.info(rule.get("log", "🎭 Matched JA3 rule"))
-                if rule["action"] == "drop":
-                    return None
-                elif rule["action"] == "tls_hello":
-                    return synthesize_tls_server_hello(pkt)
+            ja3 = extract_ja3(pkt)
+            if ja3:
+                JA3_LOG[src_ip_str].append(ja3)
+                rule = match_ja3_rule(ja3)
+                if rule:
+                    logging.info(rule.get("log", "🎭 Matched JA3 rule"))
+                    if rule["action"] == "drop":
+                        return None
+                    elif rule["action"] == "tls_hello":
+                        return synthesize_tls_server_hello(pkt)
 
         # DNS spoof (UDP port 53)
         if proto == "udp" and pkt.l4_field.get("dest_port") == 53:
@@ -111,7 +116,12 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
 
 def synthesize_dns_response(pkt, spoof_ip="1.2.3.4"):
     try:
-        payload = pkt.l4_field.get("raw_payload", b"")
+        payload = pkt.l4_field.get("raw_payload")
+        if not payload:
+            # Fallback: recalculate UDP payload
+            udp_start = len(pkt.l2_header) + len(pkt.l3_header)
+            payload = pkt.packet[udp_start + 8:]  # Skip UDP header
+
         dns = DNSRecord.parse(payload)
         qname = str(dns.q.qname)
         qtype = QTYPE[dns.q.qtype]
@@ -120,6 +130,7 @@ def synthesize_dns_response(pkt, spoof_ip="1.2.3.4"):
         reply = DNSRecord(dns)
         reply.header.qr = 1
         reply.add_answer(RR(qname, QTYPE.A, rdata=A(spoof_ip), ttl=60))
+        reply.add_ar(EDNS0())
 
         ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
         ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=64)
@@ -156,3 +167,12 @@ def synthesize_tls_server_hello(pkt):
     except Exception as e:
         logging.error(f"❌ TLS ServerHello spoof failed: {e}")
         return None
+
+
+def export_ja3_log(output_path="os_record/ja3_observed.json"):
+    try:
+        with open(output_path, "w") as f:
+            json.dump(JA3_LOG, f, indent=2)
+        logging.info(f"📄 JA3 log saved: {output_path}")
+    except Exception as e:
+        logging.warning(f"⚠️ Failed to export JA3 log: {e}")
