@@ -2,9 +2,9 @@ import logging
 import socket
 import struct
 import array
-
+import hashlib
 import src.settings as settings
-from src.fingerprint_utils import gen_key
+from src.fingerprint_utils import generateKey
 
 class Packet:
     def __init__(self, packet=b'', proc=None, l2_field=None, l3_field=None, l4_field=None, data='', ttl=None, window=None):
@@ -25,8 +25,7 @@ class Packet:
 
     def get_signature(self, proto_type: str) -> bytes:
         try:
-            key, _ = gen_key(proto_type.lower(), self.packet)
-            return key
+            return generateKey(self, proto_type)
         except Exception as e:
             logging.warning(f"[Packet] Failed to get signature for {proto_type}: {e}")
             return b''
