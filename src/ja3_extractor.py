@@ -1,53 +1,31 @@
 # src/ja3_extractor.py
 
-import hashlib
-from scapy.all import TCP, Raw
 import logging
+import hashlib
+import struct
+from scapy.all import TCP, Raw
 from src.settings import JA3_RULES
-
 
 def extract_ja3(packet_bytes: bytes) -> str:
     """
-    Extracts a JA3 fingerprint from raw TCP packet bytes (typically for port 443).
-    This is a simplified version assuming TLS ClientHello is directly available.
-
-    Returns:
-        ja3_string: Comma-separated JA3 string
+    Extracts a JA3 fingerprint from raw TCP packet bytes.
+    Returns MD5 hash of the JA3 string.
     """
     try:
-        pkt = TCP(packet_bytes)
-        if not pkt.haslayer(Raw):
-            return None
-        payload = bytes(pkt[Raw].load)
-        # Example dummy JA3 hash logic – placeholder
-        # In real JA3, parse TLS ClientHello
-        ja3_string = f"771,{pkt.sport}-{pkt.dport},0-10-11,23-24,0"
-        return hashlib.md5(ja3_string.encode()).hexdigest()
-    except Exception as e:
-        logging.warning(f"[JA3] Extraction failed: {e}")
-        return None
-    
-    try:
-        # Search for TLS handshake
         if len(packet_bytes) < 54:
             return None
 
         tcp_payload = packet_bytes[54:]
-        if tcp_payload[0] != 0x16:  # Not a TLS Handshake
+        if tcp_payload[0] != 0x16:  # TLS Handshake Content Type
             return None
 
-        # TLS Version
+        if tcp_payload[5] != 0x01:  # Handshake Type: ClientHello
+            return None
+
         version = struct.unpack("!H", tcp_payload[1:3])[0]
-
-        # Lengths
-        handshake_type = tcp_payload[5]
-        if handshake_type != 0x01:
-            return None  # Not a ClientHello
-
         session_id_len = tcp_payload[43]
         index = 44 + session_id_len
 
-        # Cipher Suites
         cipher_len = struct.unpack("!H", tcp_payload[index:index + 2])[0]
         index += 2
         ciphers = []
@@ -56,11 +34,9 @@ def extract_ja3(packet_bytes: bytes) -> str:
             ciphers.append(str(cipher))
         index += cipher_len
 
-        # Compression methods
         comp_methods_len = tcp_payload[index]
         index += 1 + comp_methods_len
 
-        # Extensions
         ext_total_len = struct.unpack("!H", tcp_payload[index:index + 2])[0]
         index += 2
 
@@ -92,30 +68,19 @@ def extract_ja3(packet_bytes: bytes) -> str:
                   f"{'-'.join(elliptic_curves)}," \
                   f"{'-'.join(ec_point_formats)}"
 
-        return ja3_str
+        return hashlib.md5(ja3_str.encode()).hexdigest()
 
     except Exception as e:
-        logging.warning(f"[JA3] Failed to extract JA3: {e}")
+        logging.warning(f"[JA3] Extraction failed: {e}")
         return None
 
-
-def match_ja3_rule(ja3_string: str, rule_set: list) -> dict:
-    for rule in JA3_RULES:
-        if rule["ja3"] == ja3_hash:
-            return rule
+def match_ja3_rule(ja3_hash: str) -> dict:
     """
-    Looks for a JA3 string match in the given JA3_RULES.
-
-    Args:
-        ja3_string: The raw JA3 string (not the MD5 hash).
-        rule_set: List of JA3 rules from settings.JA3_RULES.
-
-    Returns:
-        dict: The matched rule dictionary or None.
+    Returns matched JA3 rule (from settings.JA3_RULES) by hash.
     """
     try:
-        for rule in rule_set:
-            if rule.get("ja3") == ja3_string:
+        for rule in JA3_RULES:
+            if rule.get("ja3") == ja3_hash:
                 return rule
     except Exception as e:
         logging.warning(f"[JA3] match_ja3_rule error: {e}")
