@@ -17,8 +17,8 @@ from scapy.all import IP, TCP, UDP, ICMP, Ether, wrpcap, send, get_if_addr
 from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES, JA3_RULES
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.response import synthesize_response
-from src.fingerprint_utils import gen_key
+from src.response import synthesize_response, export_ja3_observed
+from src.fingerprint_gen import gen_key
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 
 UNMATCHED_LOG = os.path.join(os.path.dirname(__file__), "..", "os_record", "unmatched_keys.log")
@@ -164,7 +164,7 @@ class OsDeceiver:
 
         self.export_sent_packets()
         self.export_session_log()
-        self.export_ja3_log()
+        export_ja3_observed()
 
     def send_tcp_rst(self, pkt):
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"], ttl=self.ttl)
@@ -201,10 +201,3 @@ class OsDeceiver:
         with open(path, "w") as f:
             json.dump(self.session_log, f, indent=2)
         logging.info(f"📝 OS session log saved: {path}")
-
-    def export_ja3_log(self):
-        if self.ja3_log:
-            path = os.path.join(self.dest, "ja3_observed.json")
-            with open(path, "w") as f:
-                json.dump(self.ja3_log, f, indent=2)
-            logging.info(f"🔍 JA3 log exported: {path}")
