@@ -2,6 +2,7 @@ import logging
 import socket
 import struct
 import array
+
 import src.settings as settings
 from src.fingerprint_gen import generateKey
 
@@ -18,7 +19,6 @@ class Packet:
         self.l4_field = l4_field or {}
         self.data = data
         self.interface = None
-
         self.ttl_override = ttl
         self.window_override = window
 
