@@ -1,3 +1,5 @@
+# --- main.py ---
+
 import os
 import sys
 import time
@@ -78,7 +80,7 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
             packet.interface = nic
             packet.unpack()
             proto = packet.l4 if packet.l4 else packet.l3
-            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip, base_path=dest_path)
+            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip)
         except Exception as e:
             logging.debug(f"[SKIP]: Failed to unpack packet: {e}")
 
