@@ -2,12 +2,13 @@ import os
 import json
 import logging
 from datetime import datetime
-from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP
+from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP, DNS
+
 from src.settings import CUSTOM_RULES, JA3_RULES, get_os_fingerprint
-from src.response import synthesize_response, synthesize_tls_server_hello
+from src.response import synthesize_response
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.ja3_extractor import extract_ja3, match_ja3_rule
+from src.ja3_extractor import extract_ja3_from_packet, match_ja3_rule
 from src.fingerprint_utils import gen_key
 
 class PortDeceiver:
@@ -33,14 +34,11 @@ class PortDeceiver:
         self.protocol_stats = {}
         self.session_log = {}
         self.ja3_log = {}
-        self.sent_tls_templates = {}
 
     def run(self):
         logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
-        try:
-            sniff(iface=self.nic, prn=self._handle_packet, store=False)
-        finally:
-            self.export_logs()
+        sniff(iface=self.nic, prn=self._handle_packet, store=False)
+        self.export_ja3_log()
 
     def _handle_packet(self, pkt_raw):
         try:
@@ -55,24 +53,26 @@ class PortDeceiver:
             tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
             ja3_hash = None
 
-            # JA3 detection
+            # JA3 detection if applicable
             if proto == "tcp" and dst_port == 443:
-                ja3_hash = extract_ja3(pkt.packet)
+                ja3_hash = extract_ja3_from_packet(pkt)
                 if ja3_hash:
                     self.ja3_log.setdefault(src_ip, []).append(ja3_hash)
                     logging.info(f"🔍 JA3 for {src_ip}: {ja3_hash}")
+
+                    # JA3 rule matching
                     matched_rule = match_ja3_rule(ja3_hash)
                     if matched_rule:
-                        if matched_rule.get("action") == "drop":
+                        action = matched_rule.get("action")
+                        if action == "drop":
                             logging.info(matched_rule.get("log", f"❌ Dropping JA3 {ja3_hash}"))
                             return
-                        elif matched_rule.get("action") == "tls_hello":
-                            response = synthesize_tls_server_hello(pkt, fuzz_cert=True)
-                            self.conn.send_packet(response)
-                            self._log_session(src_ip, proto, dst_port, ja3_hash, action="tls_hello")
-                            return
+                        elif action == "template":
+                            logging.info(matched_rule.get("log", f"📦 JA3 {ja3_hash} → template: {matched_rule.get('template_name')}"))
+                            # Future support: lookup and use specific TLS template
+                            pass
 
-            # Custom L3/L4 rule processing
+            # Custom rule evaluation
             for rule in CUSTOM_RULES:
                 match = rule.get("proto", "").lower() == proto
                 match &= rule.get("port", dst_port) == dst_port if "port" in rule else True
@@ -93,39 +93,19 @@ class PortDeceiver:
                     elif rule["action"] == "template":
                         break
 
-            # Default template-based response
+            # Fallback response
             response = synthesize_response(pkt, b"", ttl=self.ttl, window=self.window, deceiver=self)
             if response:
                 self.conn.send_packet(response)
-                self._log_session(src_ip, proto, dst_port, ja3_hash)
+                self.session_log.setdefault(src_ip, []).append({
+                    "proto": proto,
+                    "port": dst_port,
+                    "ja3": ja3_hash,
+                    "time": datetime.utcnow().isoformat()
+                })
 
         except Exception as e:
             logging.warning(f"⚠️ PortDeceiver error: {e}")
-
-    def _log_session(self, src_ip, proto, port, ja3_hash=None, action="template"):
-        self.session_log.setdefault(src_ip, []).append({
-            "proto": proto,
-            "port": port,
-            "ja3": ja3_hash,
-            "action": action,
-            "time": datetime.utcnow().isoformat()
-        })
-
-    def export_logs(self):
-        base_path = os.path.join("os_record", self.os_name.lower())
-        os.makedirs(base_path, exist_ok=True)
-
-        if self.ja3_log:
-            path = os.path.join(base_path, "ja3_observed.json")
-            with open(path, "w") as f:
-                json.dump(self.ja3_log, f, indent=2)
-            logging.info(f"📁 Exported JA3 logs: {path}")
-
-        if self.session_log:
-            path = os.path.join(base_path, "port_session_log.json")
-            with open(path, "w") as f:
-                json.dump(self.session_log, f, indent=2)
-            logging.info(f"📝 Exported Port session logs: {path}")
 
     def _send_rst(self, pkt):
         rst = self.conn.build_tcp_rst(pkt)
@@ -135,7 +115,16 @@ class PortDeceiver:
     def _send_icmp_unreachable(self, pkt):
         from scapy.all import ICMP
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"])
-        icmp = ICMP(type=3, code=3)
+        icmp = ICMP(type=3, code=3)  # Destination Unreachable, Port Unreachable
         inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
         response = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
         self.conn.send_packet(bytes(response))
+
+    def export_ja3_log(self):
+        try:
+            out_path = os.path.join("os_record", f"ja3_observed_{self.nic}.json")
+            with open(out_path, "w") as f:
+                json.dump(self.ja3_log, f, indent=2)
+            logging.info(f"📄 Exported JA3 log: {out_path}")
+        except Exception as e:
+            logging.warning(f"⚠️ Failed to write JA3 log: {e}")
