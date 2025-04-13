@@ -1,14 +1,16 @@
+# src/port_deceiver.py
+
 import os
 import json
 import logging
 from datetime import datetime
-from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP, DNS
+from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP
 
 from src.settings import CUSTOM_RULES, JA3_RULES, get_os_fingerprint
 from src.response import synthesize_response
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.ja3_extractor import extract_ja3_from_packet, match_ja3_rule
+from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.fingerprint_utils import gen_key
 
 class PortDeceiver:
@@ -38,6 +40,7 @@ class PortDeceiver:
     def run(self):
         logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
         sniff(iface=self.nic, prn=self._handle_packet, store=False)
+        self.export_session_log()
         self.export_ja3_log()
 
     def _handle_packet(self, pkt_raw):
@@ -53,14 +56,10 @@ class PortDeceiver:
             tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
             ja3_hash = None
 
-            # JA3 detection if applicable
             if proto == "tcp" and dst_port == 443:
-                ja3_hash = extract_ja3_from_packet(pkt)
+                ja3_hash = extract_ja3(pkt.packet)
                 if ja3_hash:
                     self.ja3_log.setdefault(src_ip, []).append(ja3_hash)
-                    logging.info(f"🔍 JA3 for {src_ip}: {ja3_hash}")
-
-                    # JA3 rule matching
                     matched_rule = match_ja3_rule(ja3_hash)
                     if matched_rule:
                         action = matched_rule.get("action")
@@ -69,10 +68,9 @@ class PortDeceiver:
                             return
                         elif action == "template":
                             logging.info(matched_rule.get("log", f"📦 JA3 {ja3_hash} → template: {matched_rule.get('template_name')}"))
-                            # Future support: lookup and use specific TLS template
+                            # Placeholder for future JA3 TLS template support
                             pass
 
-            # Custom rule evaluation
             for rule in CUSTOM_RULES:
                 match = rule.get("proto", "").lower() == proto
                 match &= rule.get("port", dst_port) == dst_port if "port" in rule else True
@@ -93,7 +91,6 @@ class PortDeceiver:
                     elif rule["action"] == "template":
                         break
 
-            # Fallback response
             response = synthesize_response(pkt, b"", ttl=self.ttl, window=self.window, deceiver=self)
             if response:
                 self.conn.send_packet(response)
@@ -113,18 +110,28 @@ class PortDeceiver:
         self.protocol_stats["RST"] = self.protocol_stats.get("RST", 0) + 1
 
     def _send_icmp_unreachable(self, pkt):
-        from scapy.all import ICMP
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"])
-        icmp = ICMP(type=3, code=3)  # Destination Unreachable, Port Unreachable
+        icmp = ICMP(type=3, code=3)
         inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
         response = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
         self.conn.send_packet(bytes(response))
 
-    def export_ja3_log(self):
+    def export_session_log(self):
+        path = os.path.join("os_record", self.os_name, "port_session_log.json")
         try:
-            out_path = os.path.join("os_record", f"ja3_observed_{self.nic}.json")
-            with open(out_path, "w") as f:
-                json.dump(self.ja3_log, f, indent=2)
-            logging.info(f"📄 Exported JA3 log: {out_path}")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump(self.session_log, f, indent=2)
+            logging.info(f"📝 Port session log saved: {path}")
         except Exception as e:
-            logging.warning(f"⚠️ Failed to write JA3 log: {e}")
+            logging.error(f"❌ Failed to export session log: {e}")
+
+    def export_ja3_log(self):
+        if self.ja3_log:
+            path = os.path.join("os_record", self.os_name, "ja3_observed.json")
+            try:
+                with open(path, "w") as f:
+                    json.dump(self.ja3_log, f, indent=2)
+                logging.info(f"🔍 JA3 log exported: {path}")
+            except Exception as e:
+                logging.warning(f"⚠️ Failed to export JA3 log: {e}")
