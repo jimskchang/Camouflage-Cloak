@@ -6,8 +6,10 @@ import json
 from datetime import datetime
 from scapy.all import wrpcap
 
-from src.fingerprint_utils import gen_key
+from src.fingerprint_gen import generateKey
+from src.ja3_extractor import extract_ja3_from_packet
 
+ja3_log = {}
 
 def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, base_path=None, enable_l7=False):
     """
@@ -38,6 +40,13 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
         window = packet.l4_field.get("window") if proto_type == "TCP" else None
         options = packet.l4_field.get("option_field") if proto_type == "TCP" else {}
 
+        # Extract and store JA3 if enabled
+        if proto_type == "TCP" and dst_port == 443:
+            ja3_hash = extract_ja3_from_packet(packet)
+            if ja3_hash:
+                ja3_log.setdefault(src_ip, []).append(ja3_hash)
+                logging.info(f"🔍 JA3 Detected from {src_ip}: {ja3_hash}")
+
         # Request identification
         if proto_type in ("TCP", "UDP"):
             pair = (src_ip, dst_ip, src_port, dst_port)
@@ -50,9 +59,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
 
         # --- Incoming Request ---
         if dst_ip == host_ip:
-            key, _ = gen_key(proto_type.lower(), packet.packet)
-            if not key:
-                return template_dict
+            key = generateKey(packet, proto_type)
             pair_dict[pair] = key
             if key not in template_dict[proto_type]:
                 template_dict[proto_type][key] = None
@@ -93,3 +100,14 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
     except Exception as e:
         logging.warning(f"⚠️ templateSynthesis error: {e}")
         return template_dict
+
+def export_ja3_log(path, nic):
+    try:
+        if not ja3_log:
+            return
+        outfile = os.path.join(path, f"ja3_observed_{nic}.json")
+        with open(outfile, "w") as f:
+            json.dump(ja3_log, f, indent=2)
+        logging.info(f"🔐 JA3 log exported: {outfile}")
+    except Exception as e:
+        logging.warning(f"⚠️ Failed to export JA3 log: {e}")
