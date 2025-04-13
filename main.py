@@ -1,4 +1,4 @@
-# --- main.py ---
+# main.py
 
 import os
 import sys
@@ -11,21 +11,20 @@ import subprocess
 from collections import defaultdict
 from scapy.all import sniff, wrpcap, get_if_hwaddr
 
-# --- Setup paths ---
+# Setup paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(BASE_DIR, "src")
 os.makedirs(SRC_DIR, exist_ok=True)
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# --- Logging ---
+# Logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 
-# --- Imports ---
 try:
     import settings
     from Packet import Packet
@@ -38,7 +37,6 @@ except ImportError as e:
     logging.error(f"[ERROR]: Import error: {e}")
     sys.exit(1)
 
-# --- Utility Functions ---
 def ensure_dir(path):
     try:
         os.makedirs(path, exist_ok=True)
@@ -72,7 +70,6 @@ def get_host_ip(nic):
     except Exception:
         return "127.0.0.1"
 
-# --- Template Learning ---
 def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=False):
     template_dict = defaultdict(dict)
     pair_dict = {}
@@ -101,9 +98,8 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
         }
         with open(outfile, "w") as f:
             json.dump(outdata, f, indent=2)
-        logging.info(f"📦 Saved {proto.upper()} templates: {outfile}")
+        logging.info(f"📦 Saved {proto} templates: {outfile}")
 
-# --- Main ---
 def main():
     parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak Deception Engine")
     parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True)
@@ -173,4 +169,4 @@ def main():
         deceiver.run()
 
 if __name__ == "__main__":
-    main()  
+    main()
