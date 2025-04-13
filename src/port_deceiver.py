@@ -4,13 +4,12 @@ import logging
 from datetime import datetime
 from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP
 
-from src.settings import CUSTOM_RULES, JA3_RULES, get_os_fingerprint
+from src.settings import CUSTOM_RULES, JA3_RULES, get_os_fingerprint, OS_RECORD_PATH
 from src.response import synthesize_response
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.fingerprint_utils import gen_key
-
 
 class PortDeceiver:
     def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False):
@@ -37,8 +36,9 @@ class PortDeceiver:
         self.ja3_log = {}
 
     def run(self):
-        logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
+        logging.info(f"\U0001f6a6 Starting port deception on {self.nic} (IP: {self.interface_ip})")
         sniff(iface=self.nic, prn=self._handle_packet, store=False)
+        self.export_ja3_log()
 
     def _handle_packet(self, pkt_raw):
         try:
@@ -53,26 +53,31 @@ class PortDeceiver:
             tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
             ja3_hash = None
 
-            # --- JA3 detection ---
+            # JA3 detection if applicable
             if proto == "tcp" and dst_port == 443:
                 ja3_hash = extract_ja3(pkt.packet)
                 if ja3_hash:
                     self.ja3_log.setdefault(src_ip, []).append(ja3_hash)
-                    logging.info(f"🔍 JA3 for {src_ip}: {ja3_hash}")
-                    matched_rule = match_ja3_rule(ja3_hash, JA3_RULES)
+                    logging.info(f"\U0001f50d JA3 for {src_ip}: {ja3_hash}")
+
+                    matched_rule = match_ja3_rule(ja3_hash)
                     if matched_rule:
                         action = matched_rule.get("action")
                         if action == "drop":
-                            logging.info(matched_rule.get("log", f"❌ Dropping JA3 {ja3_hash}"))
+                            logging.info(matched_rule.get("log", f"\u274c Dropping JA3 {ja3_hash}"))
                             return
                         elif action == "template":
-                            logging.info(matched_rule.get("log", f"📦 JA3 {ja3_hash} → template"))
-                            response = synthesize_response(pkt, b"", ttl=self.ttl, window=self.window, deceiver=self)
-                            if response:
+                            logging.info(matched_rule.get("log", f"\U0001f4e6 JA3 {ja3_hash} → template: {matched_rule.get('template_name')}"))
+                            # Attempt to load TLS response
+                            template_path = os.path.join(OS_RECORD_PATH, f"ja3_{matched_rule['template_name']}.bin")
+                            if os.path.exists(template_path):
+                                with open(template_path, "rb") as f:
+                                    response = f.read()
                                 self.conn.send_packet(response)
+                                self.protocol_stats["JA3"] = self.protocol_stats.get("JA3", 0) + 1
                                 return
 
-            # --- Custom Rule Matching ---
+            # Custom rule evaluation
             for rule in CUSTOM_RULES:
                 match = rule.get("proto", "").lower() == proto
                 match &= rule.get("port", dst_port) == dst_port if "port" in rule else True
@@ -81,7 +86,7 @@ class PortDeceiver:
                 match &= rule.get("dscp", -1) == (tos >> 2) if "dscp" in rule else True
                 match &= rule.get("src_ip", "") == src_ip if "src_ip" in rule else True
                 if match:
-                    logging.info(rule.get("log", f"📖 Matched rule for {proto.upper()}:{dst_port}"))
+                    logging.info(rule.get("log", f"Rule matched on {proto.upper()}:{dst_port}"))
                     if rule["action"] == "drop":
                         return
                     elif rule["action"] == "rst" and proto == "tcp":
@@ -93,7 +98,7 @@ class PortDeceiver:
                     elif rule["action"] == "template":
                         break
 
-            # --- Fallback Response ---
+            # Fallback response
             response = synthesize_response(pkt, b"", ttl=self.ttl, window=self.window, deceiver=self)
             if response:
                 self.conn.send_packet(response)
@@ -105,7 +110,7 @@ class PortDeceiver:
                 })
 
         except Exception as e:
-            logging.warning(f"⚠️ PortDeceiver error: {e}")
+            logging.warning(f"\u26a0\ufe0f PortDeceiver error: {e}")
 
     def _send_rst(self, pkt):
         rst = self.conn.build_tcp_rst(pkt)
@@ -113,16 +118,15 @@ class PortDeceiver:
         self.protocol_stats["RST"] = self.protocol_stats.get("RST", 0) + 1
 
     def _send_icmp_unreachable(self, pkt):
+        from scapy.all import ICMP
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"])
-        icmp = ICMP(type=3, code=3)  # Destination Unreachable
+        icmp = ICMP(type=3, code=3)
         inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
         response = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
         self.conn.send_packet(bytes(response))
 
-    def export_session_log(self, path="port_session_log.json"):
-        try:
-            with open(path, "w") as f:
-                json.dump(self.session_log, f, indent=2)
-            logging.info(f"📝 Port session log saved: {path}")
-        except Exception as e:
-            logging.warning(f"⚠️ Failed to save port session log: {e}")
+    def export_ja3_log(self):
+        path = os.path.join(OS_RECORD_PATH, "ja3_observed.json")
+        with open(path, "w") as f:
+            json.dump(self.ja3_log, f, indent=2)
+        logging.info(f"\ud83d\udccb JA3 log saved: {path}")
