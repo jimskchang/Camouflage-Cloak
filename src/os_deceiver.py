@@ -2,6 +2,7 @@
 
 import os
 import json
+import base64
 import logging
 import socket
 import struct
@@ -18,7 +19,7 @@ from scapy.all import IP, TCP, UDP, ICMP, Ether, wrpcap, send, get_if_addr
 from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES, JA3_RULES
 from src.Packet import Packet
 from src.tcp import TcpConnect
-from src.response import synthesize_response
+from src.response import synthesize_response, export_ja3_log
 from src.fingerprint_utils import gen_key
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 
@@ -113,6 +114,7 @@ class OsDeceiver:
                                     self.protocol_stats["JA3"] += 1
                                     continue
 
+                # Apply custom rules
                 for rule in CUSTOM_RULES:
                     match = rule.get("proto", "").lower() == proto
                     match &= rule.get("port", dst_port) == dst_port if "port" in rule else True
@@ -138,6 +140,7 @@ class OsDeceiver:
                 template = templates.get(proto, {}).get(key)
 
                 if not template:
+                    # Fuzzy fallback
                     for k in templates.get(proto, {}):
                         if key.startswith(k[:16]):
                             template = templates[proto][k]
@@ -166,7 +169,7 @@ class OsDeceiver:
 
         self.export_sent_packets()
         self.export_session_log()
-        self.export_ja3_log()
+        export_ja3_log(self.ja3_log, os.path.join(self.dest, "ja3_observed.json"))
 
     def send_tcp_rst(self, pkt):
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"], ttl=self.ttl)
@@ -203,11 +206,3 @@ class OsDeceiver:
         with open(path, "w") as f:
             json.dump(self.session_log, f, indent=2)
         logging.info(f"📝 OS session log saved: {path}")
-
-    def export_ja3_log(self):
-        if not self.ja3_log:
-            return
-        path = os.path.join(self.dest, "ja3_observed.json")
-        with open(path, "w") as f:
-            json.dump(self.ja3_log, f, indent=2)
-        logging.info(f"🔍 JA3 log exported: {path}")
