@@ -1,80 +1,88 @@
 # src/fingerprint_utils.py
 
-import struct
+import hashlib
 import logging
+import struct
 
 def gen_key(proto: str, packet: bytes):
-    """
-    Dispatch to appropriate key generator by protocol.
+    try:
+        if proto == 'tcp':
+            return gen_tcp_key(packet), proto
+        elif proto == 'udp':
+            return gen_udp_key(packet), proto
+        elif proto == 'icmp':
+            return gen_icmp_key(packet), proto
+        elif proto == 'arp':
+            return gen_arp_key(packet), proto
+        else:
+            return b'', proto
+    except Exception as e:
+        logging.warning(f"[gen_key] failed for {proto.upper()}: {e}")
+        return b'', proto
 
-    Args:
-        proto: 'tcp', 'udp', 'icmp', or 'arp'
-        packet: raw packet bytes
-
-    Returns:
-        Tuple: (normalized key bytes, optional metadata)
-    """
-    proto = proto.lower()
-    if proto == 'tcp':
-        return gen_tcp_key(packet)
-    elif proto == 'udp':
-        return gen_udp_key(packet)
-    elif proto == 'icmp':
-        return gen_icmp_key(packet)
-    elif proto == 'arp':
-        return gen_arp_key(packet)
-    return b'', None
+def normalize_and_hash(fields):
+    try:
+        byte_fields = []
+        for field in fields:
+            if isinstance(field, int):
+                field = min(max(field, 0), 0xFFFFFFFF)
+                byte_fields.append(field.to_bytes(4, 'big'))
+            elif isinstance(field, str):
+                byte_fields.append(field.encode())
+            elif isinstance(field, bytes):
+                byte_fields.append(field)
+            elif field is None:
+                byte_fields.append(b'\x00' * 4)
+            else:
+                logging.debug(f"[normalize] Skipped unsupported field type: {type(field)}")
+        flat = b''.join(byte_fields)
+        return hashlib.sha256(flat).digest()
+    except Exception as e:
+        logging.warning(f"[normalize_and_hash] error: {e}")
+        return b''
 
 def gen_tcp_key(packet: bytes):
     try:
-        ip_header = packet[14:34]
-        tcp_header = packet[34:54]
-        offset_flags = struct.unpack('!H', tcp_header[12:14])[0]
-        offset = ((offset_flags >> 12) & 0xF) * 4
-        payload = packet[34 + offset:]
-
-        ip_key = ip_header[:8] + b'\x00' * 8
-        tcp_key = tcp_header[:2] + b'\x00\x00' + b'\x00\x00\x00\x00'  # zero seq/ack
-        tcp_key += tcp_header[12:20]  # offset/flags/window
-        tcp_key += b'\x00\x00'  # zero checksum
-        return ip_key + tcp_key + payload[:16], None
+        tcp_hdr = packet[34:54]
+        src_port, dst_port, seq, ack, offset_flags, win, chk, urg = struct.unpack('!HHLLHHHH', tcp_hdr[:20])
+        ttl = packet[22]
+        tos = packet[15]
+        fields = [ttl, tos, 0, dst_port, 0, 0, offset_flags & 0xFFF, win, chk, urg]
+        return normalize_and_hash(fields)
     except Exception as e:
-        logging.warning(f"⚠️ gen_tcp_key failed: {e}")
-        return b'', None
+        logging.warning(f"[gen_tcp_key] failed: {e}")
+        return b''
 
 def gen_udp_key(packet: bytes):
     try:
-        ip_header = packet[14:34]
-        udp_header = packet[34:42]
-        payload = packet[42:58]
-
-        ip_key = ip_header[:8] + b'\x00' * 8
-        udp_key = udp_header[:2] + b'\x00\x00' + b'\x00\x00\x00\x00'
-        return ip_key + udp_key + payload, None
+        udp_hdr = packet[34:42]
+        src_port, dst_port, length, checksum = struct.unpack('!HHHH', udp_hdr[:8])
+        ttl = packet[22]
+        tos = packet[15]
+        fields = [ttl, tos, 0, dst_port, length, checksum]
+        return normalize_and_hash(fields)
     except Exception as e:
-        logging.warning(f"⚠️ gen_udp_key failed: {e}")
-        return b'', None
+        logging.warning(f"[gen_udp_key] failed: {e}")
+        return b''
 
 def gen_icmp_key(packet: bytes):
     try:
-        ip_header = packet[14:34]
-        icmp_header = packet[34:42]
-        ip_key = ip_header[:8] + b'\x00' * 8
-        icmp_type, code, _, _, _ = struct.unpack('!BBHHH', icmp_header)
-        icmp_key = struct.pack('!BBHHH', icmp_type, code, 0, 0, 0)
-        return ip_key + icmp_key, None
+        icmp_hdr = packet[34:42]
+        icmp_type, code, checksum, id, seq = struct.unpack('!BBHHH', icmp_hdr[:8])
+        ttl = packet[22]
+        tos = packet[15]
+        fields = [ttl, tos, icmp_type, code, checksum, id, seq]
+        return normalize_and_hash(fields)
     except Exception as e:
-        logging.warning(f"⚠️ gen_icmp_key failed: {e}")
-        return b'', None
+        logging.warning(f"[gen_icmp_key] failed: {e}")
+        return b''
 
 def gen_arp_key(packet: bytes):
     try:
-        arp_header = packet[14:42]
-        fields = struct.unpack('!HHBBH6s4s6s4s', arp_header)
-        key = struct.pack('!HHBBH6s4s6s4s',
-                          fields[0], fields[1], fields[2], fields[3], fields[4],
-                          b'\x00' * 6, b'\x00' * 4, b'\x00' * 6, b'\x00' * 4)
-        return key, None
+        arp_hdr = packet[14:42]
+        htype, ptype, hlen, plen, op = struct.unpack('!HHBBH', arp_hdr[:8])
+        fields = [htype, ptype, hlen, plen, op]
+        return normalize_and_hash(fields)
     except Exception as e:
-        logging.warning(f"⚠️ gen_arp_key failed: {e}")
-        return b'', None
+        logging.warning(f"[gen_arp_key] failed: {e}")
+        return b''
