@@ -26,12 +26,6 @@ def extract_ja3(packet_bytes: bytes) -> str:
     except Exception as e:
         logging.warning(f"[JA3] Extraction failed: {e}")
         return None
-
-def match_ja3_rule(ja3_hash: str) -> dict:
-    for rule in JA3_RULES:
-        if rule["ja3"] == ja3_hash:
-            return rule
-    return None
     
     try:
         # Search for TLS handshake
@@ -106,6 +100,9 @@ def match_ja3_rule(ja3_hash: str) -> dict:
 
 
 def match_ja3_rule(ja3_string: str, rule_set: list) -> dict:
+    for rule in JA3_RULES:
+        if rule["ja3"] == ja3_hash:
+            return rule
     """
     Looks for a JA3 string match in the given JA3_RULES.
 
