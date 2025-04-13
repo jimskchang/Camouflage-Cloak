@@ -18,7 +18,7 @@ from src.settings import get_os_fingerprint, get_mac_address, CUSTOM_RULES, JA3_
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.response import synthesize_response
-from src.fingerprint_utils import gen_key
+from src.fingerprint_gen import gen_key
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 
 UNMATCHED_LOG = os.path.join(os.path.dirname(__file__), "..", "os_record", "unmatched_keys.log")
