@@ -6,10 +6,9 @@ import time
 from ipaddress import ip_address, ip_network
 
 from scapy.all import Ether, IP, TCP, UDP, ICMP
-
 from dnslib import DNSRecord, QTYPE, RR, A
 
-from src.ja3_extractor import extract_ja3_from_packet, match_ja3_rule
+from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.settings import JA3_RULES
 
 EXCLUDE_SOURCES = [
