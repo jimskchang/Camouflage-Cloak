@@ -4,7 +4,7 @@ import struct
 import array
 
 import src.settings as settings
-from src.fingerprint_gen import generateKey
+from src.fingerprint_utils import gen_key
 
 class Packet:
     def __init__(self, packet=b'', proc=None, l2_field=None, l3_field=None, l4_field=None, data='', ttl=None, window=None):
@@ -19,12 +19,14 @@ class Packet:
         self.l4_field = l4_field or {}
         self.data = data
         self.interface = None
+
         self.ttl_override = ttl
         self.window_override = window
 
     def get_signature(self, proto_type: str) -> bytes:
         try:
-            return generateKey(self, proto_type)
+            key, _ = gen_key(proto_type.lower(), self.packet)
+            return key
         except Exception as e:
             logging.warning(f"[Packet] Failed to get signature for {proto_type}: {e}")
             return b''
