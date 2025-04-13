@@ -1,3 +1,5 @@
+# src/tcp.py
+
 import socket
 import struct
 import array
@@ -6,7 +8,7 @@ import logging
 import os
 import random
 import time
-from scapy.all import Ether, IP, TCP, IPv6, IPv6ExtHdrHopByHop
+from scapy.all import Ether, IP, TCP, UDP, IPv6
 
 import src.settings as settings
 
@@ -43,19 +45,17 @@ class TcpConnect:
     def build_tcp_rst(self, pkt, flags="R", seq=None, ack=None, vlan=None, ipv6=False) -> bytes:
         try:
             ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
+
             if vlan:
                 ether.type = 0x8100
-                ether.add_payload(struct.pack("!H", vlan))
+                ether = ether / struct.pack("!HH", 0x0000, vlan)  # 0x0000 priority+CFI
 
-            if ipv6:
-                ip = IPv6(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'])
-            else:
-                ip = IP(
-                    src=pkt.l3_field['dest_IP_str'],
-                    dst=pkt.l3_field['src_IP_str'],
-                    ttl=64,
-                    id=random.randint(0, 65535)
-                )
+            ip = IPv6(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str']) if ipv6 else IP(
+                src=pkt.l3_field['dest_IP_str'],
+                dst=pkt.l3_field['src_IP_str'],
+                ttl=64,
+                id=random.randint(0, 65535)
+            )
 
             tcp = TCP(
                 sport=pkt.l4_field['dest_port'],
@@ -65,6 +65,7 @@ class TcpConnect:
                 ack=ack if ack is not None else 0,
                 window=settings.FALLBACK_WINDOW
             )
+
             return bytes(ether / ip / tcp)
         except Exception as e:
             logging.error(f"❌ Failed to build TCP {flags}: {e}")
@@ -89,17 +90,16 @@ class TcpConnect:
         try:
             if b"\x16\x03" in pkt.packet and b"\x01" in pkt.packet[5:6]:
                 client_hello = pkt.packet[pkt.packet.find(b"\x16\x03"):]
-                # Stub for future JA3 hashing
-                return "stub_ja3_hash"
+                return "stub_ja3_hash"  # TODO: Replace with real parser
         except Exception as e:
             logging.warning(f"⚠️ JA3 parsing error: {e}")
         return None
 
+# --- Utility Functions ---
 
 def check_nic_exists_and_up(nic: str) -> bool:
-    path = f"/sys/class/net/{nic}/operstate"
     try:
-        with open(path, "r") as f:
+        with open(f"/sys/class/net/{nic}/operstate", "r") as f:
             return f.read().strip() == "up"
     except Exception:
         return False
