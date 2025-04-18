@@ -1,5 +1,6 @@
 import os
 import logging
+from src.response import synthesize_dns_response  # Optional, if used for export
 
 # =======================
 # Project Paths & Storage
@@ -33,7 +34,7 @@ CUSTOM_RULES = [
     },
     {
         "proto": "UDP", "port": 53, "action": "icmp_unreachable",
-        "log": "📛 Faking ICMP Unreachable for UDP 53"
+        "log": "📋 Faking ICMP Unreachable for UDP 53"
     },
     {
         "proto": "ICMP", "type": 8, "action": "template",
@@ -141,10 +142,10 @@ def get_os_fingerprint(os_name: str) -> dict:
     name = os_name.lower()
     if name in OS_ALIASES:
         base = OS_ALIASES[name]
-        logging.info(f"🧩 Resolved alias '{name}' → '{base}'")
+        logging.info(f"🧹 Resolved alias '{name}' → '{base}'")
         return BASE_OS_TEMPLATES[base]
     if name in BASE_OS_TEMPLATES:
-        logging.info(f"🧩 Found base template for '{name}'")
+        logging.info(f"🧹 Found base template for '{name}'")
         return BASE_OS_TEMPLATES[name]
     for base in BASE_OS_TEMPLATES:
         if name.startswith(base):
