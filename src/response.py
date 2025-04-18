@@ -1,5 +1,3 @@
-# src/response.py
-
 import logging
 import random
 import time
@@ -17,12 +15,15 @@ from datetime import datetime, timedelta
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.settings import JA3_RULES
 
-EXCLUDE_SOURCES = [
-    ip_network("192.168.10.0/24"),
-]
-
+EXCLUDE_SOURCES = [ip_network("192.168.10.0/24")]
 JA3_OBSERVED_LOG = "ja3_observed.json"
 JA3_OBSERVED = {}
+
+HTTP_BANNERS = {
+    "default": "HTTP/1.1 200 OK\r\nServer: Apache/2.4.41 (Unix)\r\nContent-Length: 13\r\n\r\nHello, World!",
+    "ja3+chrome": "HTTP/1.1 200 OK\r\nServer: nginx/1.18.0\r\nContent-Length: 17\r\n\r\nHello from Chrome!",
+    "ja3+curl": "HTTP/1.1 200 OK\r\nServer: CamouflageHTTP/1.0\r\nContent-Length: 16\r\n\r\nHello curl user!"
+}
 
 def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=None):
     try:
@@ -37,8 +38,8 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
 
         proto = pkt.l4
 
-        # JA3-based handling
         if proto == "tcp":
+            # --- JA3 Fingerprint Handling ---
             ja3 = extract_ja3(pkt.packet)
             if ja3:
                 JA3_OBSERVED.setdefault(src_ip_str, []).append(ja3)
@@ -49,6 +50,22 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
                         return None
                     elif rule["action"] == "tls_hello":
                         return synthesize_tls_server_hello(pkt)
+
+            # --- HTTP GET / Banner spoofing ---
+            payload = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
+            if payload.startswith("GET") and (pkt.l4_field.get("dest_port") in [80, 8080]):
+                ua = ""
+                for line in payload.split("\r\n"):
+                    if line.lower().startswith("user-agent"):
+                        ua = line.split(":", 1)[-1].strip().lower()
+                        break
+
+                if "curl" in ua:
+                    return synthesize_http_response(pkt, HTTP_BANNERS["ja3+curl"])
+                elif "chrome" in ua:
+                    return synthesize_http_response(pkt, HTTP_BANNERS["ja3+chrome"])
+                else:
+                    return synthesize_http_response(pkt, HTTP_BANNERS["default"])
 
         if proto == "udp" and pkt.l4_field.get("dest_port") == 53:
             return synthesize_dns_response(pkt)
@@ -117,18 +134,29 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
         logging.error(f"❌ synthesize_response failed: {e}")
         return None
 
+def synthesize_http_response(pkt, banner):
+    try:
+        ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
+        ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=64)
+        tcp = TCP(
+            sport=pkt.l4_field['dest_port'],
+            dport=pkt.l4_field['src_port'],
+            flags="PA",
+            seq=pkt.l4_field.get("ack_num", 0),
+            ack=pkt.l4_field.get("seq", 0) + len(pkt.l4_field.get("raw_payload", b"")),
+            window=8192
+        )
+        return bytes(ether / ip / tcp / banner.encode())
+    except Exception as e:
+        logging.error(f"❌ synthesize_http_response failed: {e}")
+        return None
+
 def synthesize_dns_response(pkt, spoof_ip="1.2.3.4"):
     try:
         payload = pkt.l4_field.get("raw_payload", b"")
-        try:
-            dns = DNSRecord.parse(payload)
-        except Exception:
-            logging.warning("⚠️ Failed to parse DNS payload — fallback")
-            return None
-
+        dns = DNSRecord.parse(payload)
         qname = str(dns.q.qname)
         qtype = QTYPE[dns.q.qtype] if dns.q.qtype in QTYPE else dns.q.qtype
-        logging.debug(f"🌐 Spoofing DNS A Response for {qname} (type {qtype})")
 
         reply = DNSRecord(dns)
         reply.header.qr = 1
@@ -184,3 +212,5 @@ def export_ja3_observed():
         logging.info(f"📥 JA3 observed log saved: {JA3_OBSERVED_LOG}")
     except Exception as e:
         logging.warning(f"⚠️ Failed to save JA3 log: {e}")
+     
+     
