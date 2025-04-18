@@ -8,7 +8,7 @@ from ipaddress import ip_address, ip_network
 from scapy.all import Ether, IP, TCP, UDP, ICMP
 from dnslib import DNSRecord, QTYPE, RR, A
 
-from src.ja3_extractor import extract_ja3_from_packet, match_ja3_rule
+from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.settings import JA3_RULES
 
 EXCLUDE_SOURCES = [
@@ -34,7 +34,7 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
 
         # JA3-based handling
         if proto == "tcp":
-            ja3 = extract_ja3_from_packet(pkt)
+            ja3 = extract_ja3(pkt.packet)
             if ja3:
                 JA3_OBSERVED.setdefault(src_ip_str, []).append(ja3)
                 rule = match_ja3_rule(ja3)
