@@ -7,6 +7,12 @@ import json
 from ipaddress import ip_address, ip_network
 from scapy.all import Ether, IP, TCP, UDP, ICMP
 from dnslib import DNSRecord, QTYPE, RR, A
+from cryptography import x509
+from cryptography.x509.oid import NameOID
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.hazmat.backends import default_backend
+from datetime import datetime, timedelta
 
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.settings import JA3_RULES
@@ -17,7 +23,6 @@ EXCLUDE_SOURCES = [
 
 JA3_OBSERVED_LOG = "ja3_observed.json"
 JA3_OBSERVED = {}
-
 
 def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=None):
     try:
@@ -45,11 +50,9 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
                     elif rule["action"] == "tls_hello":
                         return synthesize_tls_server_hello(pkt)
 
-        # DNS spoof (UDP port 53)
         if proto == "udp" and pkt.l4_field.get("dest_port") == 53:
             return synthesize_dns_response(pkt)
 
-        # Unpack template-based fields
         src_mac = pkt.l2_field.get("sMAC")
         dst_mac = pkt.l2_field.get("dMAC")
         src_ip = pkt.l3_field.get("src_IP")
@@ -114,7 +117,6 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
         logging.error(f"❌ synthesize_response failed: {e}")
         return None
 
-
 def synthesize_dns_response(pkt, spoof_ip="1.2.3.4"):
     try:
         payload = pkt.l4_field.get("raw_payload", b"")
@@ -141,9 +143,24 @@ def synthesize_dns_response(pkt, spoof_ip="1.2.3.4"):
         logging.warning(f"⚠️ DNS spoof error: {e}")
         return None
 
-
 def synthesize_tls_server_hello(pkt):
     try:
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048, backend=default_backend())
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, u"US"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, u"California"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, u"San Francisco"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, u"Camouflage Cloak"),
+            x509.NameAttribute(NameOID.COMMON_NAME, u"tls-fuzz.local")
+        ])
+        cert = x509.CertificateBuilder().subject_name(subject).issuer_name(issuer).public_key(
+            key.public_key()).serial_number(x509.random_serial_number()).not_valid_before(
+            datetime.utcnow()).not_valid_after(datetime.utcnow() + timedelta(days=10)).sign(
+            key, hashes.SHA256(), default_backend())
+
+        cert_bytes = cert.public_bytes(serialization.Encoding.DER)
+        tls_cert_record = b"\x16\x03\x03" + len(cert_bytes).to_bytes(2, 'big') + cert_bytes
+
         ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
         ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=64)
         tcp = TCP(
@@ -154,20 +171,11 @@ def synthesize_tls_server_hello(pkt):
             ack=pkt.l4_field.get("seq", 0) + len(pkt.l4_field.get("raw_payload", b"")),
             window=8192
         )
+        return bytes(ether / ip / tcp / tls_cert_record)
 
-        tls_server_hello = bytes.fromhex(
-            "160303003a020000360303"
-            "11223344556677889900aabbccddeeff"
-            "20" + "00" * 32 +
-            "c02f" +
-            "00" +
-            "0000"
-        )
-        return bytes(ether / ip / tcp / tls_server_hello)
     except Exception as e:
         logging.error(f"❌ TLS ServerHello spoof failed: {e}")
         return None
-
 
 def export_ja3_observed():
     try:
