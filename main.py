@@ -9,12 +9,11 @@ import logging
 import argparse
 import subprocess
 from collections import defaultdict
-from scapy.all import sniff, wrpcap, get_if_hwaddr, ARP, Ether, sendp
+from scapy.all import sniff, wrpcap, get_if_hwaddr
 
 # Setup paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 SRC_DIR = os.path.join(BASE_DIR, "src")
-os.makedirs(SRC_DIR, exist_ok=True)
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
@@ -71,19 +70,6 @@ def get_host_ip(nic):
     except Exception:
         return "127.0.0.1"
 
-def stimulate_arp_traffic(nic, host_ip):
-    try:
-        gw_ip = settings.GATEWAY_MAP.get(nic)
-        mac = get_if_hwaddr(nic)
-        targets = [gw_ip, host_ip] if gw_ip else [host_ip]
-
-        for target_ip in targets:
-            arp_pkt = Ether(dst="ff:ff:ff:ff:ff:ff") / ARP(op=1, hwsrc=mac, psrc=host_ip, pdst=target_ip)
-            sendp(arp_pkt, iface=nic, verbose=0)
-            logging.info(f"📣 Sent ARP probe for {target_ip} via {nic}")
-    except Exception as e:
-        logging.warning(f"[WARN] Failed to stimulate ARP traffic: {e}")
-
 def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=False):
     template_dict = defaultdict(dict)
     pair_dict = {}
@@ -102,8 +88,14 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
     validate_nic(nic)
     set_promisc(nic)
     time.sleep(1)
-    stimulate_arp_traffic(nic, host_ip)
-    sniff(iface=nic, timeout=300, prn=handle, store=False)
+
+    sniff(
+        iface=nic,
+        timeout=300,
+        prn=handle,
+        store=False,
+        filter="ip or arp"
+    )
 
     for proto in template_dict:
         outfile = os.path.join(dest_path, f"{proto.lower()}_record.txt")
