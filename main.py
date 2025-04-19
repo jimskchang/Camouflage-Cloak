@@ -75,8 +75,6 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
 
     def handle(pkt):
         try:
-            if pkt.haslayer("ARP"):
-                logging.info(f"🧾 ARP Packet Captured: {pkt.summary()}")
             packet = Packet(bytes(pkt))
             packet.interface = nic
             packet.unpack()
@@ -92,18 +90,16 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
 
     sniff(iface=nic, timeout=300, prn=handle, store=False, filter="ip or arp")
 
-    if not template_dict:
+    if not any(template_dict.values()):
         logging.warning("⚠️ No packets captured during scan.")
 
-    for proto in template_dict:
-        outfile = os.path.join(dest_path, f"{proto.lower()}_record.txt")
-        outdata = {
-            key.hex(): value.hex()
-            for key, value in template_dict[proto].items() if value
-        }
-        with open(outfile, "w") as f:
-            json.dump(outdata, f, indent=2)
-        logging.info(f"📦 Saved {proto} templates → {outfile}")
+    for proto, records in template_dict.items():
+        outdata = {key.hex(): value.hex() for key, value in records.items() if value}
+        if outdata:
+            outfile = os.path.join(dest_path, f"{proto.lower()}_record.txt")
+            with open(outfile, "w") as f:
+                json.dump(outdata, f, indent=2)
+            logging.info(f"📦 Saved {proto.upper()} templates → {outfile}")
 
     export_ja3_log(dest_path, nic)
     l7_tracker.export()
