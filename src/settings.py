@@ -1,6 +1,5 @@
 import os
 import logging
-from src.response import synthesize_dns_response  # Optional, if used for export
 
 # =======================
 # Project Paths & Storage
