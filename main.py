@@ -84,6 +84,9 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
         except Exception as e:
             logging.debug(f"[SKIP] Failed to unpack packet: {e}")
 
+    if pkt.haslayer("ARP"):
+    logging.info(f"🧾 ARP Packet Captured: {pkt.summary()}")
+    
     logging.info(f"📡 Sniffing on {nic} for 300s...")
     validate_nic(nic)
     set_promisc(nic)
