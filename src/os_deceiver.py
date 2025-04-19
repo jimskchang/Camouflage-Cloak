@@ -20,6 +20,7 @@ from src.tcp import TcpConnect
 from src.response import synthesize_response, export_ja3_observed
 from src.fingerprint_gen import gen_key
 from src.ja3_extractor import extract_ja3, match_ja3_rule
+from src.l7_tracker import l7_tracker
 
 UNMATCHED_LOG = os.path.join(os.path.dirname(__file__), "..", "os_record", "unmatched_keys.log")
 
@@ -153,6 +154,11 @@ class OsDeceiver:
                             "time": datetime.utcnow().isoformat(),
                             "action": "template"
                         })
+
+                        # L7 banner tracking (optional)
+                        banner_type = pkt.l4_field.get("http_banner_type")
+                        if banner_type:
+                            l7_tracker.log_http_banner(src_ip, ja3_hash, banner_type)
                 else:
                     if proto == "udp":
                         self.send_icmp_port_unreachable(pkt)
@@ -165,6 +171,7 @@ class OsDeceiver:
         self.export_sent_packets()
         self.export_session_log()
         export_ja3_observed()
+        l7_tracker.export()
 
     def send_tcp_rst(self, pkt):
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"], ttl=self.ttl)
