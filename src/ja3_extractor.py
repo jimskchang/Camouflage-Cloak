@@ -1,9 +1,11 @@
 # src/ja3_extractor.py
 
+# src/ja3_extractor.py
+
 import logging
 import hashlib
 import struct
-from scapy.all import TCP, Raw
+from scapy.all import TCP
 from src.settings import JA3_RULES
 
 def extract_ja3(packet_bytes: bytes) -> str:
@@ -74,10 +76,16 @@ def extract_ja3(packet_bytes: bytes) -> str:
         logging.warning(f"[JA3] Extraction failed: {e}")
         return None
 
+
+def extract_ja3_from_packet(pkt) -> str:
+    try:
+        return extract_ja3(pkt.packet)
+    except Exception as e:
+        logging.warning(f"[JA3] extract_ja3_from_packet error: {e}")
+        return None
+
+
 def match_ja3_rule(ja3_hash: str) -> dict:
-    """
-    Returns matched JA3 rule (from settings.JA3_RULES) by hash.
-    """
     try:
         for rule in JA3_RULES:
             if rule.get("ja3") == ja3_hash:
