@@ -1,3 +1,5 @@
+# settings.py — Camouflage Cloak Configuration
+
 import os
 import logging
 
@@ -8,6 +10,9 @@ PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OS_RECORD_PATH = os.path.join(PROJECT_PATH, "os_record")
 os.makedirs(OS_RECORD_PATH, exist_ok=True)
 
+# =======================
+# Toggle Settings
+# =======================
 AUTO_LEARN_MISSING = True
 
 # =======================
@@ -59,7 +64,7 @@ JA3_RULES = [
 ]
 
 # =======================
-# Network Interfaces (manual or dynamic via CLI)
+# Network Interfaces
 # =======================
 NIC_TARGET = 'ens192'
 NIC_PROBE  = 'ens224'
@@ -78,7 +83,7 @@ GATEWAY_MAP = {
 }
 
 # =======================
-# Interface Check Utils
+# NIC Utilities
 # =======================
 def check_nic_exists(nic: str) -> bool:
     return os.path.exists(f"/sys/class/net/{nic}")
