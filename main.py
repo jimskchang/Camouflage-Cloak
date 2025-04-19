@@ -10,6 +10,7 @@ import argparse
 import subprocess
 from collections import defaultdict
 from scapy.all import sniff, wrpcap, get_if_hwaddr
+from src.l7_tracker import log_http_banner
 
 # Setup paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
