@@ -21,7 +21,6 @@ from src.response import synthesize_response, export_ja3_observed
 from src.fingerprint_utils import gen_key
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src import l7_tracker
-from src.l7_tracker import log_http_banner
 
 UNMATCHED_LOG = os.path.join(os.path.dirname(__file__), "..", "os_record", "unmatched_keys.log")
 
@@ -156,10 +155,10 @@ class OsDeceiver:
                             "action": "template"
                         })
 
-                        # L7 banner tracking (optional)
                         banner_type = pkt.l4_field.get("http_banner_type")
+                        ua = pkt.l4_field.get("user_agent")
                         if banner_type:
-                            l7_tracker.log_http_banner(src_ip, ja3_hash, banner_type)
+                            l7_tracker.log_http_banner(src_ip, ja3_hash, banner_type, ua)
                 else:
                     if proto == "udp":
                         self.send_icmp_port_unreachable(pkt)
