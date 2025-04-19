@@ -1,3 +1,5 @@
+# src/response.py
+
 import logging
 import random
 import time
@@ -39,7 +41,6 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
         proto = pkt.l4
 
         if proto == "tcp":
-            # --- JA3 Fingerprint Handling ---
             ja3 = extract_ja3(pkt.packet)
             if ja3:
                 JA3_OBSERVED.setdefault(src_ip_str, []).append(ja3)
@@ -51,15 +52,9 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
                     elif rule["action"] == "tls_hello":
                         return synthesize_tls_server_hello(pkt)
 
-            # --- HTTP GET / Banner spoofing ---
             payload = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
-            if payload.startswith("GET") and (pkt.l4_field.get("dest_port") in [80, 8080]):
-                ua = ""
-                for line in payload.split("\r\n"):
-                    if line.lower().startswith("user-agent"):
-                        ua = line.split(":", 1)[-1].strip().lower()
-                        break
-
+            if payload.startswith("GET") and pkt.l4_field.get("dest_port") in [80, 8080]:
+                ua = next((line.split(":", 1)[-1].strip().lower() for line in payload.split("\r\n") if line.lower().startswith("user-agent")), "")
                 if "curl" in ua:
                     return synthesize_http_response(pkt, HTTP_BANNERS["ja3+curl"])
                 elif "chrome" in ua:
@@ -70,19 +65,14 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
         if proto == "udp" and pkt.l4_field.get("dest_port") == 53:
             return synthesize_dns_response(pkt)
 
-        src_mac = pkt.l2_field.get("sMAC")
-        dst_mac = pkt.l2_field.get("dMAC")
-        src_ip = pkt.l3_field.get("src_IP")
-        dst_ip = pkt.l3_field.get("dest_IP")
-
         ether = Ether(template_bytes[:14])
         ip = IP(template_bytes[14:34])
         l4 = template_bytes[34:]
 
-        ether.src = dst_mac
-        ether.dst = src_mac
-        ip.src = dst_ip
-        ip.dst = src_ip
+        ether.src = pkt.l2_field.get("dMAC")
+        ether.dst = pkt.l2_field.get("sMAC")
+        ip.src = pkt.l3_field.get("dest_IP")
+        ip.dst = pkt.l3_field.get("src_IP")
         ip.ttl = ttl if ttl is not None else random.randint(60, 128)
         ip.id = deceiver.get_ip_id(src_ip_str) if deceiver else random.randint(0, 65535)
         ip.tos = deceiver.os_flags.get("tos", 0) if deceiver else ip.tos
@@ -212,5 +202,4 @@ def export_ja3_observed():
         logging.info(f"📥 JA3 observed log saved: {JA3_OBSERVED_LOG}")
     except Exception as e:
         logging.warning(f"⚠️ Failed to save JA3 log: {e}")
-     
      
