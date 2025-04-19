@@ -1,22 +1,28 @@
 # src/__init__.py
 
+# --- Core Classes ---
 from .tcp import TcpConnect, getTCPChecksum, getIPChecksum
 from .Packet import Packet
+
+# --- Settings ---
 from .settings import (
     get_mac_address,
     get_os_fingerprint,
-    CUSTOM_RULES,
-    BASE_OS_TEMPLATES,
     list_all_templates,
     print_interface_summary,
+    CUSTOM_RULES,
+    BASE_OS_TEMPLATES,
     MAC,
     NIC_TARGET,
     NIC_PROBE,
     VLAN_MAP,
-    GATEWAY_MAP
+    GATEWAY_MAP,
 )
+
+# --- Deception & Fingerprinting ---
 from .response import synthesize_response
-from .fingerprint_gen import gen_key
-from .ja3_extractor import extract_ja3, match_ja3_rule
+from .fingerprint_gen import generateKey, gen_key
 from .os_recorder import templateSynthesis
-from .fingerprint_gen import generateKey
+
+# --- JA3 ---
+from .ja3_extractor import extract_ja3, match_ja3_rule
