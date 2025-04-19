@@ -11,7 +11,7 @@ from src.response import synthesize_response, export_ja3_observed
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.ja3_extractor import extract_ja3, match_ja3_rule
-from src.fingerprint_gen import generateKey
+from src.fingerprint_utils import gen_key
 from src.l7_tracker import log_http_banner, export_http_log
 
 class PortDeceiver:
