@@ -12,6 +12,8 @@ from scapy.all import Ether, IP, TCP, UDP, IPv6
 
 import src.settings as settings
 
+logger = logging.getLogger(__name__)
+
 class TcpConnect:
     def __init__(self, host: str, nic: str = None, drop_chance: float = 0.0, delay_range=(0, 0)):
         self.dip = host
@@ -27,7 +29,7 @@ class TcpConnect:
         try:
             self.sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.ntohs(0x0003))
             self.sock.bind((self.nic, 0))
-            logging.info(f"✅ Raw socket bound to {self.nic}")
+            logger.info(f"✅ Raw socket bound to {self.nic}")
         except PermissionError:
             raise RuntimeError("❌ Root privileges required for raw socket.")
         except socket.error as e:
@@ -37,7 +39,7 @@ class TcpConnect:
         try:
             with open(f"/sys/class/net/{nic}/address", "r") as f:
                 mac = f.read().strip()
-                logging.info(f"✅ MAC of {nic}: {mac}")
+                logger.info(f"✅ MAC of {nic}: {mac}")
                 return binascii.unhexlify(mac.replace(':', ''))
         except Exception as e:
             raise RuntimeError(f"❌ Failed to read MAC for {nic}: {e}")
@@ -68,12 +70,29 @@ class TcpConnect:
 
             return bytes(ether / ip_layer / tcp)
         except Exception as e:
-            logging.error(f"❌ Failed to build TCP {flags}: {e}")
+            logger.error(f"❌ Failed to build TCP {flags}: {e}")
+            return b''
+
+    def build_tcp_ack(self, pkt, seq=None, ack=None) -> bytes:
+        try:
+            ether = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
+            ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=64)
+            tcp = TCP(
+                sport=pkt.l4_field['dest_port'],
+                dport=pkt.l4_field['src_port'],
+                flags="A",
+                seq=seq or random.randint(0, 4294967295),
+                ack=ack or pkt.l4_field.get("seq", 0) + 1,
+                window=settings.FALLBACK_WINDOW
+            )
+            return bytes(ether / ip / tcp)
+        except Exception as e:
+            logger.error(f"❌ Failed to build TCP ACK: {e}")
             return b''
 
     def send_packet(self, ether_pkt: bytes):
         if self.drop_chance > 0 and random.random() < self.drop_chance:
-            logging.warning("🚫 Simulated packet drop.")
+            logger.warning("🚫 Simulated packet drop.")
             return
 
         delay = random.uniform(*self.delay_range)
@@ -82,9 +101,9 @@ class TcpConnect:
 
         try:
             self.sock.send(ether_pkt)
-            logging.debug("📤 Sent raw Ethernet packet.")
+            logger.debug(f"📤 Sent packet preview: {ether_pkt[:64].hex()}...")
         except Exception as e:
-            logging.error(f"❌ Failed to send raw packet: {e}")
+            logger.error(f"❌ Failed to send raw packet: {e}")
 
     def extract_ja3_fingerprint(self, pkt):
         try:
@@ -92,7 +111,7 @@ class TcpConnect:
                 client_hello = pkt.packet[pkt.packet.find(b"\x16\x03"):]
                 return "stub_ja3_hash"
         except Exception as e:
-            logging.warning(f"⚠️ JA3 parsing error: {e}")
+            logger.warning(f"⚠️ JA3 parsing error: {e}")
         return None
 
 # --- Utility Functions ---
