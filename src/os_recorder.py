@@ -27,12 +27,23 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
         window = packet.l4_field.get("window") if proto_type == "TCP" else None
         options = packet.l4_field.get("option_field") if proto_type == "TCP" else {}
 
+        if proto_type not in template_dict:
+            template_dict[proto_type] = {}
+
         # --- JA3 extraction ---
+        ja3_hash = None
         if proto_type == "TCP" and dst_port == 443:
             ja3_hash = extract_ja3_from_packet(packet)
             if ja3_hash:
                 ja3_log.setdefault(src_ip, []).append(ja3_hash)
                 logging.info(f"🔍 JA3 from {src_ip}: {ja3_hash}")
+
+        # --- L7 banner logging ---
+        if enable_l7 and proto_type == "TCP":
+            banner_type = packet.l4_field.get("http_banner_type")
+            user_agent = packet.l4_field.get("user_agent")
+            if banner_type:
+                log_http_banner(src_ip, ja3_hash, banner_type, user_agent)
 
         # --- Identify request-response pair ---
         if proto_type in ("TCP", "UDP"):
