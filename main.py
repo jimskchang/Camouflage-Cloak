@@ -9,7 +9,7 @@ import logging
 import argparse
 import subprocess
 from collections import defaultdict
-from scapy.all import sniff, wrpcap, get_if_hwaddr
+from scapy.all import sniff, get_if_hwaddr
 
 # Setup paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,7 +17,7 @@ SRC_DIR = os.path.join(BASE_DIR, "src")
 if SRC_DIR not in sys.path:
     sys.path.insert(0, SRC_DIR)
 
-# Logging
+# Logging setup
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -26,41 +26,41 @@ logging.basicConfig(
 
 try:
     import settings
-    from src.Packet import Packet
-    from src.os_deceiver import OsDeceiver
-    from src.port_deceiver import PortDeceiver
-    from src.fingerprint_utils import gen_key
-    from src.os_recorder import templateSynthesis, export_ja3_log
-    from src.ja3_extractor import extract_ja3, match_ja3_rule
-    import src.l7_tracker as l7_tracker
+    from Packet import Packet
+    from os_deceiver import OsDeceiver
+    from port_deceiver import PortDeceiver
+    from fingerprint_utils import gen_key
+    from os_recorder import templateSynthesis, export_ja3_log
+    from ja3_extractor import extract_ja3, match_ja3_rule
+    import l7_tracker
 except ImportError as e:
-    logging.error(f"[ERROR]: Import error: {e}")
+    logging.error(f"[ERROR] Import error: {e}")
     sys.exit(1)
 
 def ensure_dir(path):
     try:
         os.makedirs(path, exist_ok=True)
     except Exception as e:
-        logging.error(f"[ERROR]: Cannot create directory {path}: {e}")
+        logging.error(f"[ERROR] Cannot create directory {path}: {e}")
         sys.exit(1)
 
 def validate_nic(nic):
     path = f"/sys/class/net/{nic}"
     if not os.path.exists(path):
-        logging.error(f"[ERROR]: NIC {nic} not found")
+        logging.error(f"[ERROR] NIC {nic} not found")
         sys.exit(1)
     try:
         mac = get_if_hwaddr(nic)
         logging.info(f"✅ NIC {nic} MAC: {mac}")
     except Exception as e:
-        logging.warning(f"[WARN]: MAC lookup failed for {nic}: {e}")
+        logging.warning(f"[WARN] MAC lookup failed for {nic}: {e}")
 
 def set_promisc(nic):
     try:
         subprocess.run(["ip", "link", "set", nic, "promisc", "on"], check=True)
-        logging.info(f"🔁 Enabled promiscuous mode on {nic}")
+        logging.info(f"🔁 Promiscuous mode enabled on {nic}")
     except subprocess.CalledProcessError as e:
-        logging.warning(f"[WARN]: Promiscuous mode failed: {e}")
+        logging.warning(f"[WARN] Promiscuous mode failed: {e}")
 
 def get_host_ip(nic):
     try:
@@ -82,24 +82,17 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
             proto = packet.l4 if packet.l4 else packet.l3
             templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip, base_path=dest_path, enable_l7=True)
         except Exception as e:
-            logging.debug(f"[SKIP]: Failed to unpack packet: {e}")
+            logging.debug(f"[SKIP] Failed to unpack packet: {e}")
 
-    logging.info(f"📡 Listening for templates on {nic} (300s)...")
+    logging.info(f"📡 Sniffing on {nic} for 300s...")
     validate_nic(nic)
     set_promisc(nic)
     time.sleep(1)
 
-    sniff(
-        iface=nic,
-        timeout=300,
-        prn=handle,
-        store=False,
-        filter="ip or arp"
-    )
+    sniff(iface=nic, timeout=300, prn=handle, store=False, filter="ip or arp")
 
-     # Visual indicator if nothing was captured
-    if not any(template_dict[p] for p in template_dict):
-        logging.warning("⚠️ No matching traffic captured. Ensure Nmap is targeting this host and using ARP/IP probes.")
+    if not template_dict:
+        logging.warning("⚠️ No packets captured during scan.")
 
     for proto in template_dict:
         outfile = os.path.join(dest_path, f"{proto.lower()}_record.txt")
@@ -109,17 +102,7 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
         }
         with open(outfile, "w") as f:
             json.dump(outdata, f, indent=2)
-        logging.info(f"📦 Saved {proto} templates: {outfile}")
-        
-    for proto in template_dict:
-        outfile = os.path.join(dest_path, f"{proto.lower()}_record.txt")
-        outdata = {
-            key.hex(): value.hex()
-            for key, value in template_dict[proto].items() if value
-        }
-        with open(outfile, "w") as f:
-            json.dump(outdata, f, indent=2)
-        logging.info(f"📦 Saved {proto} templates: {outfile}")
+        logging.info(f"📦 Saved {proto} templates → {outfile}")
 
     export_ja3_log(dest_path, nic)
     l7_tracker.export()
@@ -141,11 +124,11 @@ def main():
 
     if not args.nic:
         args.nic = settings.NIC_PROBE
-        logging.info(f"[INFO]: Default NIC set to {args.nic}")
+        logging.info(f"[INFO] Default NIC set to {args.nic}")
 
     if not args.host:
         args.host = get_host_ip(args.nic)
-        logging.info(f"[INFO]: Auto-detected IP: {args.host}")
+        logging.info(f"[INFO] Auto-detected host IP: {args.host}")
 
     validate_nic(args.nic)
     mac = get_if_hwaddr(args.nic)
@@ -157,7 +140,7 @@ def main():
 
     elif args.scan == "od":
         if not args.os:
-            logging.error("[ERROR]: --os is required for os deception mode")
+            logging.error("[ERROR] --os is required for os deception mode")
             return
         record_path = os.path.join(settings.OS_RECORD_PATH, args.os.lower())
         deceiver = OsDeceiver(
@@ -174,12 +157,12 @@ def main():
 
     elif args.scan == "pd":
         if not args.status:
-            logging.error("[ERROR]: --status required for port deception mode")
+            logging.error("[ERROR] --status is required for port deception mode")
             return
         try:
             port_map = json.loads(args.status)
         except Exception as e:
-            logging.error(f"[ERROR]: Invalid --status: {e}")
+            logging.error(f"[ERROR] Invalid --status format: {e}")
             return
         deceiver = PortDeceiver(
             interface_ip=args.host,
