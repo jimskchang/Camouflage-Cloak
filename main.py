@@ -10,7 +10,6 @@ import argparse
 import subprocess
 from collections import defaultdict
 from scapy.all import sniff, wrpcap, get_if_hwaddr
-from src.l7_tracker import log_http_banner
 
 # Setup paths
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -34,6 +33,7 @@ try:
     from fingerprint_utils import gen_key
     from os_recorder import templateSynthesis, export_ja3_log
     from ja3_extractor import extract_ja3, match_ja3_rule
+    import l7_tracker
 except ImportError as e:
     logging.error(f"[ERROR]: Import error: {e}")
     sys.exit(1)
@@ -81,7 +81,7 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
             packet.interface = nic
             packet.unpack()
             proto = packet.l4 if packet.l4 else packet.l3
-            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip)
+            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip, base_path=dest_path, enable_l7=True)
         except Exception as e:
             logging.debug(f"[SKIP]: Failed to unpack packet: {e}")
 
@@ -102,6 +102,7 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
         logging.info(f"📦 Saved {proto} templates: {outfile}")
 
     export_ja3_log(dest_path, nic)
+    l7_tracker.export()
 
 def main():
     parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak Deception Engine")
