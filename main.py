@@ -30,7 +30,7 @@ try:
     from Packet import Packet
     from os_deceiver import OsDeceiver
     from port_deceiver import PortDeceiver
-    from fingerprint_gen import generateKey
+    from fingerprint_utils import gen_key
     from os_recorder import templateSynthesis, export_ja3_log
     from ja3_extractor import extract_ja3, match_ja3_rule
 except ImportError as e:
