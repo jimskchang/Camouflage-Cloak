@@ -2,9 +2,10 @@
 
 import os
 import json
+import csv
 import logging
 from datetime import datetime
-from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP
+from scapy.all import sniff, Ether, IP, TCP, UDP, ICMP, wrpcap
 
 from src.settings import CUSTOM_RULES, JA3_RULES, get_os_fingerprint
 from src.response import synthesize_response, export_ja3_observed
@@ -14,7 +15,7 @@ from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src import l7_tracker
 
 class PortDeceiver:
-    def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False):
+    def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False, enable_dns=False, enable_tls=False):
         self.interface_ip = interface_ip
         self.os_name = os_name
         self.ports_config = ports_config
@@ -22,28 +23,32 @@ class PortDeceiver:
         self.mac = mac
         self.replay = replay
         self.interactive = interactive
+        self.enable_dns = enable_dns
+        self.enable_tls = enable_tls
 
         self.fingerprint = get_os_fingerprint(os_name)
-        self.ttl = self.fingerprint.get("ttl")
-        self.window = self.fingerprint.get("window")
+        self.ttl = self.fingerprint.get("ttl", 64)
+        self.window = self.fingerprint.get("window", 8192)
         self.os_flags = {
             "df": self.fingerprint.get("df", False),
             "tos": self.fingerprint.get("tos", 0),
             "ecn": self.fingerprint.get("ecn", 0),
+            "reserved": self.fingerprint.get("tcp_reserved", 0),
+            "ip_options": self.fingerprint.get("ip_options", b"")
         }
 
         self.conn = TcpConnect(self.interface_ip, nic=self.nic)
         self.protocol_stats = {}
         self.session_log = {}
         self.ja3_log = {}
+        self.sent_packets = []
 
         l7_tracker.launch_plot()
 
     def run(self):
         logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
         sniff(iface=self.nic, prn=self._handle_packet, store=False)
-        export_ja3_observed()
-        l7_tracker.export()
+        self._export_logs()
 
     def _handle_packet(self, pkt_raw):
         try:
@@ -72,7 +77,6 @@ class PortDeceiver:
                             return
                         elif action == "template":
                             logging.info(matched_rule.get("log", f"📦 JA3 {ja3_hash} → template: {matched_rule.get('template_name')}"))
-                            pass
 
             if proto == "tcp" and dst_port in [80, 8080]:
                 payload = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
@@ -81,12 +85,7 @@ class PortDeceiver:
                         if line.lower().startswith("user-agent"):
                             user_agent = line.split(":", 1)[-1].strip().lower()
                             break
-                    if "curl" in user_agent:
-                        banner_type = "curl"
-                    elif "chrome" in user_agent:
-                        banner_type = "chrome"
-                    else:
-                        banner_type = "default"
+                    banner_type = "curl" if "curl" in user_agent else "chrome" if "chrome" in user_agent else "default"
                     l7_tracker.log_http_banner(src_ip, ja3_hash, banner_type, user_agent)
 
             for rule in CUSTOM_RULES:
@@ -112,6 +111,7 @@ class PortDeceiver:
             response = synthesize_response(pkt, b"", ttl=self.ttl, window=self.window, deceiver=self)
             if response:
                 self.conn.send_packet(response)
+                self.sent_packets.append(response)
                 self.session_log.setdefault(src_ip, []).append({
                     "proto": proto,
                     "port": dst_port,
@@ -124,14 +124,48 @@ class PortDeceiver:
             logging.warning(f"⚠️ PortDeceiver error: {e}")
 
     def _send_rst(self, pkt):
-        rst = self.conn.build_tcp_rst(pkt)
+        rst = self.conn.build_tcp_rst(pkt, ttl=self.ttl)
         self.conn.send_packet(rst)
+        self.sent_packets.append(rst)
         self.protocol_stats["RST"] = self.protocol_stats.get("RST", 0) + 1
 
     def _send_icmp_unreachable(self, pkt):
-        from scapy.all import ICMP
-        ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"])
+        ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"], ttl=self.ttl, tos=self.os_flags["tos"])
         icmp = ICMP(type=3, code=3)
         inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
         response = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
         self.conn.send_packet(bytes(response))
+        self.sent_packets.append(bytes(response))
+        self.protocol_stats["ICMP"] = self.protocol_stats.get("ICMP", 0) + 1
+
+    def _export_logs(self):
+        base = os.path.join("os_record", self.os_name)
+        os.makedirs(base, exist_ok=True)
+
+        json_path = os.path.join(base, "port_sessions.json")
+        csv_path = os.path.join(base, "port_sessions.csv")
+        pcap_path = os.path.join(base, "port_responses.pcap")
+
+        try:
+            with open(json_path, "w") as f:
+                json.dump(self.session_log, f, indent=2)
+            logging.info(f"📝 Session log saved → {json_path}")
+        except Exception as e:
+            logging.warning(f"⚠️ Failed to save session JSON: {e}")
+
+        try:
+            with open(csv_path, "w", newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(["src_ip", "proto", "port", "ja3", "user_agent", "time"])
+                for ip, entries in self.session_log.items():
+                    for entry in entries:
+                        writer.writerow([ip, entry.get("proto"), entry.get("port"), entry.get("ja3"), entry.get("ua"), entry.get("time")])
+            logging.info(f"📄 Session CSV saved → {csv_path}")
+        except Exception as e:
+            logging.warning(f"⚠️ Failed to save session CSV: {e}")
+
+        try:
+            wrpcap(pcap_path, self.sent_packets)
+            logging.info(f"📦 Response PCAP saved → {pcap_path}")
+        except Exception as e:
+            logging.warning(f"⚠️ Failed to save PCAP: {e}")
