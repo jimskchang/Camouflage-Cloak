@@ -1,3 +1,5 @@
+# src/port_deceiver.py
+
 import os
 import json
 import logging
@@ -10,6 +12,7 @@ from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src.fingerprint_gen import generateKey
+from src.l7_tracker import log_http_banner, export_http_log
 
 class PortDeceiver:
     def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False):
@@ -39,6 +42,7 @@ class PortDeceiver:
         logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
         sniff(iface=self.nic, prn=self._handle_packet, store=False)
         export_ja3_observed()
+        export_http_log()
 
     def _handle_packet(self, pkt_raw):
         try:
@@ -71,6 +75,12 @@ class PortDeceiver:
                             logging.info(matched_rule.get("log", f"📦 JA3 {ja3_hash} → template: {matched_rule.get('template_name')}"))
                             # Future support: lookup and use specific TLS template
                             pass
+
+            # Log HTTP banner if found
+            if proto == "tcp" and dst_port in [80, 8080]:
+                payload = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
+                if payload.startswith("GET"):
+                    log_http_banner(src_ip, pkt.packet)
 
             # Custom rule evaluation
             for rule in CUSTOM_RULES:
