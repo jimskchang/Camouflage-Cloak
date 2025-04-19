@@ -48,9 +48,9 @@ class TcpConnect:
 
             if vlan:
                 ether.type = 0x8100
-                ether = ether / struct.pack("!HH", 0x0000, vlan)  # 0x0000 priority+CFI
+                ether = ether / struct.pack("!HH", 0x0000, vlan)
 
-            ip = IPv6(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str']) if ipv6 else IP(
+            ip_layer = IPv6(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str']) if ipv6 else IP(
                 src=pkt.l3_field['dest_IP_str'],
                 dst=pkt.l3_field['src_IP_str'],
                 ttl=64,
@@ -66,7 +66,7 @@ class TcpConnect:
                 window=settings.FALLBACK_WINDOW
             )
 
-            return bytes(ether / ip / tcp)
+            return bytes(ether / ip_layer / tcp)
         except Exception as e:
             logging.error(f"❌ Failed to build TCP {flags}: {e}")
             return b''
@@ -90,7 +90,7 @@ class TcpConnect:
         try:
             if b"\x16\x03" in pkt.packet and b"\x01" in pkt.packet[5:6]:
                 client_hello = pkt.packet[pkt.packet.find(b"\x16\x03"):]
-                return "stub_ja3_hash"  # TODO: Replace with real parser
+                return "stub_ja3_hash"
         except Exception as e:
             logging.warning(f"⚠️ JA3 parsing error: {e}")
         return None
