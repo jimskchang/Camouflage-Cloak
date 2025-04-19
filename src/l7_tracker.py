@@ -39,7 +39,7 @@ def log_http_banner(src_ip: str, ja3: str, banner_type: str, user_agent: str = N
 
 def export():
     """
-    Export full JA3+UA+Banners to JSON.
+    Export full L7 banner hit map with JA3 and User-Agent metadata to JSON.
     """
     try:
         export_data = {
@@ -50,9 +50,9 @@ def export():
         }
         with open(L7_TRACKER_LOG, "w") as f:
             json.dump(export_data, f, indent=2)
-        logging.info(f"📤 Exported L7 tracker: {L7_TRACKER_LOG}")
+        logging.info(f"📤 Exported L7 tracker to: {L7_TRACKER_LOG}")
     except Exception as e:
-        logging.warning(f"⚠️ L7 export error: {e}")
+        logging.warning(f"⚠️ L7 export failed: {e}")
 
 
 def _update_plot(frame):
@@ -82,15 +82,15 @@ def _update_plot(frame):
 
 def launch_plot():
     """
-    Launch real-time banner stats chart.
+    Launch a real-time banner stats chart (non-blocking).
     """
     ani = animation.FuncAnimation(fig, _update_plot, interval=1000)
     threading.Thread(target=plt.show, daemon=True).start()
 
 
-def get_l7_data():
+def get_l7_data() -> dict:
     """
-    Optional debug/API: Return current L7 stats.
+    Return live stats for introspection or debug UI.
     """
     return {
         "banner_hits": {k: dict(v) for k, v in l7_data.items()},
