@@ -1,241 +1,98 @@
 # /src/Packet.py
 
+# --- src/os_recorder.py (patched for ARP + L7 export) ---
+
 import logging
-import socket
-import struct
-import array
-import hashlib
-import src.settings as settings
+import os
+import json
+from datetime import datetime
+from scapy.all import wrpcap
+
 from src.fingerprint_gen import generateKey
+from src.ja3_extractor import extract_ja3_from_packet
+from src.l7_tracker import log_http_banner
 
-class Packet:
-    def __init__(self, packet=b'', proc=None, l2_field=None, l3_field=None, l4_field=None, data='', ttl=None, window=None):
-        self.packet = packet
-        self.l3 = proc if proc in settings.L3_PROC else 'ip'
-        self.l4 = proc if proc in settings.L4_PROC else ''
-        self.l2_header = b''
-        self.l3_header = b''
-        self.l4_header = b''
-        self.l2_field = l2_field or {}
-        self.l3_field = l3_field or {}
-        self.l4_field = l4_field or {}
-        self.data = data
-        self.interface = None
+ja3_log = {}
 
-        self.ttl_override = ttl
-        self.window_override = window
 
-    def get_signature(self, proto_type: str) -> bytes:
-        try:
-            return generateKey(self, proto_type)
-        except Exception as e:
-            logging.warning(f"[Packet] Failed to get signature for {proto_type}: {e}")
-            return b''
+def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, base_path=None, enable_l7=False):
+    try:
+        src_ip = packet.l3_field.get("src_IP_str")
+        dst_ip = packet.l3_field.get("dest_IP_str")
+        src_port = packet.l4_field.get("src_port")
+        dst_port = packet.l4_field.get("dest_port")
 
-    def unpack(self) -> None:
-        try:
-            self.setL2Header(self.packet)
-            self.setL3Header(self.packet)
-            self.setL4Header(self.packet)
-        except Exception as e:
-            logging.error(f"[Packet] General unpack error: {e}")
+        timestamp = datetime.utcnow().isoformat()
+        vlan = packet.l2_field.get("vlan")
+        flags = packet.l4_field.get("flags") if proto_type == "TCP" else None
+        ttl = packet.l3_field.get("ttl")
+        window = packet.l4_field.get("window") if proto_type == "TCP" else None
+        options = packet.l4_field.get("option_field") if proto_type == "TCP" else {}
 
-    def setL2Header(self, raw_packet: bytes):
-        self.packet = raw_packet
-        self.unpack_l2_header()
+        # --- JA3 Extraction ---
+        if proto_type == "TCP" and dst_port == 443:
+            ja3_hash = extract_ja3_from_packet(packet)
+            if ja3_hash:
+                ja3_log.setdefault(src_ip, []).append(ja3_hash)
+                logging.info(f"🔍 JA3 Detected from {src_ip}: {ja3_hash}")
 
-    def setL3Header(self, raw_packet: bytes):
-        self.packet = raw_packet
-        self.unpack_l3_header(self.l3)
+        # --- Identify request-response pair ---
+        if proto_type in ("TCP", "UDP"):
+            pair = (src_ip, dst_ip, src_port, dst_port)
+        elif proto_type == "ICMP":
+            pair = packet.l4_field.get("ID", 0)
+        elif proto_type == "ARP":
+            pair = (src_ip, dst_ip)
+        else:
+            return template_dict
 
-    def setL4Header(self, raw_packet: bytes):
-        self.packet = raw_packet
-        self.unpack_l4_header(self.l4)
+        # --- Incoming Request ---
+        if dst_ip == host_ip:
+            key = generateKey(packet, proto_type)
+            pair_dict[pair] = key
+            if key not in template_dict[proto_type]:
+                template_dict[proto_type][key] = None
+                logging.debug(
+                    f"🟢 [REQ][{proto_type}] {timestamp} | Key: {key.hex()[:32]} | From {src_ip}:{src_port} → {dst_ip}:{dst_port} | TTL: {ttl} | VLAN: {vlan}"
+                )
 
-    def unpack_l2_header(self) -> None:
-        if len(self.packet) < settings.ETH_HEADER_LEN:
-            logging.error("[L2] Packet too short for Ethernet header.")
-            return
-        try:
-            eth_dMAC, eth_sMAC, eth_type = struct.unpack('!6s6sH', self.packet[:14])
+        # --- Outgoing Response ---
+        elif src_ip == host_ip and pair in pair_dict:
+            key = pair_dict[pair]
 
-            if eth_type == 0x8100 and len(self.packet) >= 18:
-                vlan_tag = struct.unpack('!H', self.packet[14:16])[0]
-                real_eth_type = struct.unpack('!H', self.packet[16:18])[0]
-                vlan_id = vlan_tag & 0x0FFF
-
-                self.l2_field = {
-                    'dMAC': eth_dMAC,
-                    'sMAC': eth_sMAC,
-                    'protocol': real_eth_type,
-                    'vlan': vlan_id
-                }
-                self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(real_eth_type, 'others')
-                self.l2_header = self.packet[:18]
+            if key in template_dict[proto_type] and template_dict[proto_type][key] is not None:
+                logging.warning(f"⚠️ Collision: duplicate response for key {key.hex()[:32]}")
             else:
-                self.l2_field = {
-                    'dMAC': eth_dMAC,
-                    'sMAC': eth_sMAC,
-                    'protocol': eth_type,
-                    'vlan': None
-                }
-                self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(eth_type, 'others')
-                self.l2_header = self.packet[:14]
+                template_dict[proto_type][key] = packet.packet
 
-            # Force no L4 for ARP
-            if self.l3 == 'arp':
-                self.l4 = ''
+            preview = packet.packet.hex()[:64] + ("..." if len(packet.packet.hex()) > 64 else "")
+            logging.debug(
+                f"📤 [RESP][{proto_type}] {timestamp} | Key: {key.hex()[:32]} | To {dst_ip}:{dst_port} | TTL={ttl} | Window={window} | Flags={flags} | Options={options} | Data: {preview}"
+            )
 
-        except Exception as e:
-            logging.error(f"[L2] Error unpacking Ethernet/VLAN: {e}")
+            if base_path:
+                pcap_name = f"{proto_type.lower()}_{key.hex()[:16]}.pcap"
+                pcap_path = os.path.join(base_path, pcap_name)
+                try:
+                    wrpcap(pcap_path, [packet.packet])
+                    logging.debug(f"📂 Saved template PCAP: {pcap_path}")
+                except Exception as e:
+                    logging.warning(f"⚠️ Failed to write PCAP: {e}")
 
-    def unpack_l3_header(self, l3: str) -> None:
-        if l3 == 'ip':
-            self.unpack_ip_header()
-        elif l3 == 'arp':
-            self.unpack_arp_header()
+        return template_dict
 
-    def unpack_l4_header(self, l4: str) -> None:
-        if l4 == 'tcp':
-            self.unpack_tcp_header()
-        elif l4 == 'udp':
-            self.unpack_udp_header()
-        elif l4 == 'icmp':
-            self.unpack_icmp_header()
+    except Exception as e:
+        logging.warning(f"⚠️ templateSynthesis error: {e}")
+        return template_dict
 
-    def unpack_arp_header(self) -> None:
-        try:
-            start = len(self.l2_header)
-            self.l3_header = self.packet[start:start + settings.ARP_HEADER_LEN]
-            fields = struct.unpack('!HHBBH6s4s6s4s', self.l3_header)
-            self.l3_field = {
-                'hw_type': fields[0],
-                'proto_type': fields[1],
-                'hw_size': fields[2],
-                'proto_size': fields[3],
-                'opcode': fields[4],
-                'sender_mac': fields[5],
-                'sender_ip': fields[6],
-                'recv_mac': fields[7],
-                'recv_ip': fields[8],
-                'src_IP_str': socket.inet_ntoa(fields[6]),
-                'dest_IP_str': socket.inet_ntoa(fields[8])
-            }
-        except Exception as e:
-            logging.error(f"[ARP] Error unpacking: {e}")
 
-    def unpack_ip_header(self) -> None:
-        try:
-            start = len(self.l2_header)
-            ihl = self.packet[start] & 0x0F
-            self.l3_header = self.packet[start:start + ihl * 4]
-            fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header[:20])
-            self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(fields[6], 'others')
-            self.l3_field = {
-                'IHL_VERSION': fields[0],
-                'TYPE_OF_SERVICE': fields[1],
-                'total_len': fields[2],
-                'pktID': fields[3],
-                'FRAGMENT_STATUS': fields[4],
-                'ttl': self.ttl_override if self.ttl_override is not None else fields[5],
-                'PROTOCOL': fields[6],
-                'check_sum_of_hdr': fields[7],
-                'src_IP': fields[8],
-                'dest_IP': fields[9],
-                'src_IP_str': socket.inet_ntoa(fields[8]),
-                'dest_IP_str': socket.inet_ntoa(fields[9]),
-                'options': self.packet[start + 20:start + ihl * 4] if ihl > 5 else b''
-            }
-        except Exception as e:
-            logging.error(f"[IP] Error unpacking: {e}")
-
-    def unpack_tcp_header(self) -> None:
-        try:
-            start = len(self.l2_header) + (self.l3_field.get('IHL_VERSION', 0) & 0x0F) * 4
-            offset = (self.packet[start + 12] >> 4)
-            self.l4_header = self.packet[start:start + offset * 4]
-            fields = struct.unpack('!HHLLBBHHH', self.l4_header[:20])
-            self.l4_field = {
-                'src_port': fields[0],
-                'dest_port': fields[1],
-                'seq': fields[2],
-                'ack_num': fields[3],
-                'offset': offset * 4,
-                'flags': fields[5],
-                'reserved': (fields[4] & 0x0E) >> 1,
-                'window': self.window_override if self.window_override is not None else fields[6],
-                'checksum': fields[7],
-                'urgent_ptr': fields[8],
-                'kind_seq': [],
-                'option_field': {}
-            }
-            option_data = self.l4_header[20:offset * 4]
-            i = 0
-            while i < len(option_data):
-                kind = option_data[i]
-                self.l4_field['kind_seq'].append(kind)
-                if kind == 0:
-                    break
-                elif kind == 1:
-                    i += 1
-                    continue
-                else:
-                    length = option_data[i + 1]
-                    value = option_data[i + 2:i + length]
-                    if kind == 2 and len(value) >= 2:
-                        self.l4_field['option_field']['mss'] = struct.unpack('!H', value[:2])[0]
-                    elif kind == 3 and len(value) >= 1:
-                        self.l4_field['option_field']['ws'] = struct.unpack('!B', value[:1])[0]
-                    elif kind == 8 and len(value) >= 8:
-                        self.l4_field['option_field']['ts_val'], self.l4_field['option_field']['ts_echo_reply'] = struct.unpack('!II', value[:8])
-                    i += length
-        except Exception as e:
-            logging.error(f"[TCP] Error unpacking: {e}")
-
-    def unpack_udp_header(self) -> None:
-        try:
-            start = len(self.l2_header) + (self.l3_field.get('IHL_VERSION', 0) & 0x0F) * 4
-            self.l4_header = self.packet[start:start + settings.UDP_HEADER_LEN]
-            fields = struct.unpack('!HHHH', self.l4_header)
-            self.l4_field = {
-                'src_port': fields[0],
-                'dest_port': fields[1],
-                'length': fields[2],
-                'checksum': fields[3],
-            }
-        except Exception as e:
-            logging.error(f"[UDP] Error unpacking: {e}")
-
-    def unpack_icmp_header(self) -> None:
-        try:
-            start = len(self.l2_header) + (self.l3_field.get('IHL_VERSION', 0) & 0x0F) * 4
-            self.l4_header = self.packet[start:start + settings.ICMP_HEADER_LEN]
-            fields = struct.unpack('!BBHHH', self.l4_header)
-            self.l4_field = {
-                'icmp_type': fields[0],
-                'code': fields[1],
-                'checksum': fields[2],
-                'ID': fields[3],
-                'seq': fields[4],
-            }
-        except Exception as e:
-            logging.error(f"[ICMP] Error unpacking: {e}")
-
-    @staticmethod
-    def getTCPChecksum(packet: bytes) -> int:
-        if len(packet) % 2 != 0:
-            packet += b'\0'
-        res = sum(array.array("H", packet))
-        res = (res >> 16) + (res & 0xFFFF)
-        res += res >> 16
-        return (~res) & 0xFFFF
-
-    @staticmethod
-    def getUDPChecksum(data: bytes) -> int:
-        checksum = 0
-        if len(data) % 2:
-            data += b'\0'
-        for i in range(0, len(data), 2):
-            checksum += (data[i] << 8) + data[i+1]
-        checksum = (checksum >> 16) + (checksum & 0xFFFF)
-        return ~checksum & 0xFFFF
+def export_ja3_log(path, nic):
+    try:
+        if not ja3_log:
+            return
+        outfile = os.path.join(path, f"ja3_observed_{nic}.json")
+        with open(outfile, "w") as f:
+            json.dump(ja3_log, f, indent=2)
+        logging.info(f"🔐 JA3 log exported: {outfile}")
+    except Exception as e:
+        logging.warning(f"⚠️ Failed to export JA3 log: {e}")
