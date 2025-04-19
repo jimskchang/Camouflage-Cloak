@@ -1,32 +1,19 @@
-# src/os_recorder.py
+# --- src/os_recorder.py (patched for ARP + JA3 + L7 export) ---
 
 import logging
 import os
 import json
 from datetime import datetime
-from scapy.all import wrpcap, Ether
+from scapy.all import wrpcap
 
 from src.fingerprint_gen import generateKey
 from src.ja3_extractor import extract_ja3_from_packet
+from src.l7_tracker import log_http_banner
 
 ja3_log = {}
 
+
 def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, base_path=None, enable_l7=False):
-    """
-    Synthesizes packet templates from incoming traffic based on normalized key and response matching.
-
-    Args:
-        packet: A parsed Packet instance.
-        proto_type: "TCP", "UDP", "ICMP", or "ARP".
-        template_dict: Template storage by protocol and normalized key.
-        pair_dict: Lookup dictionary to match request-response.
-        host_ip: IP address of the host being recorded.
-        base_path: Optional directory to export individual PCAPs.
-        enable_l7: Whether to enable DNS/HTTP markers or future parsing.
-
-    Returns:
-        Updated template_dict.
-    """
     try:
         src_ip = packet.l3_field.get("src_IP_str")
         dst_ip = packet.l3_field.get("dest_IP_str")
@@ -40,14 +27,14 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
         window = packet.l4_field.get("window") if proto_type == "TCP" else None
         options = packet.l4_field.get("option_field") if proto_type == "TCP" else {}
 
-        # Extract and store JA3 if enabled
+        # --- JA3 Extraction ---
         if proto_type == "TCP" and dst_port == 443:
             ja3_hash = extract_ja3_from_packet(packet)
             if ja3_hash:
                 ja3_log.setdefault(src_ip, []).append(ja3_hash)
                 logging.info(f"🔍 JA3 Detected from {src_ip}: {ja3_hash}")
 
-        # Request identification
+        # --- Identify request-response pair ---
         if proto_type in ("TCP", "UDP"):
             pair = (src_ip, dst_ip, src_port, dst_port)
         elif proto_type == "ICMP":
@@ -64,9 +51,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
             if key not in template_dict[proto_type]:
                 template_dict[proto_type][key] = None
                 logging.debug(
-                    f"🟢 [REQ][{proto_type}] {timestamp} | "
-                    f"Key: {key.hex()[:32]} | From {src_ip}:{src_port} → {dst_ip}:{dst_port} | "
-                    f"TTL: {ttl} | VLAN: {vlan}"
+                    f"🟢 [REQ][{proto_type}] {timestamp} | Key: {key.hex()[:32]} | From {src_ip}:{src_port} → {dst_ip}:{dst_port} | TTL: {ttl} | VLAN: {vlan}"
                 )
 
         # --- Outgoing Response ---
@@ -80,18 +65,15 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
 
             preview = packet.packet.hex()[:64] + ("..." if len(packet.packet.hex()) > 64 else "")
             logging.debug(
-                f"📤 [RESP][{proto_type}] {timestamp} | "
-                f"Key: {key.hex()[:32]} | To {dst_ip}:{dst_port} | TTL={ttl} | Window={window} | "
-                f"Flags={flags} | Options={options} | Data: {preview}"
+                f"📤 [RESP][{proto_type}] {timestamp} | Key: {key.hex()[:32]} | To {dst_ip}:{dst_port} | TTL={ttl} | Window={window} | Flags={flags} | Options={options} | Data: {preview}"
             )
 
-            # Optionally save per-template PCAP
             if base_path:
                 pcap_name = f"{proto_type.lower()}_{key.hex()[:16]}.pcap"
                 pcap_path = os.path.join(base_path, pcap_name)
                 try:
-                    wrpcap(pcap_path, [Ether(packet.packet)])
-                    logging.debug(f"💾 Saved template PCAP: {pcap_path}")
+                    wrpcap(pcap_path, [packet.packet])
+                    logging.debug(f"📂 Saved template PCAP: {pcap_path}")
                 except Exception as e:
                     logging.warning(f"⚠️ Failed to write PCAP: {e}")
 
@@ -100,6 +82,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
     except Exception as e:
         logging.warning(f"⚠️ templateSynthesis error: {e}")
         return template_dict
+
 
 def export_ja3_log(path, nic):
     try:
