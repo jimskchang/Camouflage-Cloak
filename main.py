@@ -26,13 +26,13 @@ logging.basicConfig(
 
 try:
     import settings
-    from Packet import Packet
-    from os_deceiver import OsDeceiver
-    from port_deceiver import PortDeceiver
-    from fingerprint_utils import gen_key
-    from os_recorder import templateSynthesis, export_ja3_log
-    from ja3_extractor import extract_ja3, match_ja3_rule
-    import l7_tracker
+    from src.Packet import Packet
+    from src.os_deceiver import OsDeceiver
+    from src.port_deceiver import PortDeceiver
+    from src.fingerprint_utils import gen_key
+    from src.os_recorder import templateSynthesis, export_ja3_log
+    from src.ja3_extractor import extract_ja3, match_ja3_rule
+    import src.l7_tracker as l7_tracker
 except ImportError as e:
     logging.error(f"[ERROR]: Import error: {e}")
     sys.exit(1)
@@ -97,6 +97,20 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
         filter="ip or arp"
     )
 
+     # Visual indicator if nothing was captured
+    if not any(template_dict[p] for p in template_dict):
+        logging.warning("⚠️ No matching traffic captured. Ensure Nmap is targeting this host and using ARP/IP probes.")
+
+    for proto in template_dict:
+        outfile = os.path.join(dest_path, f"{proto.lower()}_record.txt")
+        outdata = {
+            key.hex(): value.hex()
+            for key, value in template_dict[proto].items() if value
+        }
+        with open(outfile, "w") as f:
+            json.dump(outdata, f, indent=2)
+        logging.info(f"📦 Saved {proto} templates: {outfile}")
+        
     for proto in template_dict:
         outfile = os.path.join(dest_path, f"{proto.lower()}_record.txt")
         outdata = {
