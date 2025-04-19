@@ -76,23 +76,37 @@ def run_template_learning(host_ip, dest_path, nic, enable_dns=False, enable_ja3=
 
     def handle(pkt):
         try:
+            if pkt.haslayer("ARP"):
+                logging.info(f"🧾 ARP Packet Captured: {pkt.summary()}")
+
             packet = Packet(bytes(pkt))
             packet.interface = nic
             packet.unpack()
             proto = packet.l4 if packet.l4 else packet.l3
-            templateSynthesis(packet, proto.upper(), template_dict, pair_dict, host_ip, base_path=dest_path, enable_l7=True)
+            templateSynthesis(
+                packet,
+                proto.upper(),
+                template_dict,
+                pair_dict,
+                host_ip,
+                base_path=dest_path,
+                enable_l7=True
+            )
         except Exception as e:
             logging.debug(f"[SKIP] Failed to unpack packet: {e}")
 
-    if pkt.haslayer("ARP"):
-    logging.info(f"🧾 ARP Packet Captured: {pkt.summary()}")
-    
     logging.info(f"📡 Sniffing on {nic} for 300s...")
     validate_nic(nic)
     set_promisc(nic)
     time.sleep(1)
 
-    sniff(iface=nic, timeout=300, prn=handle, store=False, filter="ip or arp")
+    sniff(
+        iface=nic,
+        timeout=300,
+        prn=handle,
+        store=False,
+        filter="ip or arp"
+    )
 
     if not template_dict:
         logging.warning("⚠️ No packets captured during scan.")
@@ -139,7 +153,13 @@ def main():
     if args.scan == "ts":
         dest = os.path.abspath(args.dest or settings.OS_RECORD_PATH)
         ensure_dir(dest)
-        run_template_learning(args.host, dest, args.nic, enable_dns=args.dns, enable_ja3=args.ja3)
+        run_template_learning(
+            args.host,
+            dest,
+            args.nic,
+            enable_dns=args.dns,
+            enable_ja3=args.ja3
+        )
 
     elif args.scan == "od":
         if not args.os:
