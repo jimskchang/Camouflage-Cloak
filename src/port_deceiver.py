@@ -11,8 +11,8 @@ from src.response import synthesize_response, export_ja3_observed
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.ja3_extractor import extract_ja3, match_ja3_rule
-from src.fingerprint_utils import gen_key
-from src.l7_tracker import log_http_banner, export_http_log
+from src.fingerprint_utils import generateKey
+from src.l7_tracker import log_http_banner, export as export_l7_data, launch_plot
 
 class PortDeceiver:
     def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False):
@@ -38,11 +38,13 @@ class PortDeceiver:
         self.session_log = {}
         self.ja3_log = {}
 
+        launch_plot()
+
     def run(self):
         logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
         sniff(iface=self.nic, prn=self._handle_packet, store=False)
         export_ja3_observed()
-        export_http_log()
+        export_l7_data()
 
     def _handle_packet(self, pkt_raw):
         try:
@@ -56,6 +58,7 @@ class PortDeceiver:
             flags = pkt.l4_field.get("flags", "")
             tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
             ja3_hash = None
+            ua_string = None
 
             # JA3 detection if applicable
             if proto == "tcp" and dst_port == 443:
@@ -63,8 +66,6 @@ class PortDeceiver:
                 if ja3_hash:
                     self.ja3_log.setdefault(src_ip, []).append(ja3_hash)
                     logging.info(f"🔍 JA3 for {src_ip}: {ja3_hash}")
-
-                    # JA3 rule matching
                     matched_rule = match_ja3_rule(ja3_hash)
                     if matched_rule:
                         action = matched_rule.get("action")
@@ -73,14 +74,15 @@ class PortDeceiver:
                             return
                         elif action == "template":
                             logging.info(matched_rule.get("log", f"📦 JA3 {ja3_hash} → template: {matched_rule.get('template_name')}"))
-                            # Future support: lookup and use specific TLS template
-                            pass
 
-            # Log HTTP banner if found
+            # User-Agent parsing for HTTP (port 80/8080)
             if proto == "tcp" and dst_port in [80, 8080]:
-                payload = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
-                if payload.startswith("GET"):
-                    log_http_banner(src_ip, pkt.packet)
+                raw = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
+                if raw.startswith("GET"):
+                    for line in raw.split("\r\n"):
+                        if line.lower().startswith("user-agent"):
+                            ua_string = line.split(":", 1)[-1].strip()
+                            break
 
             # Custom rule evaluation
             for rule in CUSTOM_RULES:
@@ -111,8 +113,13 @@ class PortDeceiver:
                     "proto": proto,
                     "port": dst_port,
                     "ja3": ja3_hash,
+                    "ua": ua_string,
                     "time": datetime.utcnow().isoformat()
                 })
+
+                if proto == "tcp" and dst_port in [80, 8080]:
+                    banner_type = pkt.l4_field.get("http_banner_type", "default")
+                    log_http_banner(src_ip, ja3_hash, banner_type, ua_string)
 
         except Exception as e:
             logging.warning(f"⚠️ PortDeceiver error: {e}")
@@ -125,7 +132,7 @@ class PortDeceiver:
     def _send_icmp_unreachable(self, pkt):
         from scapy.all import ICMP
         ip = IP(src=pkt.l3_field["dest_IP_str"], dst=pkt.l3_field["src_IP_str"])
-        icmp = ICMP(type=3, code=3)  # Destination Unreachable, Port Unreachable
+        icmp = ICMP(type=3, code=3)
         inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
         response = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
         self.conn.send_packet(bytes(response))
