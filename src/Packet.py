@@ -37,7 +37,6 @@ class Packet:
             self.setL2Header(self.packet)
             self.setL3Header(self.packet)
             self.setL4Header(self.packet)
-            self.extract_payload()
         except Exception as e:
             logging.error(f"[Packet] General unpack error: {e}")
 
@@ -71,7 +70,7 @@ class Packet:
                     'protocol': real_eth_type,
                     'vlan': vlan_id
                 }
-                self.l3 = {0x0800: 'ip', 0x0806: 'arp', 0x86DD: 'ipv6'}.get(real_eth_type, 'others')
+                self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(real_eth_type, 'others')
                 self.l2_header = self.packet[:18]
             else:
                 self.l2_field = {
@@ -80,8 +79,13 @@ class Packet:
                     'protocol': eth_type,
                     'vlan': None
                 }
-                self.l3 = {0x0800: 'ip', 0x0806: 'arp', 0x86DD: 'ipv6'}.get(eth_type, 'others')
+                self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(eth_type, 'others')
                 self.l2_header = self.packet[:14]
+
+            # Force no L4 for ARP
+            if self.l3 == 'arp':
+                self.l4 = ''
+
         except Exception as e:
             logging.error(f"[L2] Error unpacking Ethernet/VLAN: {e}")
 
@@ -90,8 +94,6 @@ class Packet:
             self.unpack_ip_header()
         elif l3 == 'arp':
             self.unpack_arp_header()
-        elif l3 == 'ipv6':
-            self.unpack_ipv6_header()
 
     def unpack_l4_header(self, l4: str) -> None:
         if l4 == 'tcp':
@@ -116,6 +118,8 @@ class Packet:
                 'sender_ip': fields[6],
                 'recv_mac': fields[7],
                 'recv_ip': fields[8],
+                'src_IP_str': socket.inet_ntoa(fields[6]),
+                'dest_IP_str': socket.inet_ntoa(fields[8])
             }
         except Exception as e:
             logging.error(f"[ARP] Error unpacking: {e}")
@@ -144,34 +148,6 @@ class Packet:
             }
         except Exception as e:
             logging.error(f"[IP] Error unpacking: {e}")
-
-    def unpack_ipv6_header(self) -> None:
-        try:
-            start = len(self.l2_header)
-            self.l3_header = self.packet[start:start + 40]
-            fields = struct.unpack('!IHBB16s16s', self.l3_header)
-            self.l4 = {58: 'icmp', 6: 'tcp', 17: 'udp'}.get(fields[2], 'others')
-            self.l3_field = {
-                'version_class_flow': fields[0],
-                'payload_length': fields[1],
-                'next_header': fields[2],
-                'hop_limit': fields[3],
-                'src_IP': fields[4],
-                'dest_IP': fields[5],
-                'src_IP_str': socket.inet_ntop(socket.AF_INET6, fields[4]),
-                'dest_IP_str': socket.inet_ntop(socket.AF_INET6, fields[5]),
-            }
-        except Exception as e:
-            logging.error(f"[IPv6] Error unpacking: {e}")
-
-    def extract_payload(self):
-        try:
-            l4_start = len(self.l2_header) + len(self.l3_header) + len(self.l4_header)
-            self.data = self.packet[l4_start:]
-        except Exception as e:
-            logging.debug(f"[Payload] Failed to extract data: {e}")
-
-    # ... (rest unchanged TCP/UDP/ICMP unpack and checksum methods remain the same)
 
     def unpack_tcp_header(self) -> None:
         try:
