@@ -4,7 +4,7 @@ import logging
 import os
 import json
 from datetime import datetime
-from scapy.all import wrpcap
+from scapy.all import wrpcap, Ether
 
 from src.fingerprint_gen import generateKey
 from src.ja3_extractor import extract_ja3_from_packet
@@ -90,7 +90,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
                 pcap_name = f"{proto_type.lower()}_{key.hex()[:16]}.pcap"
                 pcap_path = os.path.join(base_path, pcap_name)
                 try:
-                    wrpcap(pcap_path, [packet.packet])
+                    wrpcap(pcap_path, [Ether(packet.packet)])
                     logging.debug(f"💾 Saved template PCAP: {pcap_path}")
                 except Exception as e:
                     logging.warning(f"⚠️ Failed to write PCAP: {e}")
