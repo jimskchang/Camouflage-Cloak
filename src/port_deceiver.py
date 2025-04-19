@@ -11,8 +11,7 @@ from src.response import synthesize_response, export_ja3_observed
 from src.Packet import Packet
 from src.tcp import TcpConnect
 from src.ja3_extractor import extract_ja3, match_ja3_rule
-from src.fingerprint_utils import generateKey
-from src.l7_tracker import log_http_banner, export as export_l7_data, launch_plot
+from src import l7_tracker
 
 class PortDeceiver:
     def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False):
@@ -38,13 +37,13 @@ class PortDeceiver:
         self.session_log = {}
         self.ja3_log = {}
 
-        launch_plot()
+        l7_tracker.launch_plot()
 
     def run(self):
         logging.info(f"🚦 Starting port deception on {self.nic} (IP: {self.interface_ip})")
         sniff(iface=self.nic, prn=self._handle_packet, store=False)
         export_ja3_observed()
-        export_l7_data()
+        l7_tracker.export()
 
     def _handle_packet(self, pkt_raw):
         try:
@@ -58,9 +57,8 @@ class PortDeceiver:
             flags = pkt.l4_field.get("flags", "")
             tos = pkt.l3_field.get("TYPE_OF_SERVICE", 0)
             ja3_hash = None
-            ua_string = None
+            user_agent = None
 
-            # JA3 detection if applicable
             if proto == "tcp" and dst_port == 443:
                 ja3_hash = extract_ja3(pkt.packet)
                 if ja3_hash:
@@ -74,17 +72,23 @@ class PortDeceiver:
                             return
                         elif action == "template":
                             logging.info(matched_rule.get("log", f"📦 JA3 {ja3_hash} → template: {matched_rule.get('template_name')}"))
+                            pass
 
-            # User-Agent parsing for HTTP (port 80/8080)
             if proto == "tcp" and dst_port in [80, 8080]:
-                raw = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
-                if raw.startswith("GET"):
-                    for line in raw.split("\r\n"):
+                payload = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
+                if payload.startswith("GET"):
+                    for line in payload.split("\r\n"):
                         if line.lower().startswith("user-agent"):
-                            ua_string = line.split(":", 1)[-1].strip()
+                            user_agent = line.split(":", 1)[-1].strip().lower()
                             break
+                    if "curl" in user_agent:
+                        banner_type = "curl"
+                    elif "chrome" in user_agent:
+                        banner_type = "chrome"
+                    else:
+                        banner_type = "default"
+                    l7_tracker.log_http_banner(src_ip, ja3_hash, banner_type, user_agent)
 
-            # Custom rule evaluation
             for rule in CUSTOM_RULES:
                 match = rule.get("proto", "").lower() == proto
                 match &= rule.get("port", dst_port) == dst_port if "port" in rule else True
@@ -105,7 +109,6 @@ class PortDeceiver:
                     elif rule["action"] == "template":
                         break
 
-            # Fallback response
             response = synthesize_response(pkt, b"", ttl=self.ttl, window=self.window, deceiver=self)
             if response:
                 self.conn.send_packet(response)
@@ -113,13 +116,9 @@ class PortDeceiver:
                     "proto": proto,
                     "port": dst_port,
                     "ja3": ja3_hash,
-                    "ua": ua_string,
+                    "ua": user_agent,
                     "time": datetime.utcnow().isoformat()
                 })
-
-                if proto == "tcp" and dst_port in [80, 8080]:
-                    banner_type = pkt.l4_field.get("http_banner_type", "default")
-                    log_http_banner(src_ip, ja3_hash, banner_type, ua_string)
 
         except Exception as e:
             logging.warning(f"⚠️ PortDeceiver error: {e}")
