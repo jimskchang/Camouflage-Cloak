@@ -2,6 +2,7 @@
 
 import os
 import logging
+from scapy.all import get_if_addr, get_if_hwaddr
 
 # =======================
 # Project Paths & Storage
@@ -29,20 +30,25 @@ L3_PROC = ['ip', 'arp']
 L4_PROC = ['tcp', 'udp', 'icmp']
 
 # =======================
+# Deception Services Config
+# =======================
+SERVICES = {
+    "SSH": {"port": 22, "proto": "tcp", "banner": "SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.5"},
+    "HTTP": {"port": 80, "proto": "tcp", "banner": "HTTP/1.1 200 OK\r\nServer: Apache/2.4.41\r\n\r\n"},
+    "RDP": {"port": 3389, "proto": "tcp", "banner": None}, # Binary simulation
+}
+
+# =======================
 # Custom Rules (Layer 3/4)
 # =======================
 CUSTOM_RULES = [
     {
-        "proto": "TCP", "port": 80, "flags": "S", "action": "drop",
+        "proto": "tcp", "port": 80, "flags": "S", "action": "drop",
         "log": "🔒 Dropping TCP SYN to port 80"
     },
     {
-        "proto": "UDP", "port": 53, "action": "icmp_unreachable",
+        "proto": "udp", "port": 53, "action": "icmp_unreachable",
         "log": "📋 Faking ICMP Unreachable for UDP 53"
-    },
-    {
-        "proto": "ICMP", "type": 8, "action": "template",
-        "log": "💬 Handling ICMP Echo using template"
     }
 ]
 
@@ -55,11 +61,6 @@ JA3_RULES = [
         "action": "template",
         "template_name": "ja3_tls_windows11",
         "log": "🎭 Routing Nmap TLS probe to JA3-Windows11 template"
-    },
-    {
-        "ja3": "771,49195-49196-49199,0-10-11,23-24,0",
-        "action": "drop",
-        "log": "❌ Dropping suspicious JA3 fingerprint"
     }
 ]
 
@@ -69,105 +70,66 @@ JA3_RULES = [
 NIC_TARGET = 'ens192'
 NIC_PROBE  = 'ens224'
 
-VLAN_TARGET = None
-VLAN_PROBE = None
-
+# VLAN Tagging
 VLAN_MAP = {
-    NIC_TARGET: VLAN_TARGET,
-    NIC_PROBE: VLAN_PROBE,
+    NIC_TARGET: None,
+    NIC_PROBE: None,
 }
 
+# Gateway Mapping
 GATEWAY_MAP = {
     NIC_TARGET: '192.168.23.1',
     NIC_PROBE: '192.168.10.1',
 }
 
 # =======================
-# NIC Utilities
-# =======================
-def check_nic_exists(nic: str) -> bool:
-    return os.path.exists(f"/sys/class/net/{nic}")
-
-def get_mac_address(nic: str) -> str:
-    try:
-        with open(f"/sys/class/net/{nic}/address", "r") as f:
-            return f.read().strip()
-    except Exception as e:
-        raise RuntimeError(f"❌ Could not get MAC for {nic}: {e}")
-
-# =======================
 # Port Deception Defaults
 # =======================
-FREE_PORT = [4441, 5551, 6661]
+# Ports that should respond with a template even if not strictly "closed"
+DECEPTION_PORTS = [4441, 5551, 6661]
 
 # =======================
-# OS Fingerprint Templates
+# OS Fingerprint Templates (Advanced)
 # =======================
 FALLBACK_TTL = 64
 FALLBACK_WINDOW = 8192
 
+# Refined fingerprints: TTL, Window, DF bit, TCP Options
 BASE_OS_TEMPLATES = {
     "linux": {
-        "ttl": 64, "window": 5840,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "NOP", "NOP"]
+        "ttl": 64, "window": 5840, "df": True,
+        "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('WScale', 7)]
     },
     "win10": {
-        "ttl": 128, "window": 8192,
-        "ipid": "random", "tos": 0x02, "ecn": 0, "df": True,
-        "tcp_reserved": 0, "ip_options": [],
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=7", "NOP", "NOP"]
+        "ttl": 128, "window": 8192, "df": True,
+        "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('WScale', 2)]
     },
-    "win11": {
-        "ttl": 128, "window": 64240,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
-    },
-    "windows2022": {
-        "ttl": 128, "window": 65535,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
-    },
-    "windows2025": {
-        "ttl": 128, "window": 65535,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=8", "NOP", "NOP"]
-    },
-    "mac": {
-        "ttl": 64, "window": 65535,
-        "ipid": "zero", "df": True,
-        "tcp_options": ["MSS=1460", "SACK", "TS", "WS=6", "NOP", "NOP"]
-    }
 }
 
 OS_ALIASES = {
-    "windows10": "win10", "windows11": "win11",
-    "windows2022": "windows2022", "windows2025": "windows2025",
-    "ubuntu20": "linux", "macos": "mac"
+    "windows10": "win10", "ubuntu": "linux"
 }
 
 def get_os_fingerprint(os_name: str) -> dict:
     name = os_name.lower()
-    if name in OS_ALIASES:
-        base = OS_ALIASES[name]
-        logging.info(f"🧹 Resolved alias '{name}' → '{base}'")
-        return BASE_OS_TEMPLATES[base]
-    if name in BASE_OS_TEMPLATES:
-        logging.info(f"🧹 Found base template for '{name}'")
-        return BASE_OS_TEMPLATES[name]
-    for base in BASE_OS_TEMPLATES:
-        if name.startswith(base):
-            logging.info(f"🔁 Inheriting from base template: '{base}'")
-            return BASE_OS_TEMPLATES[base]
-    logging.warning(f"⚠ Unknown OS '{name}', using fallback TTL/Window")
-    return {"ttl": FALLBACK_TTL, "window": FALLBACK_WINDOW}
+    resolved_name = OS_ALIASES.get(name, name)
+    
+    if resolved_name in BASE_OS_TEMPLATES:
+        logging.info(f"🧹 Resolved OS '{os_name}' → '{resolved_name}'")
+        return BASE_OS_TEMPLATES[resolved_name]
+    
+    logging.warning(f"⚠ Unknown OS '{name}', using fallback values")
+    return {"ttl": FALLBACK_TTL, "window": FALLBACK_WINDOW, "tcp_options": []}
 
-def list_all_templates() -> dict:
-    all_keys = set(BASE_OS_TEMPLATES.keys()) | set(OS_ALIASES.keys())
-    return {k: get_os_fingerprint(k) for k in sorted(all_keys)}
+def get_mac_address(nic: str) -> str:
+    try:
+        return get_if_hwaddr(nic)
+    except Exception as e:
+        logging.error(f"❌ Could not get MAC for {nic}: {e}")
+        return "00:00:00:00:00:00"
 
-def print_interface_summary():
-    for nic in [NIC_TARGET, NIC_PROBE]:
-        try:
-            mac = get_mac_address(nic)
-            gw = GATEWAY_MAP.get(nic)
-            vlan = VLAN_MAP.get(nic)
-            logging.info(f"🔌 {nic}: MAC={mac}, GW={gw}, VLAN={vlan}")
-        except Exception as e:
-            logging.warning(f"⚠ Interface summary failed for {nic}: {e}")
+def get_ip_address(nic: str) -> str:
+    try:
+        return get_if_addr(nic)
+    except Exception:
+        return "0.0.0.0"
