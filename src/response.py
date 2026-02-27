@@ -3,15 +3,11 @@ import random
 import time
 import json
 from ipaddress import ip_address, ip_network
-from scapy.all import Ether, IP, TCP, UDP, ICMP, DNS, DNSRR, DNSQR
-from cryptography import x509
-from cryptography.x509.oid import NameOID
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from cryptography.hazmat.backends import default_backend
-from datetime import datetime, timedelta
+from scapy.all import Ether, IP, TCP, UDP, ICMP, DNS, DNSRR
+from datetime import datetime
 
 from src.ja3_extractor import extract_ja3, match_ja3_rule
+from src.fingerprint_utils import gen_key
 
 # --- Configuration ---
 EXCLUDE_SOURCES = [ip_network("192.168.10.0/24")]
@@ -47,7 +43,7 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
 
         # --- L7 Decoy Logic ---
         if proto == "tcp":
-            # 1. JA3 Tracking
+            # 1. JA3 Tracking & Rules
             ja3 = extract_ja3(pkt.packet)
             if ja3:
                 JA3_OBSERVED.setdefault(src_ip_str, []).append(ja3)
@@ -67,7 +63,9 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
                 return synthesize_rdp_response(pkt, RDP_CONN_CONFIRM)
 
         elif proto == "udp" and dport == 53:
-            return synthesize_dns_response(pkt)
+            # Get spoof IP from deceiver if available, else default
+            spoof_ip = deceiver.target_ip if deceiver else "1.2.3.4"
+            return synthesize_dns_response(pkt, spoof_ip)
 
         # --- Default Deception (Template Based) ---
         return generate_template_response(pkt, template_bytes, ttl, window, deceiver)
@@ -99,16 +97,20 @@ def synthesize_http_response(pkt, payload):
         return None
 
 def synthesize_rdp_response(pkt, payload):
-    """Generates RDP X.224 Connection Confirm."""
+    """Generates RDP X.224 Connection Confirm with correct TCP state."""
     logging.info(f"⚡ RDP Handshake from {pkt.l3_field.get('src_IP_str')}")
+    # RDP uses standard PSH-ACK for handshake responses
     return build_tcp_packet(pkt, payload, flags="PA")
 
-def synthesize_dns_response(pkt, spoof_ip="1.2.3.4"):
+def synthesize_dns_response(pkt, spoof_ip):
     """Generates DNS spoof response using Scapy."""
     try:
         dns_req = pkt.l4_field.get("raw_payload", b"")
         dns_header = DNS(dns_req)
         
+        if not dns_header.qd:
+            return None
+
         # Build Response
         dns_resp = DNS(
             id=dns_header.id,
@@ -125,17 +127,19 @@ def synthesize_dns_response(pkt, spoof_ip="1.2.3.4"):
 
 # --- Helper Functions for Packet Building ---
 
-def build_tcp_packet(pkt, payload, flags="SA", sport=None, dport=None):
+def build_tcp_packet(pkt, payload, flags="SA", sport=None, dport=None, window=None):
     """Generic TCP packet builder."""
     eth = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
+    # Ensure TTL is set, default to 64 if not passed
     ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=64)
     tcp = TCP(
         sport=sport or pkt.l4_field['dest_port'],
         dport=dport or pkt.l4_field['src_port'],
         flags=flags,
+        # Proper sequence/ack numbers for session continuation
         seq=pkt.l4_field.get("ack_num", 0),
         ack=pkt.l4_field.get("seq", 0) + len(pkt.l4_field.get("raw_payload", b"")),
-        window=8192
+        window=window or pkt.l4_field.get("window", 8192)
     )
     return bytes(eth / ip / tcp / payload)
 
@@ -148,6 +152,31 @@ def build_udp_packet(pkt, payload, sport=None, dport=None):
 
 def generate_template_response(pkt, template_bytes, ttl, window, deceiver):
     """Handles standard template-based packet forging."""
-    # (保持原本處理template的邏輯，但為了篇幅省略細節，建議使用上面定義的build_函數)
-    pass
-     
+    try:
+        # Re-construct base layers from template
+        eth = Ether(template_bytes[:14])
+        ip = IP(template_bytes[14:34])
+        
+        # Update IP layers with actual packet details
+        ip.src = pkt.l3_field['dest_IP_str']
+        ip.dst = pkt.l3_field['src_IP_str']
+        ip.ttl = ttl or 64
+        
+        # Re-construct L4 layer
+        l4_bytes = template_bytes[34:]
+        if pkt.l4 == "tcp":
+            l4_layer = TCP(l4_bytes)
+            l4_layer.window = window or l4_layer.window
+        elif pkt.l4 == "udp":
+            l4_layer = UDP(l4_bytes)
+        else:
+            return None
+
+        # Fix L4 ports and sequence numbers
+        l4_layer.sport = pkt.l4_field['dest_port']
+        l4_layer.dport = pkt.l4_field['src_port']
+        
+        return bytes(eth / ip / l4_layer)
+    except Exception as e:
+        logging.error(f"❌ Template generation failed: {e}")
+        return None
