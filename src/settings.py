@@ -2,7 +2,8 @@
 
 import os
 import logging
-import time # --- 新增：用於獲取時間 ---
+import time
+import random
 from scapy.all import get_if_addr, get_if_hwaddr
 
 # =======================
@@ -12,8 +13,11 @@ PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OS_RECORD_PATH = os.path.join(PROJECT_PATH, "os_record")
 os.makedirs(OS_RECORD_PATH, exist_ok=True)
 
-# --- 新增：紀錄程式啟動時間（以秒為單位） ---
-# 為了類比真實 uptime，這裡可以使用隨機時間減去，例如模擬啟動了 30 天
+# 新增：儲存學習到指紋的 JSON 檔案路徑
+LEARNED_FINGERPRINTS_FILE = os.path.join(OS_RECORD_PATH, "learned_fingerprints.json")
+
+# 紀錄程式啟動時間，用於類比真實 TCP Uptime
+# 隨機減去一個時間，模擬啟動了 1 到 30 天
 START_TIME = time.time() - random.randint(86400, 2592000)
 
 # =======================
@@ -110,29 +114,65 @@ BASE_OS_TEMPLATES = {
         "ttl": 128, "window": 8192, "df": True,
         "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('Timestamp', (0, 0)), ('WScale', 2)]
     },
+    "win_legacy": {
+        "ttl": 128, "window": 65535, "df": True,
+        "tcp_options": [('MSS', 1460), ('NOP', b''), ('NOP', b''), ('SAckOK', b'')]
+    },
+    "linux_legacy": {
+        "ttl": 64, "window": 32120, "df": True,
+        "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('WScale', 6)]
+    }
 }
 
 OS_ALIASES = {
-    "windows10": "win10", "ubuntu": "linux"
+    "windows10": "win10", "ubuntu": "linux",
+    "unknown_learned": "heuristic_match" # 對應學習引擎標記的未知 OS
 }
 
-def get_os_fingerprint(os_name: str) -> dict:
+# =======================
+# Heuristic Rules for Auto-Learning
+# =======================
+HEURISTIC_RULES = [
+    {
+        "name": "win10",
+        "match": lambda window, ttl, opts: 8000 <= window <= 65535 and ttl > 100
+    },
+    {
+        "name": "linux",
+        "match": lambda window, ttl, opts: window < 8000 and ttl <= 64
+    }
+]
+
+def get_os_fingerprint(os_name: str, packet_features: dict = None) -> dict:
+    """
+    獲取 OS 指紋，如果為未知則應用啟發式規則猜測，並加入動態 Timestamp。
+    """
     name = os_name.lower()
     resolved_name = OS_ALIASES.get(name, name)
+    
+    # 應用啟發式規則匹配邏輯
+    if resolved_name == "heuristic_match" and packet_features:
+        logging.info("🧠 Applying heuristic rules for unknown OS...")
+        for rule in HEURISTIC_RULES:
+            if rule["match"](packet_features.get('window', 0), 
+                             packet_features.get('ttl', 0), 
+                             packet_features.get('options', [])):
+                resolved_name = rule["name"]
+                logging.info(f"💡 Heuristic matched: {resolved_name}")
+                break
     
     if resolved_name in BASE_OS_TEMPLATES:
         logging.info(f"🧹 Resolved OS '{os_name}' → '{resolved_name}'")
         template = BASE_OS_TEMPLATES[resolved_name].copy()
         
-        # --- 新增：動態計算 Timestamp ---
-        # 計算毫秒數 (Linux 通常為 1000Hz, Windows 為 10Hz/1000Hz, 這裡使用高精度)
+        # 動態計算 Timestamp
         current_ts = int((time.time() - START_TIME) * 1000)
         
         # 替換 tcp_options 中的 Timestamp 佔位符
         new_options = []
         for opt in template["tcp_options"]:
             if opt[0] == 'Timestamp':
-                # 類比 TSVal=current_ts, TSecr=0 (for SYN)
+                # 類比 TSVal=current_ts, TSecr=0
                 new_options.append(('Timestamp', (current_ts, 0)))
             else:
                 new_options.append(opt)
