@@ -1,28 +1,49 @@
 # src/__init__.py
 
-# --- Core Classes ---
-from .tcp import TcpConnect, getTCPChecksum, getIPChecksum
-from .Packet import Packet
+"""
+Camouflage Cloak Deception Engine - Source Package
+"""
 
-# --- Settings ---
-from .settings import (
-    get_mac_address,
-    get_os_fingerprint,
-    list_all_templates,
-    print_interface_summary,
-    CUSTOM_RULES,
-    BASE_OS_TEMPLATES,
-    MAC,
-    NIC_TARGET,
-    NIC_PROBE,
-    VLAN_MAP,
-    GATEWAY_MAP,
-)
+# --- Define Public API ---
+__all__ = [
+    # Core Classes
+    'Packet',
+    'TcpConnect',
+    'getTCPChecksum',
+    'getIPChecksum',
+    
+    # Deception & Fingerprinting
+    'synthesize_response',
+    'generateKey',
+    'gen_key',
+    'templateSynthesis',
+    'OsDeceiver',
+    'PortDeceiver',
+    
+    # JA3 & Tracker
+    'extract_ja3',
+    'match_ja3_rule',
+    'l7_tracker',
+    
+    # Settings
+    'settings'
+]
+
+# --- Core Classes ---
+from .Packet import Packet
+from .tcp import TcpConnect, getTCPChecksum, getIPChecksum
+from .os_deceiver import OsDeceiver
+from .port_deceiver import PortDeceiver
 
 # --- Deception & Fingerprinting ---
 from .response import synthesize_response
 from .fingerprint_gen import generateKey, gen_key
 from .os_recorder import templateSynthesis
 
-# --- JA3 ---
+# --- JA3 & L7 Tracking ---
 from .ja3_extractor import extract_ja3, match_ja3_rule
+import l7_tracker
+
+# --- Settings ---
+# Importing the module itself allows usage like settings.MAC
+import src.settings as settings
