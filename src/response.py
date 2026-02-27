@@ -3,23 +3,18 @@ import random
 import time
 import json
 from ipaddress import ip_address, ip_network
-from scapy.all import Ether, IP, TCP, UDP, ICMP, DNS, DNSRR
+from scapy.all import Ether, IP, TCP, UDP, ICMP, DNS, DNSRR, DNSQR
 from datetime import datetime
 
+# 導入新的設定和工具
 from src.ja3_extractor import extract_ja3, match_ja3_rule
-from src.fingerprint_utils import gen_key
+from src.settings import get_os_fingerprint, HTTP_BANNERS
 
 # --- Configuration ---
+# 排除特定的源 IP 地址，例如信任的內部網路
 EXCLUDE_SOURCES = [ip_network("192.168.10.0/24")]
 JA3_OBSERVED_LOG = "ja3_observed.json"
 JA3_OBSERVED = {}
-
-# --- HTTP Banners ---
-HTTP_BANNERS = {
-    "default": b"HTTP/1.1 200 OK\r\nServer: Apache/2.4.41 (Unix)\r\nContent-Length: 13\r\n\r\nHello, World!",
-    "ja3+chrome": b"HTTP/1.1 200 OK\r\nServer: nginx/1.18.0\r\nContent-Length: 17\r\n\r\nHello from Chrome!",
-    "ja3+curl": b"HTTP/1.1 200 OK\r\nServer: CamouflageHTTP/1.0\r\nContent-Length: 16\r\n\r\nHello curl user!"
-}
 
 # --- RDP Binary Payloads (X.224) ---
 # Connection Confirm PDU
@@ -43,7 +38,7 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
 
         # --- L7 Decoy Logic ---
         if proto == "tcp":
-            # 1. JA3 Tracking & Rules
+            # 1. JA3 Tracking
             ja3 = extract_ja3(pkt.packet)
             if ja3:
                 JA3_OBSERVED.setdefault(src_ip_str, []).append(ja3)
@@ -63,8 +58,8 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
                 return synthesize_rdp_response(pkt, RDP_CONN_CONFIRM)
 
         elif proto == "udp" and dport == 53:
-            # Get spoof IP from deceiver if available, else default
-            spoof_ip = deceiver.target_ip if deceiver else "1.2.3.4"
+            # DNS spoofing needs a target IP to advertise
+            spoof_ip = deceiver.host if deceiver else "127.0.0.1"
             return synthesize_dns_response(pkt, spoof_ip)
 
         # --- Default Deception (Template Based) ---
@@ -84,10 +79,11 @@ def synthesize_http_response(pkt, payload):
                 ua = line.split(":", 1)[-1].strip().lower()
                 break
         
+        # Use banners from settings.py
         if "curl" in ua:
-            banner = HTTP_BANNERS["ja3+curl"]
+            banner = HTTP_BANNERS.get("curl", HTTP_BANNERS["default"])
         elif "chrome" in ua:
-            banner = HTTP_BANNERS["ja3+chrome"]
+            banner = HTTP_BANNERS.get("chrome", HTTP_BANNERS["default"])
         else:
             banner = HTTP_BANNERS["default"]
             
@@ -97,9 +93,8 @@ def synthesize_http_response(pkt, payload):
         return None
 
 def synthesize_rdp_response(pkt, payload):
-    """Generates RDP X.224 Connection Confirm with correct TCP state."""
+    """Generates RDP X.224 Connection Confirm."""
     logging.info(f"⚡ RDP Handshake from {pkt.l3_field.get('src_IP_str')}")
-    # RDP uses standard PSH-ACK for handshake responses
     return build_tcp_packet(pkt, payload, flags="PA")
 
 def synthesize_dns_response(pkt, spoof_ip):
@@ -129,17 +124,20 @@ def synthesize_dns_response(pkt, spoof_ip):
 
 def build_tcp_packet(pkt, payload, flags="SA", sport=None, dport=None, window=None):
     """Generic TCP packet builder."""
+    # Note: L2 MAC addresses should be swapped from request to response
     eth = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
-    # Ensure TTL is set, default to 64 if not passed
+    
+    # Use standard TTL or specific one passed in
     ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=64)
+    
     tcp = TCP(
         sport=sport or pkt.l4_field['dest_port'],
         dport=dport or pkt.l4_field['src_port'],
         flags=flags,
-        # Proper sequence/ack numbers for session continuation
+        # Correctly handle sequence numbers for response
         seq=pkt.l4_field.get("ack_num", 0),
         ack=pkt.l4_field.get("seq", 0) + len(pkt.l4_field.get("raw_payload", b"")),
-        window=window or pkt.l4_field.get("window", 8192)
+        window=window or 8192
     )
     return bytes(eth / ip / tcp / payload)
 
@@ -151,30 +149,34 @@ def build_udp_packet(pkt, payload, sport=None, dport=None):
     return bytes(eth / ip / udp / payload)
 
 def generate_template_response(pkt, template_bytes, ttl, window, deceiver):
-    """Handles standard template-based packet forging."""
+    """Handles standard template-based packet forging, patching IPs and TTLs."""
     try:
-        # Re-construct base layers from template
+        # 1. Parse existing template to Scapy layers
         eth = Ether(template_bytes[:14])
         ip = IP(template_bytes[14:34])
         
-        # Update IP layers with actual packet details
+        # 2. Patch IP layers with current context
         ip.src = pkt.l3_field['dest_IP_str']
         ip.dst = pkt.l3_field['src_IP_str']
         ip.ttl = ttl or 64
         
-        # Re-construct L4 layer
+        # 3. Patch Ethernet Layers
+        eth.src = pkt.l2_field['dMAC']
+        eth.dst = pkt.l2_field['sMAC']
+        
+        # 4. Handle L4 patching
         l4_bytes = template_bytes[34:]
         if pkt.l4 == "tcp":
             l4_layer = TCP(l4_bytes)
             l4_layer.window = window or l4_layer.window
+            l4_layer.sport = pkt.l4_field['dest_port']
+            l4_layer.dport = pkt.l4_field['src_port']
         elif pkt.l4 == "udp":
             l4_layer = UDP(l4_bytes)
+            l4_layer.sport = pkt.l4_field['dest_port']
+            l4_layer.dport = pkt.l4_field['src_port']
         else:
             return None
-
-        # Fix L4 ports and sequence numbers
-        l4_layer.sport = pkt.l4_field['dest_port']
-        l4_layer.dport = pkt.l4_field['src_port']
         
         return bytes(eth / ip / l4_layer)
     except Exception as e:
