@@ -1,24 +1,20 @@
 import logging
 import random
-import time
-import json
+import re
 from ipaddress import ip_address, ip_network
-from scapy.all import Ether, IP, TCP, UDP, ICMP, DNS, DNSRR, DNSQR
+from scapy.all import Ether, IP, TCP, UDP, DNS, DNSRR
 from datetime import datetime
 
 # 導入新的設定和工具
 from src.ja3_extractor import extract_ja3, match_ja3_rule
-# --- 修改處 1: 導入 SERVICES，移除 HTTP_BANNERS ---
 from src.settings import get_os_fingerprint, SERVICES
 
 # --- Configuration ---
 # 排除特定的源 IP 地址，例如信任的內部網路
 EXCLUDE_SOURCES = [ip_network("192.168.10.0/24")]
-JA3_OBSERVED_LOG = "ja3_observed.json"
 JA3_OBSERVED = {}
 
 # --- RDP Binary Payloads (X.224) ---
-# Connection Confirm PDU
 RDP_CONN_CONFIRM = b"\x03\x00\x00\x0b\x06\xd0\x00\x00\x12\x34\x00"
 
 def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=None):
@@ -39,7 +35,7 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
 
         # --- L7 Decoy Logic ---
         if proto == "tcp":
-            # 1. JA3 Tracking
+            # 1. JA3 Tracking (For TLS deception)
             ja3 = extract_ja3(pkt.packet)
             if ja3:
                 JA3_OBSERVED.setdefault(src_ip_str, []).append(ja3)
@@ -50,7 +46,7 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
             # 2. Protocol Simulation
             payload = pkt.l4_field.get("raw_payload", b"")
             
-            # --- 修改處 2: 檢查 SERVICES 字典中定義的 HTTP 埠 ---
+            # --- 使用 SERVICES 字典檢查 HTTP 服務 ---
             http_service = SERVICES.get("HTTP", {})
             if dport == http_service.get("port") and payload.startswith(b"GET"):
                 return synthesize_http_response(pkt, payload)
@@ -64,7 +60,7 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
             spoof_ip = deceiver.host if deceiver else "127.0.0.1"
             return synthesize_dns_response(pkt, spoof_ip)
 
-        # --- Default Deception (Template Based) ---
+        # --- Default Deception (Template Based with TCP Options) ---
         return generate_template_response(pkt, template_bytes, ttl, window, deceiver)
 
     except Exception as e:
@@ -72,25 +68,48 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
         return None
 
 def synthesize_http_response(pkt, payload):
-    """Generates dynamic HTTP response based on user agent and SERVICES dict."""
+    """Generates dynamic, complex HTTP response based on user agent and SERVICES."""
     try:
         payload_text = payload.decode(errors="ignore")
-        ua = ""
-        for line in payload_text.split("\r\n"):
-            if line.lower().startswith("user-agent:"):
-                ua = line.split(":", 1)[-1].strip().lower()
-                break
         
-        # --- 修改處 3: 從 SERVICES 字典獲取 Banner ---
+        # 1. 解析 User-Agent
+        ua_match = re.search(r'User-Agent:\s*(.*)', payload_text, re.IGNORECASE)
+        ua = ua_match.group(1).lower() if ua_match else "unknown"
+        
+        # 2. 獲取服務基礎配置
         http_service = SERVICES.get("HTTP", {})
-        banner = http_service.get("banner", b"HTTP/1.1 200 OK\r\n\r\n")
+        
+        # 3. 根據 UA 選擇不同的 Banner 模板和內容
+        if "curl" in ua:
+            server_header = "Server: CamouflageHTTP/1.0"
+            content = b"<html><body><h1>Curl User Detected</h1></body></html>"
+        elif "mozilla" in ua or "chrome" in ua:
+            server_header = "Server: Apache/2.4.41 (Ubuntu)"
+            content = b"<html><body><h1>Welcome to our secure decoy site</h1></body></html>"
+        else:
+            server_header = "Server: GenericWeb/1.0"
+            content = b"<html><body><h1>Deception Site</h1></body></html>"
 
-        # 這裡可以根據 UA 修改 banner，但最好是在 settings.py 定義更複雜的邏輯
-        # if "curl" in ua: ...
+        # 4. 動態構建 Headers
+        date_str = datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT')
+        
+        # 構建 HTTP Response 字節流
+        response_header = (
+            f"HTTP/1.1 200 OK\r\n"
+            f"Date: {date_str}\r\n"
+            f"{server_header}\r\n"
+            f"Content-Type: text/html\r\n"
+            f"Content-Length: {len(content)}\r\n"
+            f"Connection: close\r\n"
+            f"\r\n"
+        ).encode('utf-8')
+        
+        full_response = response_header + content
             
-        return build_tcp_packet(pkt, banner.encode() if isinstance(banner, str) else banner, flags="PA")
+        return build_tcp_packet(pkt, full_response, flags="PA")
+    
     except Exception as e:
-        logging.error(f"❌ HTTP Response failed: {e}")
+        logging.error(f"❌ Complex HTTP Response failed: {e}")
         return None
 
 def synthesize_rdp_response(pkt, payload):
@@ -125,17 +144,13 @@ def synthesize_dns_response(pkt, spoof_ip):
 
 def build_tcp_packet(pkt, payload, flags="SA", sport=None, dport=None, window=None):
     """Generic TCP packet builder."""
-    # Note: L2 MAC addresses should be swapped from request to response
     eth = Ether(src=pkt.l2_field['dMAC'], dst=pkt.l2_field['sMAC'])
-    
-    # Use standard TTL or specific one passed in
     ip = IP(src=pkt.l3_field['dest_IP_str'], dst=pkt.l3_field['src_IP_str'], ttl=64)
     
     tcp = TCP(
         sport=sport or pkt.l4_field['dest_port'],
         dport=dport or pkt.l4_field['src_port'],
         flags=flags,
-        # Correctly handle sequence numbers for response
         seq=pkt.l4_field.get("ack_num", 0),
         ack=pkt.l4_field.get("seq", 0) + len(pkt.l4_field.get("raw_payload", b"")),
         window=window or 8192
@@ -150,13 +165,13 @@ def build_udp_packet(pkt, payload, sport=None, dport=None):
     return bytes(eth / ip / udp / payload)
 
 def generate_template_response(pkt, template_bytes, ttl, window, deceiver):
-    """Handles standard template-based packet forging, patching IPs and TTLs."""
+    """Handles template-based packet forging, patching IPs, TTLs, and TCP Options."""
     try:
         # 1. Parse existing template to Scapy layers
         eth = Ether(template_bytes[:14])
         ip = IP(template_bytes[14:34])
         
-        # 2. Patch IP layers with current context
+        # 2. Patch IP layers
         ip.src = pkt.l3_field['dest_IP_str']
         ip.dst = pkt.l3_field['src_IP_str']
         ip.ttl = ttl or 64
@@ -169,9 +184,26 @@ def generate_template_response(pkt, template_bytes, ttl, window, deceiver):
         l4_bytes = template_bytes[34:]
         if pkt.l4 == "tcp":
             l4_layer = TCP(l4_bytes)
-            l4_layer.window = window or l4_layer.window
+            
+            # --- 修改處: 動態處理 TCP Options ---
+            if deceiver and hasattr(deceiver, 'os'):
+                os_config = get_os_fingerprint(deceiver.os)
+                if "tcp_options" in os_config:
+                    l4_layer.options = os_config["tcp_options"]
+                if "window" in os_config:
+                    l4_layer.window = os_config["window"]
+            
+            # 覆蓋傳入的參數
+            if window:
+                l4_layer.window = window
+                
             l4_layer.sport = pkt.l4_field['dest_port']
             l4_layer.dport = pkt.l4_field['src_port']
+            
+            # 重新計算校驗和
+            del ip.chksum
+            del l4_layer.chksum
+
         elif pkt.l4 == "udp":
             l4_layer = UDP(l4_bytes)
             l4_layer.sport = pkt.l4_field['dest_port']
