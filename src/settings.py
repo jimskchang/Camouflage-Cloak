@@ -2,6 +2,7 @@
 
 import os
 import logging
+import time # --- 新增：用於獲取時間 ---
 from scapy.all import get_if_addr, get_if_hwaddr
 
 # =======================
@@ -10,6 +11,10 @@ from scapy.all import get_if_addr, get_if_hwaddr
 PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OS_RECORD_PATH = os.path.join(PROJECT_PATH, "os_record")
 os.makedirs(OS_RECORD_PATH, exist_ok=True)
+
+# --- 新增：紀錄程式啟動時間（以秒為單位） ---
+# 為了類比真實 uptime，這裡可以使用隨機時間減去，例如模擬啟動了 30 天
+START_TIME = time.time() - random.randint(86400, 2592000)
 
 # =======================
 # Toggle Settings
@@ -98,11 +103,12 @@ FALLBACK_WINDOW = 8192
 BASE_OS_TEMPLATES = {
     "linux": {
         "ttl": 64, "window": 5840, "df": True,
-        "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('WScale', 7)]
+        # TSVal: Timestamp Value, TSecr: Timestamp Echo Reply
+        "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('Timestamp', (0, 0)), ('WScale', 7)]
     },
     "win10": {
         "ttl": 128, "window": 8192, "df": True,
-        "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('WScale', 2)]
+        "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('Timestamp', (0, 0)), ('WScale', 2)]
     },
 }
 
@@ -116,7 +122,23 @@ def get_os_fingerprint(os_name: str) -> dict:
     
     if resolved_name in BASE_OS_TEMPLATES:
         logging.info(f"🧹 Resolved OS '{os_name}' → '{resolved_name}'")
-        return BASE_OS_TEMPLATES[resolved_name]
+        template = BASE_OS_TEMPLATES[resolved_name].copy()
+        
+        # --- 新增：動態計算 Timestamp ---
+        # 計算毫秒數 (Linux 通常為 1000Hz, Windows 為 10Hz/1000Hz, 這裡使用高精度)
+        current_ts = int((time.time() - START_TIME) * 1000)
+        
+        # 替換 tcp_options 中的 Timestamp 佔位符
+        new_options = []
+        for opt in template["tcp_options"]:
+            if opt[0] == 'Timestamp':
+                # 類比 TSVal=current_ts, TSecr=0 (for SYN)
+                new_options.append(('Timestamp', (current_ts, 0)))
+            else:
+                new_options.append(opt)
+        
+        template["tcp_options"] = new_options
+        return template
     
     logging.warning(f"⚠ Unknown OS '{name}', using fallback values")
     return {"ttl": FALLBACK_TTL, "window": FALLBACK_WINDOW, "tcp_options": []}
