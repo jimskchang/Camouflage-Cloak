@@ -185,22 +185,23 @@ def generate_template_response(pkt, template_bytes, ttl, window, deceiver):
         if pkt.l4 == "tcp":
             l4_layer = TCP(l4_bytes)
             
-            # --- 修改處: 動態處理 TCP Options ---
+            # --- 動態處理 TCP Options (包含 Timestamp) ---
             if deceiver and hasattr(deceiver, 'os'):
+                # 這裡會呼叫 settings.py 中的函數，獲取帶有動態 Timestamp 的配置
                 os_config = get_os_fingerprint(deceiver.os)
                 if "tcp_options" in os_config:
                     l4_layer.options = os_config["tcp_options"]
                 if "window" in os_config:
                     l4_layer.window = os_config["window"]
             
-            # 覆蓋傳入的參數
+            # 覆蓋傳入的參數（如果有單獨傳入 window）
             if window:
                 l4_layer.window = window
                 
             l4_layer.sport = pkt.l4_field['dest_port']
             l4_layer.dport = pkt.l4_field['src_port']
             
-            # 重新計算校驗和
+            # 重新計算校驗和以確保封包有效
             del ip.chksum
             del l4_layer.chksum
 
