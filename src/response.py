@@ -7,12 +7,18 @@ from datetime import datetime
 
 # 導入新的設定和工具
 from src.ja3_extractor import extract_ja3, match_ja3_rule
+from src.fingerprint_gen import generateKey
+# --- 修改處: 導入 learning_engine ---
 from src.settings import get_os_fingerprint, SERVICES
+from src.learning_engine import FingerprintLearner
 
 # --- Configuration ---
 # 排除特定的源 IP 地址，例如信任的內部網路
 EXCLUDE_SOURCES = [ip_network("192.168.10.0/24")]
 JA3_OBSERVED = {}
+
+# --- 初始化學習引擎 ---
+learner = FingerprintLearner()
 
 # --- RDP Binary Payloads (X.224) ---
 RDP_CONN_CONFIRM = b"\x03\x00\x00\x0b\x06\xd0\x00\x00\x12\x34\x00"
@@ -55,12 +61,33 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
             elif dport == 3389 and payload.startswith(b"\x03\x00\x00"):
                 return synthesize_rdp_response(pkt, RDP_CONN_CONFIRM)
 
+            # --- 修改處: 自動學習與指紋匹配 ---
+            # 產生確定的 TCP 指紋
+            current_hash = generateKey(pkt, "TCP")
+            
+            # 根據指紋匹配已有 OS 或學習新設備
+            os_name = learner.match_or_learn(current_hash, pkt)
+            
+            if os_name:
+                # 準備特徵供啟發式規則使用 (get_os_fingerprint 會判斷並應用)
+                packet_features = {
+                    'window': pkt.l4_field.get('window'),
+                    'ttl': pkt.l3_field.get('ttl'),
+                    'options': pkt.l4_field.get('option_field')
+                }
+                # 獲取帶有動態 Timestamp 和啟發式匹配後的配置
+                os_config = get_os_fingerprint(os_name, packet_features)
+                
+                # 覆蓋基礎參數
+                ttl = os_config.get("ttl")
+                window = os_config.get("window")
+
         elif proto == "udp" and dport == 53:
             # DNS spoofing needs a target IP to advertise
             spoof_ip = deceiver.host if deceiver else "127.0.0.1"
             return synthesize_dns_response(pkt, spoof_ip)
 
-        # --- Default Deception (Template Based with TCP Options) ---
+        # --- Default Deception (Template Based with Dynamic TCP Options) ---
         return generate_template_response(pkt, template_bytes, ttl, window, deceiver)
 
     except Exception as e:
@@ -188,6 +215,7 @@ def generate_template_response(pkt, template_bytes, ttl, window, deceiver):
             # --- 動態處理 TCP Options (包含 Timestamp) ---
             if deceiver and hasattr(deceiver, 'os'):
                 # 這裡會呼叫 settings.py 中的函數，獲取帶有動態 Timestamp 的配置
+                # 注意：match_or_learn 的結果直接作為 os_name 傳入
                 os_config = get_os_fingerprint(deceiver.os)
                 if "tcp_options" in os_config:
                     l4_layer.options = os_config["tcp_options"]
