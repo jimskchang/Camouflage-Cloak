@@ -8,7 +8,8 @@ from datetime import datetime
 
 # 導入新的設定和工具
 from src.ja3_extractor import extract_ja3, match_ja3_rule
-from src.settings import get_os_fingerprint, HTTP_BANNERS
+# --- 修改處 1: 導入 SERVICES，移除 HTTP_BANNERS ---
+from src.settings import get_os_fingerprint, SERVICES
 
 # --- Configuration ---
 # 排除特定的源 IP 地址，例如信任的內部網路
@@ -49,8 +50,9 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
             # 2. Protocol Simulation
             payload = pkt.l4_field.get("raw_payload", b"")
             
-            # HTTP/Web Simulation
-            if dport in [80, 8080] and payload.startswith(b"GET"):
+            # --- 修改處 2: 檢查 SERVICES 字典中定義的 HTTP 埠 ---
+            http_service = SERVICES.get("HTTP", {})
+            if dport == http_service.get("port") and payload.startswith(b"GET"):
                 return synthesize_http_response(pkt, payload)
             
             # RDP Simulation (Binary)
@@ -70,7 +72,7 @@ def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=Non
         return None
 
 def synthesize_http_response(pkt, payload):
-    """Generates dynamic HTTP response based on user agent."""
+    """Generates dynamic HTTP response based on user agent and SERVICES dict."""
     try:
         payload_text = payload.decode(errors="ignore")
         ua = ""
@@ -79,15 +81,14 @@ def synthesize_http_response(pkt, payload):
                 ua = line.split(":", 1)[-1].strip().lower()
                 break
         
-        # Use banners from settings.py
-        if "curl" in ua:
-            banner = HTTP_BANNERS.get("curl", HTTP_BANNERS["default"])
-        elif "chrome" in ua:
-            banner = HTTP_BANNERS.get("chrome", HTTP_BANNERS["default"])
-        else:
-            banner = HTTP_BANNERS["default"]
+        # --- 修改處 3: 從 SERVICES 字典獲取 Banner ---
+        http_service = SERVICES.get("HTTP", {})
+        banner = http_service.get("banner", b"HTTP/1.1 200 OK\r\n\r\n")
+
+        # 這裡可以根據 UA 修改 banner，但最好是在 settings.py 定義更複雜的邏輯
+        # if "curl" in ua: ...
             
-        return build_tcp_packet(pkt, banner, flags="PA")
+        return build_tcp_packet(pkt, banner.encode() if isinstance(banner, str) else banner, flags="PA")
     except Exception as e:
         logging.error(f"❌ HTTP Response failed: {e}")
         return None
