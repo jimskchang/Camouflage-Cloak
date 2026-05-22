@@ -1,9 +1,6 @@
-# src/fingerprint_gen.py
-
-import copy
 import logging
 import hashlib
-
+import struct
 
 def generateKey(packet, proto_type):
     """
@@ -17,77 +14,68 @@ def generateKey(packet, proto_type):
         bytes: SHA-256 hash of normalized protocol-specific fields.
     """
     try:
-        pkt = copy.deepcopy(packet)
-        ip_hdr = pkt.l3_field
-        tcp_hdr = pkt.l4_field if proto_type == "TCP" else None
-        udp_hdr = pkt.l4_field if proto_type == "UDP" else None
-        icmp_hdr = pkt.l4_field if proto_type == "ICMP" else None
+        ip_hdr = packet.l3_field
+        tcp_hdr = packet.l4_field if proto_type == "TCP" else None
+        udp_hdr = packet.l4_field if proto_type == "UDP" else None
+        icmp_hdr = packet.l4_field if proto_type == "ICMP" else None
 
-        fields = []
+        chunks = []
 
         # --- IP Header Normalization ---
         if ip_hdr:
-            fields.extend([
-                ip_hdr.get("version", 4),
-                ip_hdr.get("ihl", 5),
-                ip_hdr.get("TYPE_OF_SERVICE", 0) & 0xFC,
-                0,  # total length
-                0,  # ID
-                0,  # fragment offset
-                ip_hdr.get("ttl", 0),
-                ip_hdr.get("protocol", 0),
-                0,  # checksum
-                b"\x00" * 4,  # src IP masked
-                b"\x00" * 4,  # dst IP masked
-                ip_hdr.get("ip_options", b"")
-            ])
+            # Struct Format: B (Version/IHL combined or solo), B (TOS), H (TTL/Proto split setup)
+            # Standardize sizes to mirror exact RFC protocol layouts
+            version = ip_hdr.get("version", 4)
+            ihl = ip_hdr.get("ihl", 5)
+            tos = ip_hdr.get("TYPE_OF_SERVICE", 0) & 0xFC
+            ttl = ip_hdr.get("ttl", 0)
+            protocol = ip_hdr.get("protocol", 0)
+            
+            chunks.append(struct.pack("!BBBB", (version << 4) | ihl, tos, ttl, protocol))
+            chunks.append(ip_hdr.get("ip_options", b""))
 
-        if "vlan" in pkt.l2_field:
-            fields.append(pkt.l2_field.get("vlan", 0))
+        # --- VLAN Profile Tagging ---
+        if "vlan" in packet.l2_field:
+            chunks.append(struct.pack("!H", packet.l2_field.get("vlan", 0)))
 
-        # --- TCP ---
+        # --- TCP Protocol Matching ---
         if proto_type == "TCP" and tcp_hdr:
-            fields.extend([
-                0,  # src_port masked
-                tcp_hdr.get("dest_port", 0),
-                0, 0,  # seq, ack
-                0x50,  # data offset
-                tcp_hdr.get("flags", 0),
-                0, 0, 0  # window, checksum, urgent_ptr
-            ])
+            dest_port = tcp_hdr.get("dest_port", 0)
+            flags = tcp_hdr.get("flags", 0)
+            
+            # Mask volatile sequence numbers and source ports
+            chunks.append(struct.pack("!HH", 0, dest_port)) # Ports
+            chunks.append(struct.pack("!II", 0, 0))         # Seq / Ack
+            chunks.append(struct.pack("!BB", 0x50, flags))  # Data Offset / Flags
+            chunks.append(struct.pack("!HHH", 0, 0, 0))     # Window / Checksum / Urg
+            
+            # Options sanitization
             opts = tcp_hdr.get("option_field", {})
             filtered_opts = {
                 k: v for k, v in opts.items()
                 if k not in ["ts_val", "ts_ecr", "sack"] and v is not None
             }
-            fields.append(str(sorted(filtered_opts.items())).encode())
+            # Maintain strict string sort configurations before hashing conversion
+            chunks.append(str(sorted(filtered_opts.items())).encode())
 
-        # --- UDP ---
+        # --- UDP Protocol Matching ---
         elif proto_type == "UDP" and udp_hdr:
-            fields.extend([
-                0,
-                udp_hdr.get("dest_port", 0),
-                0, 0
-            ])
+            dest_port = udp_hdr.get("dest_port", 0)
+            chunks.append(struct.pack("!HH", 0, dest_port))
 
-        # --- ICMP ---
+        # --- ICMP Protocol Matching ---
         elif proto_type == "ICMP" and icmp_hdr:
-            fields.extend([
-                icmp_hdr.get("icmp_type", 0),
-                icmp_hdr.get("code", 0),
-                0, 0
-            ])
+            icmp_type = icmp_hdr.get("icmp_type", 0)
+            code = icmp_hdr.get("code", 0)
+            chunks.append(struct.pack("!BB", icmp_type, code))
 
-        # --- Final Normalize & Hash ---
-        raw_bytes = b''.join(
-            x.to_bytes((x.bit_length() + 7) // 8 or 1, 'big') if isinstance(x, int)
-            else x if isinstance(x, bytes)
-            else str(x).encode()
-            for x in fields
-        )
-
+        # --- Final Stream Consolidation and Hashing ---
+        raw_bytes = b"".join(chunks)
         return hashlib.sha256(raw_bytes).digest()
 
     except Exception as e:
         logging.warning(f"⚠️ generateKey() failed for {proto_type}: {e}")
         return b''
+
+# Alias definition for backwards compatibility matching across scripts
+gen_key = generateKey
