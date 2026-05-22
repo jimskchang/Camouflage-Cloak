@@ -1,5 +1,3 @@
-# --- src/os_recorder.py (cleaned + enhanced) ---
-
 import os
 import json
 import logging
@@ -45,13 +43,17 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
             if banner_type:
                 log_http_banner(src_ip, ja3_hash, banner_type, user_agent)
 
-        # --- Identify request-response pair ---
+        # --- FIXED: Symmetrical Request-Response Pair Identification ---
         if proto_type in ("TCP", "UDP"):
-            pair = (src_ip, dst_ip, src_port, dst_port)
+            # Sort IPs and ports to guarantee identical mapping keys regardless of direction
+            ips = sorted([src_ip, dst_ip])
+            ports = sorted([src_port, dst_port])
+            pair = (ips[0], ips[1], ports[0], ports[1])
         elif proto_type == "ICMP":
             pair = packet.l4_field.get("ID", 0)
         elif proto_type == "ARP":
-            pair = (src_ip, dst_ip)
+            ips = sorted([src_ip, dst_ip])
+            pair = (ips[0], ips[1])
         else:
             return template_dict
 
@@ -68,6 +70,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
         # --- Outgoing Response ---
         elif src_ip == host_ip and pair in pair_dict:
             key = pair_dict[pair]
+            
             if key in template_dict[proto_type] and template_dict[proto_type][key] is not None:
                 logging.warning(f"⚠️ Duplicate response for key {key.hex()[:32]}")
             else:
@@ -75,7 +78,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
 
             preview = packet.packet.hex()[:64] + ("..." if len(packet.packet.hex()) > 64 else "")
             logging.debug(
-                f"📤 [RESP][{proto_type}] {timestamp} | Key={key.hex()[:32]} | {src_ip} → {dst_ip}:{dst_port} | TTL={ttl} | Flags={flags} | Opts={options} | Data={preview}"
+                f"📤 [RESP][{proto_type}] {timestamp} | Key={key.hex()[:32]} | {src_ip}:{src_port} → {dst_ip}:{dst_port} | TTL={ttl} | Flags={flags} | Opts={options} | Data={preview}"
             )
 
             # Save per-template PCAP
@@ -87,6 +90,9 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
                     logging.debug(f"💾 Saved PCAP: {pcap_path}")
                 except Exception as e:
                     logging.warning(f"⚠️ Failed to write PCAP: {e}")
+            
+            # Clean memory out of pair_dict after response resolution to prevent leaks
+            del pair_dict[pair]
 
         return template_dict
 
@@ -95,6 +101,7 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
         return template_dict
 
 def export_ja3_log(path, nic):
+    global ja3_log
     try:
         if not ja3_log:
             return
@@ -102,5 +109,6 @@ def export_ja3_log(path, nic):
         with open(outfile, "w") as f:
             json.dump(ja3_log, f, indent=2)
         logging.info(f"🔐 JA3 log exported → {outfile}")
+        ja3_log.clear() # Clear memory allocation cache safely
     except Exception as e:
         logging.warning(f"⚠️ Failed to export JA3 log: {e}")
