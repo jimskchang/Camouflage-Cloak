@@ -1,9 +1,8 @@
-# settings.py — Camouflage Cloak Configuration
-
 import os
 import logging
 import time
 import random
+import copy
 from scapy.all import get_if_addr, get_if_hwaddr
 
 # =======================
@@ -13,11 +12,10 @@ PROJECT_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OS_RECORD_PATH = os.path.join(PROJECT_PATH, "os_record")
 os.makedirs(OS_RECORD_PATH, exist_ok=True)
 
-# 新增：儲存學習到指紋的 JSON 檔案路徑
+# Path configuration for persistence engine cache profiles
 LEARNED_FINGERPRINTS_FILE = os.path.join(OS_RECORD_PATH, "learned_fingerprints.json")
 
-# 紀錄程式啟動時間，用於類比真實 TCP Uptime
-# 隨機減去一個時間，模擬啟動了 1 到 30 天
+# Backdate clock safely to provide accurate, multi-day uptime signatures
 START_TIME = time.time() - random.randint(86400, 2592000)
 
 # =======================
@@ -44,7 +42,7 @@ L4_PROC = ['tcp', 'udp', 'icmp']
 SERVICES = {
     "SSH": {"port": 22, "proto": "tcp", "banner": "SSH-2.0-OpenSSH_8.2p1 Ubuntu-4ubuntu0.5"},
     "HTTP": {"port": 80, "proto": "tcp", "banner": "HTTP/1.1 200 OK\r\nServer: Apache/2.4.41\r\n\r\n"},
-    "RDP": {"port": 3389, "proto": "tcp", "banner": None}, # Binary simulation
+    "RDP": {"port": 3389, "proto": "tcp", "banner": None}, # Processed via low-level application layers
 }
 
 # =======================
@@ -94,7 +92,6 @@ GATEWAY_MAP = {
 # =======================
 # Port Deception Defaults
 # =======================
-# Ports that should respond with a template even if not strictly "closed"
 DECEPTION_PORTS = [4441, 5551, 6661]
 
 # =======================
@@ -103,11 +100,9 @@ DECEPTION_PORTS = [4441, 5551, 6661]
 FALLBACK_TTL = 64
 FALLBACK_WINDOW = 8192
 
-# Refined fingerprints: TTL, Window, DF bit, TCP Options
 BASE_OS_TEMPLATES = {
     "linux": {
         "ttl": 64, "window": 5840, "df": True,
-        # TSVal: Timestamp Value, TSecr: Timestamp Echo Reply
         "tcp_options": [('MSS', 1460), ('SAckOK', b''), ('NOP', b''), ('Timestamp', (0, 0)), ('WScale', 7)]
     },
     "win10": {
@@ -125,8 +120,8 @@ BASE_OS_TEMPLATES = {
 }
 
 OS_ALIASES = {
-    "windows10": "win10", "ubuntu": "linux",
-    "unknown_learned": "heuristic_match" # 對應學習引擎標記的未知 OS
+    "windows10": "win10", 
+    "ubuntu": "linux"
 }
 
 # =======================
@@ -145,34 +140,42 @@ HEURISTIC_RULES = [
 
 def get_os_fingerprint(os_name: str, packet_features: dict = None) -> dict:
     """
-    獲取 OS 指紋，如果為未知則應用啟發式規則猜測，並加入動態 Timestamp。
+    Retrieves platform fingerprints dynamically. Unknown discovered elements 
+    are passed to the heuristics engine, adding dynamic runtime timestamps securely.
     """
     name = os_name.lower()
-    resolved_name = OS_ALIASES.get(name, name)
     
-    # 應用啟發式規則匹配邏輯
+    # FIXED: Map dynamic prefix string signatures instead of using exact match constraints
+    is_learned_unknown = name.startswith("unknown_learned")
+    resolved_name = "heuristic_match" if is_learned_unknown else OS_ALIASES.get(name, name)
+    
+    # Apply heuristics matching checks cleanly over custom profile strings
     if resolved_name == "heuristic_match" and packet_features:
-        logging.info("🧠 Applying heuristic rules for unknown OS...")
+        logging.info("🧠 Applying fingerprint heuristics rules over unmapped host profile...")
         for rule in HEURISTIC_RULES:
             if rule["match"](packet_features.get('window', 0), 
                              packet_features.get('ttl', 0), 
                              packet_features.get('options', [])):
                 resolved_name = rule["name"]
-                logging.info(f"💡 Heuristic matched: {resolved_name}")
+                logging.info(f"💡 Heuristics matching success: {resolved_name}")
                 break
+        
+        # Fall back to generic Linux signature profile rules if heuristic checks fail to match
+        if resolved_name == "heuristic_match":
+            resolved_name = "linux"
     
     if resolved_name in BASE_OS_TEMPLATES:
-        logging.info(f"🧹 Resolved OS '{os_name}' → '{resolved_name}'")
-        template = BASE_OS_TEMPLATES[resolved_name].copy()
+        logging.info(f"🧹 Resolved fingerprint alias profile target: '{os_name}' → '{resolved_name}'")
         
-        # 動態計算 Timestamp
+        # FIXED: Use deepcopy to prevent clock mutations from overwriting master option patterns
+        template = copy.deepcopy(BASE_OS_TEMPLATES[resolved_name])
+        
+        # Calculate precise TCP timestamps (represented in milliseconds)
         current_ts = int((time.time() - START_TIME) * 1000)
         
-        # 替換 tcp_options 中的 Timestamp 佔位符
         new_options = []
         for opt in template["tcp_options"]:
             if opt[0] == 'Timestamp':
-                # 類比 TSVal=current_ts, TSecr=0
                 new_options.append(('Timestamp', (current_ts, 0)))
             else:
                 new_options.append(opt)
@@ -180,18 +183,14 @@ def get_os_fingerprint(os_name: str, packet_features: dict = None) -> dict:
         template["tcp_options"] = new_options
         return template
     
-    logging.warning(f"⚠ Unknown OS '{name}', using fallback values")
+    logging.warning(f"⚠ Target environment profile lookup failed for '{name}'. Utilizing global default configurations.")
     return {"ttl": FALLBACK_TTL, "window": FALLBACK_WINDOW, "tcp_options": []}
 
 def get_mac_address(nic: str) -> str:
     try:
         return get_if_hwaddr(nic)
     except Exception as e:
-        logging.error(f"❌ Could not get MAC for {nic}: {e}")
+        logging.error(f"❌ Custom Driver Framework Error: Failed to extract MAC address configuration on device interface {nic}: {e}")
         return "00:00:00:00:00:00"
 
-def get_ip_address(nic: str) -> str:
-    try:
-        return get_if_addr(nic)
-    except Exception:
-        return "0.0.0.0"
+def
