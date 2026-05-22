@@ -1,18 +1,16 @@
-# src/__init__.py
-
 """
-Camouflage Cloak Deception Engine - Source Package
+Camouflage Cloak Deception Engine - Source Package Public API Contract
 """
 
-# --- Define Public API ---
+# --- Define Public API Export Targets ---
 __all__ = [
-    # Core Classes
+    # Core Processing Framework Elements
     'Packet',
     'TcpConnect',
     'getTCPChecksum',
     'getIPChecksum',
     
-    # Deception & Fingerprinting
+    # Deception Framework Engines
     'synthesize_response',
     'generateKey',
     'gen_key',
@@ -20,30 +18,29 @@ __all__ = [
     'OsDeceiver',
     'PortDeceiver',
     
-    # JA3 & Tracker
+    # Cryptographic & Layer 7 Analysis Subsystems
     'extract_ja3',
     'match_ja3_rule',
     'l7_tracker',
     
-    # Settings
+    # Global Parameters Matrix
     'settings'
 ]
 
-# --- Core Classes ---
+# --- Relative Packet Structural Framework Imports ---
 from .Packet import Packet
 from .tcp import TcpConnect, getTCPChecksum, getIPChecksum
 from .os_deceiver import OsDeceiver
 from .port_deceiver import PortDeceiver
 
-# --- Deception & Fingerprinting ---
+# --- Deception Fingerprint Custom Mapping Component Links ---
 from .response import synthesize_response
 from .fingerprint_gen import generateKey, gen_key
 from .os_recorder import templateSynthesis
 
-# --- JA3 & L7 Tracking ---
+# --- FIXED: Explicit Relative Package Importing Patterns for Layer 7 Trackers ---
 from .ja3_extractor import extract_ja3, match_ja3_rule
-import l7_tracker
+from . import l7_tracker
 
-# --- Settings ---
-# Importing the module itself allows usage like settings.MAC
-import src.settings as settings
+# --- FIXED: Streamlined Relative Configuration Settings Target Mapping ---
+from . import settings
