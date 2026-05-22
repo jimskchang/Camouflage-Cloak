@@ -30,24 +30,28 @@ class Packet:
 
     def unpack(self) -> None:
         try:
-            # 高效unpack：先檢查長度再解析
-            if len(self.packet) < 14: return
-            self.unpack_l2_header()
-            self.unpack_l3_header()
+            if len(self.packet) < 14: 
+                return
+            
+            # Use strict boolean gatekeeping to stop structural cascading drops
+            if not self.unpack_l2_header(): 
+                return
+            if not self.unpack_l3_header(): 
+                return
             self.unpack_l4_header()
+            
         except Exception as e:
             logging.debug(f"[Packet] Parsing error: {e}")
 
-    def unpack_l2_header(self) -> None:
+    def unpack_l2_header(self) -> bool:
         try:
             eth_dMAC, eth_sMAC, eth_type = struct.unpack('!6s6sH', self.packet[:14])
-            
-            # 使用列表推導式可能更快，但為了可讀性保持現狀
             eth_dMAC_str = ':'.join('%02x' % b for b in eth_dMAC)
             eth_sMAC_str = ':'.join('%02x' % b for b in eth_sMAC)
             
-            if eth_type == 0x8100: # VLAN
-                if len(self.packet) < 18: return
+            if eth_type == 0x8100: # VLAN Tagged Frame
+                if len(self.packet) < 18: 
+                    return False
                 vlan_tag = struct.unpack('!H', self.packet[14:16])[0]
                 real_eth_type = struct.unpack('!H', self.packet[16:18])[0]
                 self.l2_field = {'dMAC': eth_dMAC_str, 'sMAC': eth_sMAC_str, 'protocol': real_eth_type, 'vlan': vlan_tag & 0x0FFF}
@@ -57,36 +61,29 @@ class Packet:
                 self.l2_field = {'dMAC': eth_dMAC_str, 'sMAC': eth_sMAC_str, 'protocol': eth_type, 'vlan': None}
                 self.l3 = {0x0800: 'ip', 0x0806: 'arp'}.get(eth_type, 'others')
                 self.l2_header = self.packet[:14]
+            return True
         except Exception as e:
             logging.error(f"[L2] Error unpacking: {e}")
+            return False
 
-    def unpack_l3_header(self) -> None:
+    def unpack_l3_header(self) -> bool:
         if self.l3 == 'ip':
-            self.unpack_ip_header()
+            return self.unpack_ip_header()
         elif self.l3 == 'arp':
-            self.unpack_arp_header()
+            return self.unpack_arp_header()
+        return False
 
-    def unpack_l4_header(self) -> None:
-        if self.l4 == 'tcp':
-            self.unpack_tcp_header()
-        elif self.l4 == 'udp':
-            self.unpack_udp_header()
-        elif self.l4 == 'icmp':
-            self.unpack_icmp_header()
-
-    def unpack_arp_header(self) -> None:
+    def unpack_arp_header(self) -> bool:
         try:
             start = len(self.l2_header)
+            if len(self.packet) < start + settings.ARP_HEADER_LEN: 
+                return False
+                
             self.l3_header = self.packet[start:start + settings.ARP_HEADER_LEN]
-            if len(self.l3_header) < settings.ARP_HEADER_LEN: return
-            
             fields = struct.unpack('!HHBBH6s4s6s4s', self.l3_header)
             self.l3_field = {
-                'hw_type': fields[0],
-                'proto_type': fields[1],
-                'hw_size': fields[2],
-                'proto_size': fields[3],
-                'opcode': fields[4],
+                'hw_type': fields[0], 'proto_type': fields[1],
+                'hw_size': fields[2], 'proto_size': fields[3], 'opcode': fields[4],
                 'sender_mac': ':'.join('%02x' % b for b in fields[5]),
                 'sender_ip': socket.inet_ntoa(fields[6]),
                 'recv_mac': ':'.join('%02x' % b for b in fields[7]),
@@ -94,23 +91,25 @@ class Packet:
                 'src_IP_str': socket.inet_ntoa(fields[6]),
                 'dest_IP_str': socket.inet_ntoa(fields[8])
             }
+            return True
         except Exception as e:
             logging.error(f"[ARP] Error unpacking: {e}")
+            return False
 
-    def unpack_ip_header(self) -> None:
+    def unpack_ip_header(self) -> bool:
         try:
             start = len(self.l2_header)
-            if len(self.packet) < start + 20: return
+            if len(self.packet) < start + 20: 
+                return False
             
-            # 檢查 IHL (Header Length) 是否合理
             ihl = self.packet[start] & 0x0F
-            if ihl < 5: return 
+            if ihl < 5 or len(self.packet) < start + (ihl * 4): 
+                return False 
             
             self.l3_header = self.packet[start:start + ihl * 4]
             fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header[:20])
             
             self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(fields[6], 'others')
-            
             self.l3_field = {
                 'IHL_VERSION': fields[0],
                 'ttl': self.ttl_override if self.ttl_override is not None else fields[5],
@@ -119,39 +118,50 @@ class Packet:
                 'dest_IP_str': socket.inet_ntoa(fields[9]),
                 'options': self.l3_header[20:]
             }
+            return True
         except Exception as e:
             logging.error(f"[IP] Error unpacking: {e}")
+            return False
 
     def unpack_tcp_header(self) -> None:
         try:
+            if not self.l3_field: 
+                return # Safe exit if IP layer validation dropped out
+                
             start = len(self.l2_header) + (self.l3_field.get('IHL_VERSION', 0) & 0x0F) * 4
-            if len(self.packet) < start + 20: return
+            if len(self.packet) < start + 20: 
+                return
             
             offset = (self.packet[start + 12] >> 4)
+            if len(self.packet) < start + (offset * 4): 
+                return
+                
             self.l4_header = self.packet[start:start + offset * 4]
             fields = struct.unpack('!HHLLBBHHH', self.l4_header[:20])
             
             self.l4_field = {
-                'src_port': fields[0],
-                'dest_port': fields[1],
-                'seq': fields[2],
-                'ack_num': fields[3],
-                'flags': fields[5],
+                'src_port': fields[0], 'dest_port': fields[1],
+                'seq': fields[2], 'ack_num': fields[3], 'flags': fields[5],
                 'window': self.window_override if self.window_override is not None else fields[6],
                 'option_field': {}
             }
-            # 解析 TCP Options
+            
+            # --- Robust TCP Options Processing ---
             option_data = self.l4_header[20:]
             i = 0
             while i < len(option_data):
                 kind = option_data[i]
-                if kind == 0: break
+                if kind == 0: 
+                    break
                 if kind == 1:
                     i += 1
                     continue
-                if i + 1 >= len(option_data): break
+                if i + 1 >= len(option_data): 
+                    break
+                    
                 length = option_data[i + 1]
-                if i + length > len(option_data): break
+                if length < 2 or (i + length) > len(option_data): 
+                    break # Break out of bad lengths to avoid stuck loops
                 
                 value = option_data[i + 2:i + length]
                 if kind == 2 and len(value) >= 2:
@@ -164,12 +174,8 @@ class Packet:
         except Exception as e:
             logging.debug(f"[TCP] Error unpacking: {e}")
 
-    # ... (unpack_udp_header 和 unpack_icmp_header 結構類似，加上長度檢查即可)
-
     @staticmethod
     def getTCPChecksum(packet: bytes) -> int:
-        # 正確的校驗和計算，通常需要偽標頭(Pseudo-header)參與，
-        # 此處僅為 TCP Segment 的校驗和計算
         if len(packet) % 2 != 0:
             packet += b'\0'
         res = sum(array.array("H", packet))
