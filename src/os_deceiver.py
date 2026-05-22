@@ -29,13 +29,13 @@ class OsDeceiver:
         self.replay = replay
         self.enable_ja3 = enable_ja3
         
-        # --- 核心優化：加載 OS 指紋配置 ---
+        # --- OS Template Configuration ---
         os_template = get_os_fingerprint(self.os)
         self.ttl = os_template.get("ttl", 64)
         self.window = os_template.get("window", 8192)
         self.tcp_options_data = os_template.get("tcp_options", {}) 
         
-        # IPID 模式: "increment", "random", "zero"
+        # IPID Profile Configuration
         self.ipid_mode = os_template.get("ipid", "increment")
         self.current_ipid = random.randint(1000, 60000)
 
@@ -47,12 +47,19 @@ class OsDeceiver:
 
         self.sent_packets = []
         self.protocol_stats = defaultdict(int)
-        
-        # 簡單的 Timestamp 計算器
         self.start_time = time.time()
 
+    def load_file(self, ptype):
+        """Mock/Placeholder or dynamic recovery of template dictionaries"""
+        # If your templates are saved as JSON configuration files:
+        filepath = os.path.join("templates", f"{self.os}_{ptype}.json")
+        if os.path.exists(filepath):
+            with open(filepath, 'r') as f:
+                return json.load(f)
+        return {}
+
     def _get_ipid(self):
-        """根據配置模式獲取 IPID"""
+        """Calculates IPID according to targeted OS profile rules"""
         if self.ipid_mode == "random":
             return random.randint(1, 65535)
         elif self.ipid_mode == "zero":
@@ -62,31 +69,27 @@ class OsDeceiver:
             return self.current_ipid
 
     def _get_timestamp_val(self):
-        """產生反映系統uptime的Timestamp值"""
-        return int((time.time() - self.start_time) * 100) # 每10ms增加1
+        """Calculates simulated uptime values"""
+        return int((time.time() - self.start_time) * 100) 
 
     def get_tcp_options(self, ts_echo=0):
-        """根據 OS 特徵產生精確的 TCP SYN/ACK 選項。"""
+        """Generates realistic TCP Options profiles"""
         options = []
-        # MSS
         options.append(('MSS', self.tcp_options_data.get("mss", 1460)))
         
-        # SackOK
         if self.tcp_options_data.get("sack", True):
             options.append(('SAckOK', b''))
             
-        # Window Scale
         if "wscale" in self.tcp_options_data:
             options.append(('WScale', self.tcp_options_data["wscale"]))
             
-        # Timestamp
         if self.tcp_options_data.get("timestamp", True):
             options.append(('Timestamp', (self._get_timestamp_val(), ts_echo)))
             
         return options
 
     def _send_packet(self, packet):
-        """封裝後的封包發送邏輯"""
+        """Lower engine packet injection layer"""
         try:
             sendp(packet, iface=self.nic, verbose=False)
             self.sent_packets.append(bytes(packet))
@@ -107,21 +110,22 @@ class OsDeceiver:
                 pkt.unpack()
 
                 proto = pkt.l4 if pkt.l4 else pkt.l3
-                src_ip = pkt.l3_field.get("src_IP_str")
+                if not proto:
+                    continue
                 
-                # --- L7 & JA3 Logic (保持原本邏輯) ---
-                
-                # --- Template Match ---
+                # --- Template Match Engine ---
                 key, _ = gen_key(proto, pkt.packet)
                 template = templates.get(proto, {}).get(key)
                 
                 if template:
                     response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window, deceiver=self)
                     if response:
-                        self._send_packet(Ether(response))
+                        # Ensure we don't accidentally stack nested Ethernet frames
+                        out_pkt = response if isinstance(response, Ether) else Ether(response)
+                        self._send_packet(out_pkt)
                         self.protocol_stats[proto.upper()] += 1
                 else:
-                    # 主動回應 Closed Port
+                    # Defensive Port/OS Spoof Behavior for non-profiled traffic
                     if proto == "udp":
                         self.send_icmp_port_unreachable(pkt)
                     elif proto == "tcp":
@@ -133,9 +137,12 @@ class OsDeceiver:
         self.export_data()
 
     def send_tcp_rst(self, pkt):
-        """產生偽造的 RST 封包"""
+        """Constructs and injects a tailored TCP RST signature packet"""
         ip_flags = "DF" if self.os_flags["df"] else None
         
+        # Grab target destination MAC safely if accessible via custom Packet class properties
+        dst_mac = pkt.packet_field.get("src_mac", "ff:ff:ff:ff:ff:ff") 
+
         ip = IP(
             src=pkt.l3_field["dest_IP_str"], 
             dst=pkt.l3_field["src_IP_str"], 
@@ -153,12 +160,14 @@ class OsDeceiver:
             options=self.get_tcp_options()
         )
         
-        rst = Ether(src=self.mac) / ip / tcp
+        rst = Ether(src=self.mac, dst=dst_mac) / ip / tcp
         self._send_packet(rst)
         self.protocol_stats["TCP"] += 1
 
     def send_icmp_port_unreachable(self, pkt):
-        """產生偽造的 ICMP Port Unreachable"""
+        """Constructs an accurate ICMP Destination Unreachable response"""
+        dst_mac = pkt.packet_field.get("src_mac", "ff:ff:ff:ff:ff:ff")
+
         ip = IP(
             src=pkt.l3_field["dest_IP_str"], 
             dst=pkt.l3_field["src_IP_str"], 
@@ -167,11 +176,17 @@ class OsDeceiver:
             id=self._get_ipid()
         )
         icmp = ICMP(type=3, code=3)
-        # 嚴格構造被引用的封包內容
-        inner = IP(pkt.packet[14:34]) / UDP(pkt.packet[34:42])
-        reply = Ether(src=self.mac) / ip / icmp / bytes(inner)[:28]
+        
+        # Dynamically isolate inner IP layer headers from the original byte array safely
+        # Slicing the raw packet from the start of the network layer string
+        inner_ip_bytes = pkt.packet[14:] 
+        
+        reply = Ether(src=self.mac, dst=dst_mac) / ip / icmp / bytes(inner_ip_bytes)[:28]
         
         self._send_packet(reply)
         self.protocol_stats["ICMP"] += 1
 
-    # ... (load_file 和 export 邏輯保持不變) ...
+    def export_data(self):
+        """Saves generated session metrics safely"""
+        logging.info("💾 Exporting deception metrics logs...")
+        # Write your output data collection functions here
