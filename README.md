@@ -36,16 +36,20 @@
 
 ##  Project Structure
 Camouflage-Cloak/
-├── os_record/               # Stores OS fingerprint templates
+├── os_record/                  # Target database store for profile snapshots
+│   └── structured_logs/        # Auto-generated analytical time-series CSV dumps
 ├── src/
-│   ├── settings.py          # Configurations: IPs, NICs, TTLs, MAC, etc.
-│   ├── Packet.py            # Packet parsing (Ethernet, IP, TCP, UDP, ICMP, ARP)
-│   ├── tcp.py               # TCP header logic & checksum tools
-│   ├── os_deceiver.py       # OS deception engine
-│   ├── port_deceiver.py     # Port deception engine
-│   ├── init.py              # Exposes top-level module APIs
-├── main.py                  # CLI runner: capture, deceive, spoof
-├── README.md                # This file
+│   ├── __init__.py             # Unified namespace package manager public API contract
+│   ├── settings.py             # Settings matrix: hardware MAC bindings, static maps, rules
+│   ├── Packet.py               # Boundary-safe link-frame validation and decoding engine
+│   ├── tcp.py                  # Transport layer socket state creation & raw Internet checksums
+│   ├── os_deceiver.py          # OS network profile signature spoofing implementation
+│   ├── port_deceiver.py        # Port connection handler & banner simulation subsystem
+│   ├── ja3_extractor.py        # Dynamic TLS ClientHello DPI engine & standard JA3 matching
+│   ├── l7_tracker.py           # Thread-safe telemetry processing & real-time plotting dashboard
+│   └── log_manager.py          # Process-safe JSON-to-CSV database logging engine
+├── main.py                     # High-performance parallelized CLI orchestration engine
+└── README.md                   # Core system documentation manual
 
 ---
 
