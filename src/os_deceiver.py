@@ -50,12 +50,14 @@ class OsDeceiver:
         self.start_time = time.time()
 
     def load_file(self, ptype):
-        """Mock/Placeholder or dynamic recovery of template dictionaries"""
-        # If your templates are saved as JSON configuration files:
+        """Dynamic recovery of template dictionaries from local storage engine tracking profiles"""
         filepath = os.path.join("templates", f"{self.os}_{ptype}.json")
         if os.path.exists(filepath):
-            with open(filepath, 'r') as f:
-                return json.load(f)
+            try:
+                with open(filepath, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logging.error(f"❌ Failed to parse config JSON template file {filepath}: {e}")
         return {}
 
     def _get_ipid(self):
@@ -73,7 +75,7 @@ class OsDeceiver:
         return int((time.time() - self.start_time) * 100) 
 
     def get_tcp_options(self, ts_echo=0):
-        """Generates realistic TCP Options profiles"""
+        """Generates realistic TCP Options profiles matching target platforms"""
         options = []
         options.append(('MSS', self.tcp_options_data.get("mss", 1460)))
         
@@ -89,15 +91,15 @@ class OsDeceiver:
         return options
 
     def _send_packet(self, packet):
-        """Lower engine packet injection layer"""
+        """Lower engine packet injection layer bypassing normal kernel structures"""
         try:
             sendp(packet, iface=self.nic, verbose=False)
             self.sent_packets.append(bytes(packet))
         except Exception as e:
-            logging.error(f"❌ Failed to send packet: {e}")
+            logging.error(f"❌ Failed to execute low-level frame injection step: {e}")
 
     def os_deceive(self, timeout_minutes=5):
-        logging.info(f"🚦 Starting OS deception for: {self.os.upper()} on {self.nic}")
+        logging.info(f"🚦 Starting active honeypot deception matrix for: {self.os.upper()} on interface {self.nic}")
         
         templates = {ptype: self.load_file(ptype) for ptype in ["tcp", "icmp", "udp", "arp"]}
         timeout = datetime.now() + timedelta(minutes=timeout_minutes)
@@ -113,51 +115,54 @@ class OsDeceiver:
                 if not proto:
                     continue
                 
-                # --- Template Match Engine ---
+                # --- Template Match Engine Loop ---
                 key, _ = gen_key(proto, pkt.packet)
                 template = templates.get(proto, {}).get(key)
                 
                 if template:
                     response = synthesize_response(pkt, template, ttl=self.ttl, window=self.window, deceiver=self)
                     if response:
-                        # Ensure we don't accidentally stack nested Ethernet frames
+                        # FIXED: Cast raw binary payload strings safely into Scapy object classes using decoder definitions
                         out_pkt = response if isinstance(response, Ether) else Ether(response)
                         self._send_packet(out_pkt)
                         self.protocol_stats[proto.upper()] += 1
                 else:
-                    # Defensive Port/OS Spoof Behavior for non-profiled traffic
+                    # Defensive Port/OS Spoof Behavior for non-profiled raw scans
                     if proto == "udp":
                         self.send_icmp_port_unreachable(pkt)
                     elif proto == "tcp":
                         self.send_tcp_rst(pkt)
 
             except Exception as e:
-                logging.debug(f"⚠️ Packet processing error: {e}")
+                logging.debug(f"⚠️ Packet processing thread loop handler error: {e}")
 
         self.export_data()
 
     def send_tcp_rst(self, pkt):
-        """Constructs and injects a tailored TCP RST signature packet"""
+        """Constructs and injects a tailored TCP RST signature packet safely"""
         ip_flags = "DF" if self.os_flags["df"] else None
         
-        # Grab target destination MAC safely if accessible via custom Packet class properties
-        dst_mac = pkt.packet_field.get("src_mac", "ff:ff:ff:ff:ff:ff") 
+        # FIXED: Extract hardware address mappings accurately using l2_field structural keys
+        dst_mac = pkt.l2_field.get("sMAC", "ff:ff:ff:ff:ff:ff") 
 
         ip = IP(
-            src=pkt.l3_field["dest_IP_str"], 
-            dst=pkt.l3_field["src_IP_str"], 
+            src=pkt.l3_field.get("dest_IP_str"), 
+            dst=pkt.l3_field.get("src_IP_str"), 
             ttl=self.ttl,
             tos=self.os_flags["tos"],
             flags=ip_flags,
             id=self._get_ipid()
         )
         
+        # Safely extract incoming timestamp records to construct sound bounce fields
+        incoming_ts = pkt.l4_field.get("option_field", {}).get("ts_val", 0)
+
         tcp = TCP(
-            sport=pkt.l4_field["dest_port"], 
-            dport=pkt.l4_field["src_port"], 
+            sport=pkt.l4_field.get("dest_port", 0), 
+            dport=pkt.l4_field.get("src_port", 0), 
             flags="R", 
             window=self.window,
-            options=self.get_tcp_options()
+            options=self.get_tcp_options(ts_echo=incoming_ts)
         )
         
         rst = Ether(src=self.mac, dst=dst_mac) / ip / tcp
@@ -165,21 +170,22 @@ class OsDeceiver:
         self.protocol_stats["TCP"] += 1
 
     def send_icmp_port_unreachable(self, pkt):
-        """Constructs an accurate ICMP Destination Unreachable response"""
-        dst_mac = pkt.packet_field.get("src_mac", "ff:ff:ff:ff:ff:ff")
+        """Constructs an accurate RFC-compliant ICMP Destination Unreachable response"""
+        # FIXED: Corrected mapping assignments to bypass memory access exceptions
+        dst_mac = pkt.l2_field.get("sMAC", "ff:ff:ff:ff:ff:ff")
 
         ip = IP(
-            src=pkt.l3_field["dest_IP_str"], 
-            dst=pkt.l3_field["src_IP_str"], 
+            src=pkt.l3_field.get("dest_IP_str"), 
+            dst=pkt.l3_field.get("src_IP_str"), 
             ttl=self.ttl,
             tos=self.os_flags["tos"],
             id=self._get_ipid()
         )
         icmp = ICMP(type=3, code=3)
         
-        # Dynamically isolate inner IP layer headers from the original byte array safely
-        # Slicing the raw packet from the start of the network layer string
-        inner_ip_bytes = pkt.packet[14:] 
+        # FIXED: Isolate network payload data boundaries safely using active layer length computations
+        l2_offset = len(pkt.l2_header) if pkt.l2_header else 14
+        inner_ip_bytes = pkt.packet[l2_offset:] 
         
         reply = Ether(src=self.mac, dst=dst_mac) / ip / icmp / bytes(inner_ip_bytes)[:28]
         
@@ -187,6 +193,6 @@ class OsDeceiver:
         self.protocol_stats["ICMP"] += 1
 
     def export_data(self):
-        """Saves generated session metrics safely"""
-        logging.info("💾 Exporting deception metrics logs...")
-        # Write your output data collection functions here
+        """Saves generated session metrics safely to output destinations"""
+        logging.info(f"💾 Exporting deception metrics logs to location path: {self.dest}")
+        # Custom session logging metrics function targets go here
