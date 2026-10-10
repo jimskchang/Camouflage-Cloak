@@ -56,13 +56,24 @@ Camouflage-Cloak/
 │   ├── tcp.py                  # TCP behavior utilities and checksum logic
 │   ├── os_deceiver.py          # OS fingerprint spoofing engine
 │   ├── port_deceiver.py        # Port deception logic
+│   ├── learning_engine.py      # Adaptive behavior learning and profile refinement
+│   ├── fingerprint_gen.py      # Synthetic fingerprint generation and template creation
+│   ├── fingerprint_utils.py    # Shared helpers for fingerprint parsing and normalization
+│   ├── os_recorder.py          # OS fingerprint recording and persistence
+│   ├── response.py             # Response synthesis and packet emission helpers
 │   ├── ja3_extractor.py        # TLS fingerprint extraction
 │   ├── l7_tracker.py           # Telemetry and monitoring
-│   └── log_manager.py          # Logging and export layer
+│   ├── log_manager.py          # Logging and export layer
+│   └── settings.py             # Runtime configuration and static mappings
 ├── main.py                     # CLI orchestration engine
 ├── README.md                   # Project documentation
 ├── LICENSE                     # License file
-└── .gitignore                  # Git metadata exclusions
+├── MULTIPROCESSING_ARCHITECTURE.md
+├── MULTIPROCESSING_HARDENING.md
+├── .gitignore                  # Git metadata exclusions
+├── .idea/                      # IDE project metadata
+├── os_record/sample.txt        # Sample generated capture artifact
+└── src/response.py             # Packet response generation helpers
 ```
 
 ---
