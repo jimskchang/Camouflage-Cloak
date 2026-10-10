@@ -1,3 +1,5 @@
+"""Port deception engine for spoofing services on network ports."""
+
 import os
 import json
 import csv
@@ -13,8 +15,23 @@ from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src import l7_tracker
 
 class PortDeceiver:
+    """Port deception engine for responding to port probes and service queries."""
+    
     def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, 
                  interactive=False, enable_dns=False, enable_tls=False):
+        """Initialize port deception engine.
+        
+        Args:
+            interface_ip: IP address of interface to listen on
+            os_name: OS name to emulate
+            ports_config: Port configuration
+            nic: Network interface name
+            mac: MAC address (optional)
+            replay: Whether to replay captured packets
+            interactive: Interactive mode flag
+            enable_dns: Enable DNS spoofing
+            enable_tls: Enable TLS spoofing
+        """
         self.interface_ip = interface_ip
         self.os_name = os_name
         self.ports_config = ports_config
@@ -42,24 +59,31 @@ class PortDeceiver:
         self.ja3_log = {}
         self.sent_packets = []
         
-        # === CRITICAL: DO NOT call launch_plot() here ===
-        # launch_plot() spawns matplotlib window and must run in main process only
-        # logging.info(f"PortDeceiver initialized for {interface_ip}")
+        logging.info(f"✅ PortDeceiver initialized for {interface_ip} on {nic}")
 
     def run(self):
-        logging.info(f"🚦 Starting active port deception engine on {self.nic} (IP: {self.interface_ip})")
+        """Start the port deception engine."""
+        logging.info(
+            f"🚦 Starting active port deception engine on {self.nic} "
+            f"(IP: {self.interface_ip})"
+        )
         try:
             sniff(iface=self.nic, prn=self._handle_packet, store=False)
         finally:
             self._export_logs()
 
     def _handle_packet(self, pkt_raw):
+        """Handle incoming packet and generate deceptive response.
+        
+        Args:
+            pkt_raw: Raw packet bytes from scapy
+        """
         try:
             pkt = Packet(bytes(pkt_raw))
             pkt.interface = self.nic
             pkt.unpack()
             
-            # Prevent loopback echo processing from tracking self-generated responses
+            # Prevent loopback echo processing
             src_ip = pkt.l3_field.get("src_IP_str")
             if src_ip == self.interface_ip:
                 return
@@ -72,7 +96,7 @@ class PortDeceiver:
             ja3_hash = None
             user_agent = None
 
-            # 1. TLS/JA3 Inspection Handler Logic
+            # 1. TLS/JA3 Inspection
             if proto == "tcp" and dst_port == 443:
                 ja3_hash = extract_ja3(pkt.packet)
                 if ja3_hash:
@@ -82,12 +106,22 @@ class PortDeceiver:
                     if matched_rule:
                         action = matched_rule.get("action")
                         if action == "drop":
-                            logging.info(matched_rule.get("log", f"❌ Dropping connection via JA3 blocklist: {ja3_hash}"))
+                            logging.info(
+                                matched_rule.get(
+                                    "log", 
+                                    f"❌ Dropping connection via JA3 blocklist: {ja3_hash}"
+                                )
+                            )
                             return
                         elif action == "template":
-                            logging.info(matched_rule.get("log", f"📦 Matching JA3 to template target: {matched_rule.get('template_name')}"))
+                            logging.info(
+                                matched_rule.get(
+                                    "log", 
+                                    f"📦 Matching JA3 to template: {matched_rule.get('template_name')}"
+                                )
+                            )
 
-            # 2. L7 Banner Tracker Normalizer Rules
+            # 2. L7 Banner Tracking (legacy - uses old l7_tracker module)
             if proto == "tcp" and dst_port in [80, 8080]:
                 payload = pkt.l4_field.get("raw_payload", b"").decode(errors="ignore")
                 if payload.startswith("GET"):
@@ -95,15 +129,20 @@ class PortDeceiver:
                         if line.lower().startswith("user-agent"):
                             user_agent = line.split(":", 1)[-1].strip().lower()
                             break
-                    banner_type = "curl" if "curl" in (user_agent or "") else "chrome" if "chrome" in (user_agent or "") else "default"
+                    banner_type = (
+                        "curl" if "curl" in (user_agent or "") 
+                        else "chrome" if "chrome" in (user_agent or "") 
+                        else "default"
+                    )
+                    # Legacy call - still works but doesn't use SharedState
                     l7_tracker.log_http_banner(src_ip, ja3_hash, banner_type, user_agent)
 
-            # 3. Custom Firewalls / Routing Rule Enforcement Matching Engine
+            # 3. Custom Rules Enforcement
             for rule in CUSTOM_RULES:
                 match = rule.get("proto", "").lower() == proto
                 match &= rule.get("port", dst_port) == dst_port if "port" in rule else True
                 
-                # FIXED: Translate flag bitmasks safely to their corresponding standard string tokens
+                # Translate flag bitmasks safely
                 if proto == "tcp" and "flags" in rule:
                     flag_string_map = {0x01: "F", 0x02: "S", 0x04: "R", 0x08: "P", 0x10: "A"}
                     current_flag_char = flag_string_map.get(raw_flags & 0x1F, "")
@@ -114,7 +153,12 @@ class PortDeceiver:
                 match &= rule.get("src_ip", "") == src_ip if "src_ip" in rule else True
                 
                 if match:
-                    logging.info(rule.get("log", f"Custom interception rule hit on standard stack protocol: {proto.upper()}:{dst_port}"))
+                    logging.info(
+                        rule.get(
+                            "log", 
+                            f"Custom rule hit: {proto.upper()}:{dst_port}"
+                        )
+                    )
                     if rule["action"] == "drop":
                         return
                     elif rule["action"] == "rst" and proto == "tcp":
@@ -126,10 +170,11 @@ class PortDeceiver:
                     elif rule["action"] == "template":
                         break
 
-            # FIXED: Avoid parsing empty baseline bytes. Fall back gracefully to pristine state packet builders.
-            response = synthesize_response(pkt, template_bytes=None, ttl=self.ttl, window=self.window, deceiver=self)
+            # Send response
+            response = synthesize_response(
+                pkt, template_bytes=None, ttl=self.ttl, window=self.window, deceiver=self
+            )
             if response:
-                # Convert raw byte payloads into valid Scapy Link-Layer frame objects
                 out_frame = Ether(response) if isinstance(response, bytes) else response
                 self.conn.send_packet(bytes(out_frame))
                 self.sent_packets.append(bytes(out_frame))
@@ -143,10 +188,14 @@ class PortDeceiver:
                 })
 
         except Exception as e:
-            logging.warning(f"⚠️ PortDeceiver core packet loop exception error: {e}")
+            logging.warning(f"⚠️ PortDeceiver core packet loop error: {e}")
 
     def _send_rst(self, pkt):
-        """Constructs and injects a tailored TCP RST signature packet safely"""
+        """Construct and send TCP RST packet.
+        
+        Args:
+            pkt: Packet object
+        """
         rst = self.conn.build_tcp_rst(pkt, ttl=self.ttl)
         if rst:
             out_frame = Ether(rst) if isinstance(rst, bytes) else rst
@@ -155,18 +204,24 @@ class PortDeceiver:
             self.protocol_stats["RST"] = self.protocol_stats.get("RST", 0) + 1
 
     def _send_icmp_unreachable(self, pkt):
-        """Constructs an accurate RFC-compliant ICMP Destination Unreachable response"""
-        # Extract source hardware components safely from incoming parsed dictionaries
+        """Send RFC-compliant ICMP Destination Unreachable response.
+        
+        Args:
+            pkt: Packet object
+        """
         target_mac = pkt.l2_field.get("sMAC", "ff:ff:ff:ff:ff:ff")
         
-        ip = IP(src=pkt.l3_field.get("dest_IP_str"), dst=pkt.l3_field.get("src_IP_str"), ttl=self.ttl, tos=self.os_flags["tos"])
+        ip = IP(
+            src=pkt.l3_field.get("dest_IP_str"), 
+            dst=pkt.l3_field.get("src_IP_str"), 
+            ttl=self.ttl, 
+            tos=self.os_flags["tos"]
+        )
         icmp = ICMP(type=3, code=3)
         
-        # FIXED: Extract nested network headers dynamically via Scapy's native layout decoder maps
         raw_scapy = Ether(pkt.packet)
         if raw_scapy.haslayer(IP):
             inner_quote = raw_scapy[IP].copy()
-            # Truncate optional transport payloads to stay within default safety guidelines
             del inner_quote.chksum
             if inner_quote.haslayer(TCP):
                 del inner_quote[TCP].chksum
@@ -179,7 +234,7 @@ class PortDeceiver:
             self.protocol_stats["ICMP"] = self.protocol_stats.get("ICMP", 0) + 1
 
     def _export_logs(self):
-        """Saves session database details across unified formats upon engine teardown."""
+        """Export session logs to JSON, CSV, and PCAP formats."""
         base = os.path.join("os_record", self.os_name)
         os.makedirs(base, exist_ok=True)
 
@@ -200,7 +255,10 @@ class PortDeceiver:
                 writer.writerow(["src_ip", "proto", "port", "ja3", "user_agent", "time"])
                 for ip, entries in self.session_log.items():
                     for entry in entries:
-                        writer.writerow([ip, entry.get("proto"), entry.get("port"), entry.get("ja3"), entry.get("ua"), entry.get("time")])
+                        writer.writerow([
+                            ip, entry.get("proto"), entry.get("port"), 
+                            entry.get("ja3"), entry.get("ua"), entry.get("time")
+                        ])
             logging.info(f"📄 Session CSV saved → {csv_path}")
         except Exception as e:
             logging.warning(f"⚠️ Failed to save session CSV: {e}")
