@@ -13,7 +13,8 @@ from src.ja3_extractor import extract_ja3, match_ja3_rule
 from src import l7_tracker
 
 class PortDeceiver:
-    def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, interactive=False, enable_dns=False, enable_tls=False):
+    def __init__(self, interface_ip, os_name, ports_config, nic, mac=None, replay=False, 
+                 interactive=False, enable_dns=False, enable_tls=False):
         self.interface_ip = interface_ip
         self.os_name = os_name
         self.ports_config = ports_config
@@ -40,8 +41,10 @@ class PortDeceiver:
         self.session_log = {}
         self.ja3_log = {}
         self.sent_packets = []
-
-        l7_tracker.launch_plot()
+        
+        # === CRITICAL: DO NOT call launch_plot() here ===
+        # launch_plot() spawns matplotlib window and must run in main process only
+        # logging.info(f"PortDeceiver initialized for {interface_ip}")
 
     def run(self):
         logging.info(f"🚦 Starting active port deception engine on {self.nic} (IP: {self.interface_ip})")

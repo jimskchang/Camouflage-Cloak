@@ -42,7 +42,8 @@ except ImportError as e:
 # =======================
 # 2. 核心工作進程 (Packet Worker)
 # =======================
-def packet_worker(queue, args, host_ip, connection_states, template_dict, pair_dict, shared_fingerprint_proxy):
+def packet_worker(queue, args, host_ip, connection_states, template_dict, pair_dict, 
+                  shared_fingerprint_proxy, ja3_log_proxy, ja3_log_lock):
     """
     完全在獨立工作進程區域運行的執行邏輯，整合所有欺騙引擎 [4]。
     """
@@ -89,7 +90,8 @@ def packet_worker(queue, args, host_ip, connection_states, template_dict, pair_d
                 if proto:
                     # 建立請求/回應對並持久化為指紋模板 [10, 11]
                     templateSynthesis(packet_obj, proto.upper(), template_dict, pair_dict, 
-                                      host_ip, base_path=args.dest, enable_l7=True)
+                                      host_ip, base_path=args.dest, enable_l7=True,
+                                      ja3_log_proxy=ja3_log_proxy, ja3_log_lock=ja3_log_lock)
 
         except Exception as e:
             logging.debug(f"⚠️ 工作進程處理封包時發生錯誤：{e}")
@@ -109,10 +111,16 @@ def run_sniffing_engine(args, host_ip):
     pair_dict = manager.dict()
     shared_fingerprint_proxy = manager.dict()
     
-    # 同步視覺化儀表板數據 [13]
+    # === CRITICAL: Initialize multiprocessing lock and shared state for l7_tracker ===
+    mp_lock = manager.Lock()
+    l7_tracker._set_multiprocessing_lock(mp_lock)
     l7_tracker.l7_data = manager.dict()
     l7_tracker.ja3_map = manager.dict()
     l7_tracker.ua_map = manager.dict()
+    
+    # === Initialize shared JA3 log state ===
+    ja3_log_proxy = manager.dict()
+    ja3_log_lock = manager.Lock()
 
     num_workers = max(1, cpu_count() - 1)
     workers = []
@@ -120,7 +128,8 @@ def run_sniffing_engine(args, host_ip):
     for i in range(num_workers):
         p = Process(
             target=packet_worker,
-            args=(packet_queue, args, host_ip, connection_states, template_dict, pair_dict, shared_fingerprint_proxy),
+            args=(packet_queue, args, host_ip, connection_states, template_dict, pair_dict, 
+                  shared_fingerprint_proxy, ja3_log_proxy, ja3_log_lock),
             name=f"Worker-{i}"
         )
         p.daemon = True
@@ -144,6 +153,7 @@ def run_sniffing_engine(args, host_ip):
             daemon=True
         )
         sniff_thread.start()
+        # === CRITICAL: launch_plot() must run in main thread only, NOT in worker processes ===
         l7_tracker.launch_plot() # 啟動即時統計圖表 [15]
     else:
         sniff(iface=args.nic, filter="ip", prn=producer, store=False, timeout=sniffer_timeout)
@@ -155,6 +165,8 @@ def run_sniffing_engine(args, host_ip):
     
     if args.scan == "ts":
         save_templates(args.dest, template_dict)
+        # Export JA3 log after all workers finish
+        export_ja3_log(args.dest, args.nic, ja3_log_proxy)
 
 def save_templates(dest_path, template_dict):
     """持久化合成的指紋模板 [17]"""
@@ -171,6 +183,23 @@ def save_templates(dest_path, template_dict):
         logging.info(f"📦 合成指紋數據已儲存至：{dest_path}")
     except Exception as e:
         logging.error(f"❌ 儲存指紋模板失敗：{e}")
+
+def export_ja3_log(dest_path, nic, ja3_log_proxy):
+    """Export multiprocess-safe JA3 log from manager proxy"""
+    try:
+        if not ja3_log_proxy:
+            return
+        outfile = os.path.join(dest_path, f"ja3_observed_{nic}.json")
+        # Convert manager dict proxy to native dict
+        native_dict = dict(ja3_log_proxy)
+        # Convert sets to sorted lists for JSON serialization
+        json_ready = {k: sorted(list(v)) if isinstance(v, (set, list)) else v 
+                      for k, v in native_dict.items()}
+        with open(outfile, "w") as f:
+            json.dump(json_ready, f, indent=2)
+        logging.info(f"🔐 JA3 log exported → {outfile}")
+    except Exception as e:
+        logging.warning(f"⚠️ Failed to export JA3 log: {e}")
 
 # =======================
 # 4. 系統輔助功能

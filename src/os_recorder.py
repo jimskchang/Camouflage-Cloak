@@ -8,10 +8,15 @@ from src.fingerprint_gen import generateKey
 from src.ja3_extractor import extract_ja3_from_packet
 from src.l7_tracker import log_http_banner
 
-# JA3 per-IP log memory cache
-ja3_log = {}
-
-def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, base_path=None, enable_l7=False):
+def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, base_path=None, 
+                     enable_l7=False, ja3_log_proxy=None, ja3_log_lock=None):
+    """
+    Template synthesis with multiprocessing-safe JA3 logging.
+    
+    Args:
+        ja3_log_proxy: manager.dict() proxy for cross-process JA3 storage
+        ja3_log_lock: manager.Lock() for synchronized access
+    """
     try:
         src_ip = packet.l3_field.get("src_IP_str")
         dst_ip = packet.l3_field.get("dest_IP_str")
@@ -28,12 +33,17 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
         if proto_type not in template_dict:
             template_dict[proto_type] = {}
 
-        # --- JA3 extraction ---
+        # --- JA3 extraction with multiprocess-safe storage ---
         ja3_hash = None
         if proto_type == "TCP" and dst_port == 443:
             ja3_hash = extract_ja3_from_packet(packet)
-            if ja3_hash:
-                ja3_log.setdefault(src_ip, []).append(ja3_hash)
+            if ja3_hash and ja3_log_proxy is not None and ja3_log_lock is not None:
+                # === CRITICAL: Use lock to protect concurrent access ===
+                with ja3_log_lock:
+                    if src_ip not in ja3_log_proxy:
+                        ja3_log_proxy[src_ip] = []
+                    if ja3_hash not in ja3_log_proxy[src_ip]:
+                        ja3_log_proxy[src_ip].append(ja3_hash)
                 logging.info(f"🔍 JA3 from {src_ip}: {ja3_hash}")
 
         # --- L7 banner logging ---
@@ -99,16 +109,3 @@ def templateSynthesis(packet, proto_type, template_dict, pair_dict, host_ip, bas
     except Exception as e:
         logging.warning(f"⚠️ templateSynthesis error: {e}")
         return template_dict
-
-def export_ja3_log(path, nic):
-    global ja3_log
-    try:
-        if not ja3_log:
-            return
-        outfile = os.path.join(path, f"ja3_observed_{nic}.json")
-        with open(outfile, "w") as f:
-            json.dump(ja3_log, f, indent=2)
-        logging.info(f"🔐 JA3 log exported → {outfile}")
-        ja3_log.clear() # Clear memory allocation cache safely
-    except Exception as e:
-        logging.warning(f"⚠️ Failed to export JA3 log: {e}")

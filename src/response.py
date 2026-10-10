@@ -1,5 +1,6 @@
 import logging
 import random
+import threading
 from ipaddress import ip_address, ip_network
 from scapy.all import Ether, IP, TCP, UDP, Raw
 from src.settings import get_os_fingerprint
@@ -9,11 +10,32 @@ EXCLUDE_SOURCES = [ip_network("192.168.10.0/24")]
 
 # Global cache container hook used internally inside processing nodes
 _process_learner_instance = None
+_learner_lock = threading.Lock()  # Per-process lock for singleton initialization
 
 def get_shared_learner(shared_proxy=None):
+    """
+    Thread-safe lazy initialization of the learner instance per worker process.
+    
+    Each process gets one learner instance; manager proxies handle cross-process sync.
+    This uses a double-checked lock pattern to minimize lock contention.
+    
+    Args:
+        shared_proxy: multiprocessing.Manager().dict() proxy for cross-process state
+    
+    Returns:
+        FingerprintLearner instance
+    """
     global _process_learner_instance
-    if _process_learner_instance is None:
-        _process_learner_instance = FingerprintLearner(shared_map_proxy=shared_proxy)
+    # === First check (no lock) - fast path ===
+    if _process_learner_instance is not None:
+        return _process_learner_instance
+    
+    # === Acquire lock for initialization ===
+    with _learner_lock:
+        # === Second check (with lock) - ensure another thread didn't initialize ===
+        if _process_learner_instance is None:
+            _process_learner_instance = FingerprintLearner(shared_map_proxy=shared_proxy)
+    
     return _process_learner_instance
 
 def synthesize_response(pkt, template_bytes, ttl=None, window=None, deceiver=None, shared_proxy=None):
