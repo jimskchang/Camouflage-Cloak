@@ -2,8 +2,10 @@ import os
 import json
 import logging
 import threading
+import multiprocessing
 from collections import defaultdict
 from datetime import datetime
+from typing import Optional
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -12,32 +14,41 @@ import matplotlib.animation as animation
 L7_TRACKER_LOG = os.path.join(os.path.dirname(__file__), "..", "os_record", "l7_http_log.json")
 
 # === Thread/Process Synchronization Lock ===
-data_lock = threading.Lock()
+# NOTE: If using multiprocessing, this MUST be replaced with multiprocessing.Lock()
+# by the coordinator that initializes the Manager proxies.
+data_lock: Optional[threading.Lock] = threading.Lock()
 
 # === Shared Stats Store ===
-# Note: When spawned via the multiprocessing coordinator, these will be replaced 
-# with multiprocessing.Manager().dict() proxies to bridge the process memory silos.
-l7_data = defaultdict(lambda: defaultdict(int))   # {src_ip: {banner_type: count}}
-ja3_map = defaultdict(set)                        # {src_ip: set(ja3)}
-ua_map = defaultdict(set)                         # {src_ip: set(user-agent)}
+# Will be replaced with multiprocessing.Manager().dict() proxies in multiprocessing mode
+l7_data = defaultdict(lambda: defaultdict(int))   
+ja3_map = defaultdict(set)                        
+ua_map = defaultdict(set)                         
 
-# Retain global animation anchor to prevent garbage collection sweeps
 _ani_anchor = None
+
+
+def _set_multiprocessing_lock(mp_lock):
+    """
+    Call this from the multiprocessing coordinator to swap the lock.
+    Must be called BEFORE any worker processes start.
+    """
+    global data_lock
+    data_lock = mp_lock
 
 
 def log_http_banner(src_ip: str, ja3: str, banner_type: str, user_agent: str = None):
     """
     Log per-IP HTTP/JA3/User-Agent correlations securely using mutex synchronization.
-    Called by sniffing threads or background worker states.
     """
     try:
         with data_lock:
             l7_data[src_ip][banner_type] += 1
             if ja3:
-                # Handle both managed lists and native sets gracefully
+                # Always use set semantics when possible
                 if isinstance(ja3_map[src_ip], set):
                     ja3_map[src_ip].add(ja3)
                 else:
+                    # Manager proxy: convert to set-like behavior by checking before append
                     if ja3 not in ja3_map[src_ip]:
                         ja3_map[src_ip].append(ja3)
             if user_agent:
@@ -46,10 +57,10 @@ def log_http_banner(src_ip: str, ja3: str, banner_type: str, user_agent: str = N
                 else:
                     if user_agent not in ua_map[src_ip]:
                         ua_map[src_ip].append(user_agent)
-                        
+        
         logging.info(f"📥 L7 Traffic Profiled: {src_ip} | Banner: {banner_type} | JA3={ja3}")
         
-        # Non-blocking async persistence flush
+        # Call export() OUTSIDE the lock to avoid nested locking
         export()
     except Exception as e:
         logging.warning(f"⚠️ log_http_banner state update error: {e}")
@@ -58,10 +69,10 @@ def log_http_banner(src_ip: str, ja3: str, banner_type: str, user_agent: str = N
 def export():
     """
     Export full L7 banner hit map with JA3 and User-Agent metadata to JSON safely.
-    Handles cross-process/cross-thread conversion mutations automatically.
     """
     try:
         with data_lock:
+            # Snapshot the data while locked
             export_data = {
                 "updated": datetime.utcnow().isoformat(),
                 "banner_hits": {k: dict(v) for k, v in l7_data.items()},
@@ -69,7 +80,10 @@ def export():
                 "user_agents": {k: list(v) for k, v in ua_map.items()}
             }
         
-        os.makedirs(os.path.dirname(L7_TRACKER_LOG), exist_ok=True)
+        # File I/O happens OUTSIDE the lock
+        log_dir = os.path.dirname(L7_TRACKER_LOG)
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
         with open(L7_TRACKER_LOG, "w") as f:
             json.dump(export_data, f, indent=2)
     except Exception as e:
@@ -82,9 +96,9 @@ def _update_plot(frame, ax):
     """
     try:
         with data_lock:
-            # Create a localized deep-copy reference to avoid concurrent modification crashes
             current_hits = {k: dict(v) for k, v in l7_data.items()}
-
+        
+        # All matplotlib operations happen OUTSIDE the lock
         ax.clear()
         summary = defaultdict(int)
         for ip, banners in current_hits.items():
@@ -101,13 +115,9 @@ def _update_plot(frame, ax):
         values = [summary[k] for k in labels]
         x_positions = list(range(len(labels)))
 
-        # Render clean categorical bar graph plots
         ax.bar(x_positions, values, color="#2c3e50", edgecolor="#34495e")
-        
-        # FIXED: Explicitly set ticks before mapping text labels to satisfy modern Matplotlib APIs
         ax.set_xticks(x_positions)
         ax.set_xticklabels(labels, rotation=25, ha='right', fontsize=9)
-        
         ax.set_title("📊 Live Deception Engine HTTP Banner Hits", fontsize=12, fontweight='bold', pad=12)
         ax.set_ylabel("Total Captured Hits", fontsize=10)
         ax.set_xlabel("Target Server Emulation Profile", fontsize=10)
@@ -128,8 +138,9 @@ def launch_plot():
         logging.info("🎨 Constructing interactive metric dashboard elements...")
         fig, ax = plt.subplots(figsize=(8, 5))
         
-        # Pass the ax context object explicitly into the functional frame engine updates
-        _ani_anchor = animation.FuncAnimation(fig, _update_plot, fargs=(ax,), interval=1000, cache_frame_data=False)
+        _ani_anchor = animation.FuncAnimation(
+            fig, _update_plot, fargs=(ax,), interval=1000, cache_frame_data=False
+        )
         
         plt.tight_layout()
         plt.show()
