@@ -3,46 +3,55 @@ import hashlib
 import struct
 from src.settings import JA3_RULES
 
+
 def extract_ja3(packet_bytes: bytes) -> str:
     """
     Extract a JA3 fingerprint from raw TCP packet bytes safely.
     Handles dynamic TCP header option sizing and accurately follows TLS specifications.
     """
     try:
-        if len(packet_bytes) < 60:
+        if not packet_bytes or len(packet_bytes) < 60:
             return None
 
         # 1. Dynamically parse L3 and L4 structures to capture true L7 payloads safely
         eth_type = struct.unpack("!H", packet_bytes[12:14])[0]
         l3_start = 14
-        if eth_type == 0x8100: # Account for VLAN tags
+        if eth_type == 0x8100:  # Account for VLAN tags
+            if len(packet_bytes) < 18:
+                return None
             l3_start = 18
             eth_type = struct.unpack("!H", packet_bytes[16:18])[0]
-            
+
         if eth_type != 0x0800:
-            return None # Ignore non-IPv4 traffic streams
+            return None  # Ignore non-IPv4 traffic streams
+
+        if l3_start + 20 > len(packet_bytes):
+            return None
 
         ihl = (packet_bytes[l3_start] & 0x0F) * 4
         l4_start = l3_start + ihl
-        
+        if l4_start + 20 > len(packet_bytes):
+            return None
+
         # Parse real TCP header data length parameters dynamically
         tcp_data_offset = (packet_bytes[l4_start + 12] >> 4) * 4
         tls_start = l4_start + tcp_data_offset
-        
         tcp_payload = packet_bytes[tls_start:]
-        
-        # 2. Validate clean TLS Handshake ClientHello record characteristics 
+
+        # 2. Validate clean TLS Handshake ClientHello record characteristics
         if len(tcp_payload) < 48:
             return None
         if tcp_payload[0] != 0x16 or tcp_payload[5] != 0x01:
-            return None  # Frame structure is not a TLS ClientHello sequence
+            return None  # Not a TLS ClientHello sequence
 
         # Extract precise TLS parameters according to standard RFC specs
         handshake_version = struct.unpack("!H", tcp_payload[9:11])[0]
 
-        # FIXED: Shift pointer exactly 48 bytes to target the true Session ID length boundary
-        session_id_len = tcp_payload[48]
-        index = 49 + session_id_len
+        # Correct ClientHello field layout:
+        # record header (5 bytes) + handshake header (4 bytes) + version (2 bytes)
+        # + random (32 bytes) + session_id_length (1 byte)
+        session_id_len = tcp_payload[43]
+        index = 44 + session_id_len
         if index + 2 > len(tcp_payload):
             return None
 
@@ -50,7 +59,7 @@ def extract_ja3(packet_bytes: bytes) -> str:
         cipher_len = struct.unpack("!H", tcp_payload[index:index + 2])[0]
         index += 2
         ciphers = []
-        for i in range(0, cipher_len, 2):
+        for _ in range(0, cipher_len, 2):
             if index + 2 > len(tcp_payload):
                 return None
             cipher = struct.unpack("!H", tcp_payload[index:index + 2])[0]
@@ -84,9 +93,9 @@ def extract_ja3(packet_bytes: bytes) -> str:
             # Deep parse Elliptic Curves / Supported Groups parameters safely
             if ext_type == 10 and len(ext_data) >= 2:
                 curve_len = struct.unpack("!H", ext_data[:2])[0]
-                for i in range(2, 2 + curve_len, 2):
-                    if i + 2 <= len(ext_data):
-                        curve = struct.unpack("!H", ext_data[i:i + 2])[0]
+                for j in range(2, 2 + curve_len, 2):
+                    if j + 2 <= len(ext_data):
+                        curve = struct.unpack("!H", ext_data[j:j + 2])[0]
                         curves.append(str(curve))
             # Extract EC Point Formats parameters
             elif ext_type == 11 and len(ext_data) >= 1:
@@ -94,12 +103,14 @@ def extract_ja3(packet_bytes: bytes) -> str:
 
             index += 4 + ext_len
 
-        # FIXED: Reconstruct parameters according to the official JA3 signature format
-        ja3_str = f"{handshake_version}," \
-                  f"{'-'.join(ciphers)}," \
-                  f"{'-'.join(exts)}," \
-                  f"{'-'.join(curves)}," \
-                  f"{'-'.join(ec_formats)}"
+        # Reconstruct parameters according to the official JA3 signature format
+        ja3_str = (
+            f"{handshake_version},"
+            f"{'-'.join(ciphers)},"
+            f"{'-'.join(exts)},"
+            f"{'-'.join(curves)},"
+            f"{'-'.join(ec_formats)}"
+        )
 
         ja3_hash = hashlib.md5(ja3_str.encode()).hexdigest()
         logging.debug(f"[JA3] Constructed signature string: '{ja3_str}' → MD5: {ja3_hash}")
@@ -108,6 +119,7 @@ def extract_ja3(packet_bytes: bytes) -> str:
     except Exception as e:
         logging.warning(f"[JA3] extract_ja3 extraction sequence error exception failure: {e}")
         return None
+
 
 def extract_ja3_from_packet(pkt) -> str:
     """
@@ -118,6 +130,7 @@ def extract_ja3_from_packet(pkt) -> str:
     except Exception as e:
         logging.warning(f"[JA3] extract_ja3_from_packet engine error: {e}")
         return None
+
 
 def match_ja3_rule(ja3_hash: str) -> dict:
     """
