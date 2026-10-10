@@ -1,146 +1,150 @@
 # 🛡 Camouflage Cloak
 
-Camouflage Cloak is a Python-based deception toolkit designed to manipulate low-level network behavior and mislead active reconnaissance tools such as Nmap. It is intended to confuse OS fingerprinting and port scanning by simulating realistic network responses, helping conceal the true operating system and exposed services of a protected host.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
+[![Platform: Linux](https://img.shields.io/badge/platform-Linux-green)](https://www.linux.org/)
+[![Research](https://img.shields.io/badge/category-Network%20Deception-purple)](https://github.com/jimskchang/Camouflage-Cloak)
 
-This project focuses on:
-- OS deception
-- Port deception
-- Packet-level fingerprint capture and reuse
-- Dual-NIC traffic handling for transparent deception
+A Python-based network deception system that manipulates packet-level behavior to confound OS fingerprinting and port scanning reconnaissance tools. Camouflage Cloak actively generates spoofed network responses, leveraging dual-NIC architectures to transparently intercept and deceive common vulnerability scanning workflows.
+
+Key application: defensive network research, honeypot simulation, and red-team/blue-team exercises.
 
 ---
 
-## Overview
+## Abstract
 
-Camouflage Cloak works by intercepting and responding to network probes with crafted packets that resemble those expected from a specific operating system or service state. Instead of simply dropping or ignoring scan traffic, it actively generates deceptive replies to influence how scanners interpret the target.
+Active reconnaissance tools such as Nmap infer target system properties through probing behaviors that elicit predictable protocol responses. By synthesizing authentic OS-level artifacts—TTL distributions, TCP window sizes, ICMP and ARP signatures—Camouflage Cloak can convincingly misrepresent system identity and service exposure. This toolkit captures live scanning telemetry, derives reusable fingerprint templates, and replays deceptive responses in real time, enabling controlled network deception for research and defensive purposes.
 
-This is especially useful for:
-- defensive network research
-- honeypot and deception testing
-- red-team and blue-team simulation
-- understanding how scanning tools interpret spoofed packet behavior
+---
+
+## Core Capabilities
+
+| Feature | Description |
+|---------|-------------|
+| OS Spoofing | Emulate Windows, Linux, macOS, FreeBSD, and Windows Server profiles via authentic stack behavior |
+| Port Simulation | Present arbitrary port states (open, closed, filtered) with service banner fabrication |
+| Fingerprint Synthesis | Capture live scanning probes, extract behavioral templates, and regenerate them on demand |
+| Dual-NIC Routing | Transparent interception via independent probe and target interfaces |
+| Packet Introspection | Base64 serialization, ARP/IP/TCP/ICMP unpacking, and raw checksum validation |
 
 ---
 
 ## How It Works
 
-### OS Deception
-The system can emulate OS-level behaviors such as:
-- TTL values
-- TCP window sizes
-- TCP options, including timestamps
-- ICMP and ARP responses
+### Operational Model
 
-This allows the protected host to appear as another operating system to tools like Nmap.
+```text
+[Attacker / Scanner]
+        ↓
+  [NIC_PROBE] ← Camouflage Cloak → [NIC_TARGET]
+                      ↓
+              [Target Host]
+```
+
+Camouflage Cloak intercepts probe traffic on `NIC_PROBE`, processes it through OS and port deception engines, and returns spoofed responses to the scanner while remaining transparent to the target host.
+
+### OS Deception
+
+Authentic OS fingerprinting relies on distinctive stack behavior:
+- TTL values
+- TCP window sizes and option sets
+- ICMP and ARP response patterns
+
+The toolkit records these signatures during template synthesis and replays them to produce scanner-observable OS misidentification.
 
 ### Port Deception
-The toolkit can make ports appear:
-- open
-- closed
-- filtered
 
-It can simulate:
-- SYN-ACK responses
-- RST packets
-- UDP responses
-- fake service banners
+Port scanning typically depends on TCP and UDP response analysis:
+- Closed ports → RST or ICMP unreachable
+- Filtered ports → no response / timeout
+- Open ports → SYN-ACK acceptance
 
-### Fingerprint Capture
-Camouflage Cloak can capture packet behavior during scans, convert those observations into reusable templates, and later replay them to reproduce the same deceptive fingerprint on demand.
+Camouflage Cloak synthesizes crafted responses like SYN-ACK, RST, and fake banners to simulate arbitrary port states.
 
 ---
 
-## Features
-
-- OS deception for Windows, Linux, Mac, FreeBSD, and Windows Server profiles
-- Port scan simulation for open, closed, and filtered states
-- Dynamic dual-NIC support using NIC_PROBE and NIC_TARGET
-- Base64 packet serialization and packet parsing for ARP, IP, TCP, and ICMP
-- Deceptive replies routed out through the probe interface
-- CLI-driven workflow with hybrid configuration via settings.py
-- TTL and TCP window presets tailored to target OS profiles
-
----
-
-## Project Structure
+## System Architecture
 
 ```text
 Camouflage-Cloak/
-├── os_record/                  # Storage for target OS profile snapshots
-│   └── structured_logs/        # Auto-generated analytical CSV exports
+├── os_record/                  # OS profile snapshot storage
+│   └── structured_logs/        # Analytical CSV exports
 ├── src/
-│   ├── __init__.py             # Unified namespace package API contract
-│   ├── settings.py             # Hardware bindings, static rules, and configuration
-│   ├── Packet.py               # Packet validation and decoding engine
-│   ├── tcp.py                  # TCP socket state and raw checksum utilities
+│   ├── __init__.py             # Public API contract
+│   ├── settings.py             # Network configuration and static rules
+│   ├── Packet.py               # Frame validation and decoding
+│   ├── tcp.py                  # TCP state machine and checksum utilities
 │   ├── os_deceiver.py          # OS fingerprint spoofing engine
-│   ├── port_deceiver.py        # Port deception and banner simulation
-│   ├── ja3_extractor.py        # TLS ClientHello DPI analysis and JA3 matching
-│   ├── l7_tracker.py           # Telemetry processing and dashboard plotting
-│   └── log_manager.py          # Safe JSON-to-CSV logging and process management
-├── main.py                     # CLI orchestration engine
-├── README.md                   # Project documentation
-└── LICENSE                     # License file (if present)
+│   ├── port_deceiver.py        # Port state and banner simulation
+│   ├── ja3_extractor.py        # TLS ClientHello DPI and JA3 matching
+│   ├── l7_tracker.py           # Telemetry collection and visualization
+│   └── log_manager.py          # Process-safe JSON-to-CSV logging
+├── main.py                     # CLI orchestration and parallelized dispatch
+├── README.md                   # Documentation
+└── LICENSE                     # License file
 ```
 
 ---
 
 ## Requirements
 
-- Linux system (tested on Ubuntu/Kali)
+- Linux (Ubuntu or Kali recommended)
 - Python 3.11+
-- sudo privileges for raw socket access
+- `sudo` access for raw socket access
+- Dual Ethernet interfaces for `NIC_PROBE` and `NIC_TARGET`
 
 ---
 
-## System Setup
+## Installation
 
-### Required Hosts
+### 1. Clone the repository
 
-| Host | Role |
-|------|------|
-| Camouflage Cloak | Deception gateway between scanner and target |
-| Target Host | The actual server being protected |
-| Attacker | Nmap or another reconnaissance tool |
-
-### Network Design
-
-Ensure:
-- NIC_PROBE connects to the scanner / attacker
-- NIC_TARGET connects to the real target
-- Camouflage Cloak is positioned between them and can intercept and manipulate traffic
-
----
-
-## Configuration
-
-Edit `src/settings.py` and set your network interfaces and host address:
-
-```python
-NIC_TARGET = 'ens192'     # Interface connected to the target host
-NIC_PROBE  = 'ens224'     # Interface connected to the scanner/attacker
-HOST = "192.168.23.206"   # Camouflage Cloak IP address
+```bash
+git clone https://github.com/jimskchang/Camouflage-Cloak.git
+cd Camouflage-Cloak
 ```
 
-Make sure the interface names match your system.
+### 2. Configure the interfaces
+
+Edit `src/settings.py`:
+
+```python
+NIC_TARGET = 'ens192'          # Interface connected to the target host
+NIC_PROBE  = 'ens224'          # Interface connected to the scanner / attacker
+HOST       = "192.168.23.206"  # Camouflage Cloak IP address
+```
+
+Verify interface names:
+
+```bash
+ip link show
+```
+
+### 3. Check Python
+
+```bash
+python3 --version
+```
 
 ---
 
-## Usage
+## Quick Start
 
-### 1. Build a Template from a Real Scan
+### 1. Template synthesis
+
+Capture a real host signature during a live scan:
 
 ```bash
 sudo -E python3 main.py --host <target_ip> --nic <NIC_TARGET> --scan ts --dest ./os_record
 ```
 
-Then run Nmap from the attacker machine during the capture window:
+From the attacker machine:
 
 ```bash
 sudo nmap -O <target_ip>
 ```
 
-After capture, move the generated files into a profile directory:
+Then organize the generated output:
 
 ```bash
 cd
@@ -149,40 +153,113 @@ mkdir -p os_record/win10
 mv os_record/*.txt os_record/win10/
 ```
 
-### 2. Run OS Deception
+### 2. Run OS deception
 
 ```bash
 sudo -E python3 main.py --host <target_ip> --nic <NIC_TARGET> --scan od --os win10 --te 6
 ```
 
-From the attacker machine, run Nmap again. It should identify the spoofed OS profile instead of the true system.
+Run Nmap again from the attacker side. It should report the spoofed OS profile rather than the true system.
 
-### 3. Run Port Deception
+### 3. Run port deception
 
 ```bash
 sudo -E python3 main.py --host <target_ip> --nic <NIC_TARGET> --scan pd --status open --te 6
 ```
 
-This will cause Nmap to observe open ports even when they are not actually open.
+Nmap will observe open ports even when they are not actually open.
 
 ---
 
-## Notes
+## Command Reference
 
-- This project requires elevated privileges because it uses raw sockets and packet-level manipulation.
-- It is intended for research, defensive simulation, and authorized network testing.
-- Behavior depends on the environment, interface configuration, and the exact scan tool being used.
+| Mode | Command | Purpose |
+|------|---------|---------|
+| Template Synthesis | `--scan ts` | Capture real Nmap behavior for profile generation |
+| OS Deception | `--scan od --os <profile>` | Spoof target operating system |
+| Port Deception | `--scan pd --status <state>` | Simulate arbitrary port states |
+
+Common arguments:
+- `--host <IP>` — target IP address
+- `--nic <interface>` — target network interface
+- `--te <seconds>` — runtime duration
+- `--dest <path>` — output directory for templates
+
+---
+
+## Use Cases
+
+- Defensive research and protocol analysis
+- Honeypot simulation to misdirect reconnaissance
+- Red-team and blue-team exercises
+- Network forensics and traffic analysis training
+
+---
+
+## Screenshots / Example Output
+
+```text
+[*] Camouflage Cloak Engine Initialized
+[*] NIC_PROBE: ens224 | NIC_TARGET: ens192
+[*] OS Profile: win10 (TTL=128, Window=65535)
+[+] Listening for probes on ens224...
+[+] SYN → SYN-ACK (spoofed Windows response)
+[✓] Deception active. Engine uptime: 6s
+```
+
+Example Nmap result:
+
+```text
+Before: OS detection: Linux 5.x (99%)
+After:  OS detection: Windows 10 (98%)
+```
+
+---
+
+## Ethical Considerations
+
+- Use only on Systems and networks with explicit authorization.
+- Intended for academic, defensive, and controlled security test environments.
+- Unauthorized deception may violate applicable laws and organizational policy.
+
+---
+
+## Known Limitations
+
+- Advanced stateful firewalls may detect inconsistencies in prolonged sessions.
+- Multilayer verification (network + TLS + app-level fingerprinting) may challenge spoofing.
+- Timing jitter and latency can reveal synthetic behavior.
+
+---
+
+## Contributing
+
+Contributions are welcome. Please keep changes focused and include documentation updates when relevant.
+
+---
+
+## References
+
+- NIST SP 800-42: Guidelines on Network Security Testing
+- Nmap OS Detection methodology
+- RFC 1191: Path MTU Discovery
 
 ---
 
 ## Author
 
-Camouflage Cloak by Shangkai Chang
+Shangkai Chang
 
-An open-source packet deception toolkit built for research, defense, and network-level deception experiments.
+Camouflage Cloak is an open-source network deception toolkit created for research, defense, and controlled security experimentation.
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.
 
 ---
 
 ## Disclaimer
 
-This project is designed for learning, defensive research, and authorized security testing. Do not use it against systems or networks without explicit permission.
+This software is provided for educational, defensive, and authorized security research use only. The author assumes no responsibility for misuse or unauthorized deployment.
