@@ -2,45 +2,42 @@
 Camouflage Cloak Deception Engine - Source Package Public API Contract
 """
 
-# --- Define Public API Export Targets ---
+# Public API contract for the package
 __all__ = [
     # Core Processing Framework Elements
-    'Packet',
-    'TcpConnect',
-    'getTCPChecksum',
-    'getIPChecksum',
-    
+    "Packet",
+    "TcpConnect",
+    "getTCPChecksum",
+    "getIPChecksum",
+
     # Deception Framework Engines
-    'synthesize_response',
-    'generateKey',
-    'gen_key',
-    'templateSynthesis',
-    'OsDeceiver',
-    'PortDeceiver',
-    
+    "synthesize_response",
+    "generateKey",
+    "gen_key",
+    "templateSynthesis",
+    "OsDeceiver",
+    "PortDeceiver",
+
     # Cryptographic & Layer 7 Analysis Subsystems
-    'extract_ja3',
-    'match_ja3_rule',
-    'l7_tracker',
-    
+    "extract_ja3",
+    "match_ja3_rule",
+    "l7_tracker",
+
     # Global Parameters Matrix
-    'settings'
+    "settings",
 ]
 
-# --- Relative Packet Structural Framework Imports ---
+# Package-level imports: keep these explicit and ordered
+# NOTE: verify module casing matches the actual filenames on disk.
 from .Packet import Packet
 from .tcp import TcpConnect, getTCPChecksum, getIPChecksum
 from .os_deceiver import OsDeceiver
 from .port_deceiver import PortDeceiver
 
-# --- Deception Fingerprint Custom Mapping Component Links ---
 from .response import synthesize_response
 from .fingerprint_gen import generateKey, gen_key
 from .os_recorder import templateSynthesis
 
-# --- FIXED: Explicit Relative Package Importing Patterns for Layer 7 Trackers ---
 from .ja3_extractor import extract_ja3, match_ja3_rule
 from . import l7_tracker
-
-# --- FIXED: Streamlined Relative Configuration Settings Target Mapping ---
 from . import settings
