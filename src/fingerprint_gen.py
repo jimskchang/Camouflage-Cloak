@@ -4,7 +4,28 @@ import struct
 import array
 
 import src.settings as settings
-from src.fingerprint_gen import generateKey
+from src.fingerprint_utils import gen_key
+
+
+def generateKey(packet_obj, proto_type: str) -> bytes:
+    """
+    Compatibility wrapper used by Packet.get_signature().
+    Accepts either a raw packet bytes object or a Packet instance.
+    """
+    try:
+        if packet_obj is None:
+            return b''
+
+        packet_bytes = getattr(packet_obj, 'packet', packet_obj)
+        if not isinstance(packet_bytes, (bytes, bytearray)):
+            return b''
+
+        proto = str(proto_type).lower()
+        fingerprint, _ = gen_key(proto, bytes(packet_bytes))
+        return fingerprint if isinstance(fingerprint, (bytes, bytearray)) else b''
+    except Exception as e:
+        logging.warning(f"[generateKey] failed for {proto_type}: {e}")
+        return b''
 
 
 class Packet:
@@ -14,18 +35,6 @@ class Packet:
     Unpacks raw binary packet data layer-by-layer (L2→L3→L4) into structured
     field dictionaries. Supports fingerprinting for flow identification and
     deception matching.
-    
-    Attributes:
-        packet (bytes): Raw packet data
-        l3 (str): Layer 3 protocol ('ip', 'arp', 'others')
-        l4 (str): Layer 4 protocol ('tcp', 'udp', 'icmp', 'others', or '')
-        l2_field (dict): Parsed L2 (Ethernet/VLAN) fields
-        l3_field (dict): Parsed L3 (IP/ARP) fields
-        l4_field (dict): Parsed L4 (TCP/UDP/ICMP) fields
-        l2_header, l3_header, l4_header (bytes): Raw header bytes
-        interface (str): Network interface name (optional)
-        ttl_override (int): Override TTL value if set
-        window_override (int): Override TCP window if set
     """
     
     def __init__(
@@ -112,7 +121,6 @@ class Packet:
             eth_dMAC_str = ':'.join(f'{b:02x}' for b in eth_dMAC)
             eth_sMAC_str = ':'.join(f'{b:02x}' for b in eth_sMAC)
             
-            # Check for VLAN tag (802.1Q)
             if eth_type == 0x8100:
                 if len(self.packet) < 18:
                     return False
@@ -174,7 +182,6 @@ class Packet:
             if self.l4 == 'udp':
                 return self.unpack_udp_header()
             
-            # Non-TCP/UDP protocols: ICMP, others are valid but may not have standard L4 parsing
             if self.l4 in ('icmp', 'others', ''):
                 return True
             
@@ -235,7 +242,6 @@ class Packet:
             ihl = version_ihl & 0x0F
             version = version_ihl >> 4
             
-            # Validate version and header length
             if version != 4 or ihl < 5:
                 return False
             
@@ -246,16 +252,14 @@ class Packet:
             self.l3_header = self.packet[start:start + header_len]
             fields = struct.unpack('!BBHHHBBH4s4s', self.l3_header[:20])
             
-            # Determine L4 protocol
             protocol_num = fields[6]
             self.l4 = {1: 'icmp', 6: 'tcp', 17: 'udp'}.get(protocol_num, 'others')
             
-            # Build field dictionary with standardized key names for fingerprinting
             self.l3_field = {
-                'IHL_VERSION': version_ihl,  # Raw version/IHL byte
+                'IHL_VERSION': version_ihl,
                 'VERSION': version,
                 'IHL': ihl,
-                'TOS': fields[1],  # Type of Service / DSCP
+                'TOS': fields[1],
                 'total_length': fields[2],
                 'identification': fields[3],
                 'flags': fields[4] >> 13,
@@ -322,7 +326,6 @@ class Packet:
             if len(self.packet) < start + 20:
                 return
             
-            # Parse data offset from byte 12 of TCP header
             data_offset_byte = self.packet[start + 12]
             offset = (data_offset_byte >> 4) & 0x0F
             
@@ -349,44 +352,33 @@ class Packet:
                 'option_field': {},
             }
             
-            # Parse TCP Options (variable length)
             option_data = self.l4_header[20:header_len]
             i = 0
             while i < len(option_data):
                 kind = option_data[i]
                 
-                # End of Options List
                 if kind == 0:
                     break
                 
-                # No-Operation (NOP)
                 if kind == 1:
                     i += 1
                     continue
                 
-                # All other options have a length field at i+1
                 if i + 1 >= len(option_data):
                     break
                 
                 length = option_data[i + 1]
                 if length < 2 or (i + length) > len(option_data):
-                    break  # Invalid option length; stop parsing
+                    break
                 
                 value = option_data[i + 2:i + length]
                 
-                # Maximum Segment Size (MSS, kind=2)
                 if kind == 2 and len(value) >= 2:
                     self.l4_field['option_field']['mss'] = struct.unpack('!H', value[:2])[0]
-                
-                # Window Scale (WSCALE, kind=3)
                 elif kind == 3 and len(value) >= 1:
                     self.l4_field['option_field']['ws'] = struct.unpack('!B', value[:1])[0]
-                
-                # Selective ACK (SACK, kind=5) - store length only
                 elif kind == 5:
                     self.l4_field['option_field']['sack_length'] = length
-                
-                # Timestamps (kind=8)
                 elif kind == 8 and len(value) >= 8:
                     ts_val, ts_echo_reply = struct.unpack('!II', value[:8])
                     self.l4_field['option_field']['ts_val'] = ts_val
@@ -401,12 +393,6 @@ class Packet:
     def getTCPChecksum(packet: bytes) -> int:
         """
         Calculate TCP/IP checksum using RFC 1071 algorithm.
-        
-        Args:
-            packet (bytes): The data to checksum.
-        
-        Returns:
-            int: 16-bit checksum value (0x0000 - 0xFFFF).
         """
         if len(packet) % 2 != 0:
             packet += b'\0'
@@ -420,11 +406,5 @@ class Packet:
     def getIPChecksum(packet: bytes) -> int:
         """
         Calculate IPv4 header checksum using RFC 1071 algorithm.
-        
-        Args:
-            packet (bytes): IPv4 header (typically 20 bytes).
-        
-        Returns:
-            int: 16-bit checksum value.
         """
         return Packet.getTCPChecksum(packet)
