@@ -36,6 +36,16 @@ def _set_multiprocessing_lock(mp_lock):
     data_lock = mp_lock
 
 
+def _ensure_set(store, key):
+    """
+    Safely ensure a key exists in the store and contains a set.
+    Works with both regular dicts and multiprocessing.Manager().dict() proxies.
+    """
+    if key not in store:
+        store[key] = set()
+    return store[key]
+
+
 def log_http_banner(src_ip: str, ja3: str, banner_type: str, user_agent: str = None):
     """
     Log per-IP HTTP/JA3/User-Agent correlations securely using mutex synchronization.
@@ -43,20 +53,14 @@ def log_http_banner(src_ip: str, ja3: str, banner_type: str, user_agent: str = N
     try:
         with data_lock:
             l7_data[src_ip][banner_type] += 1
+            
             if ja3:
-                # Always use set semantics when possible
-                if isinstance(ja3_map[src_ip], set):
-                    ja3_map[src_ip].add(ja3)
-                else:
-                    # Manager proxy: convert to set-like behavior by checking before append
-                    if ja3 not in ja3_map[src_ip]:
-                        ja3_map[src_ip].append(ja3)
+                target = _ensure_set(ja3_map, src_ip)
+                target.add(ja3)
+            
             if user_agent:
-                if isinstance(ua_map[src_ip], set):
-                    ua_map[src_ip].add(user_agent)
-                else:
-                    if user_agent not in ua_map[src_ip]:
-                        ua_map[src_ip].append(user_agent)
+                target = _ensure_set(ua_map, src_ip)
+                target.add(user_agent)
         
         logging.info(f"📥 L7 Traffic Profiled: {src_ip} | Banner: {banner_type} | JA3={ja3}")
         
@@ -76,8 +80,8 @@ def export():
             export_data = {
                 "updated": datetime.utcnow().isoformat(),
                 "banner_hits": {k: dict(v) for k, v in l7_data.items()},
-                "ja3_map": {k: list(v) for k, v in ja3_map.items()},
-                "user_agents": {k: list(v) for k, v in ua_map.items()}
+                "ja3_map": {k: sorted(v) for k, v in ja3_map.items()},
+                "user_agents": {k: sorted(v) for k, v in ua_map.items()}
             }
         
         # File I/O happens OUTSIDE the lock
@@ -155,6 +159,6 @@ def get_l7_data() -> dict:
     with data_lock:
         return {
             "banner_hits": {k: dict(v) for k, v in l7_data.items()},
-            "ja3_map": {k: list(v) for k, v in ja3_map.items()},
-            "user_agents": {k: list(v) for k, v in ua_map.items()}
+            "ja3_map": {k: sorted(v) for k, v in ja3_map.items()},
+            "user_agents": {k: sorted(v) for k, v in ua_map.items()}
         }
