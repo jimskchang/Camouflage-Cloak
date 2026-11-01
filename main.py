@@ -70,6 +70,28 @@ def validate_nic(nic):
         return False
 
 
+def ensure_writable_directory(path):
+    if not path:
+        return False
+    try:
+        os.makedirs(path, exist_ok=True)
+        test_file = os.path.join(path, ".camouflage_cloak_write_test")
+        with open(test_file, "w", encoding="utf-8") as handle:
+            handle.write("ok")
+        os.remove(test_file)
+        return True
+    except Exception:
+        return False
+
+
+def supports_gui():
+    if os.environ.get("DISPLAY"):
+        return True
+    if os.name == "nt":
+        return True
+    return False
+
+
 def validate_runtime_args(args):
     """先驗證輸入參數，避免在高負載中處理無效 NIC/host/dest。"""
     if args.nic and not validate_nic(args.nic):
@@ -83,14 +105,16 @@ def validate_runtime_args(args):
 
     if args.status:
         try:
-            json.loads(args.status)
-        except json.JSONDecodeError as exc:
+            parsed = json.loads(args.status)
+            if not isinstance(parsed, (dict, list)):
+                raise ValueError("--status must decode to a JSON object or array")
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise ValueError(f"Invalid JSON for --status: {exc}") from exc
 
     if args.dest:
         args.dest = os.path.abspath(args.dest)
-        if not os.path.isdir(args.dest):
-            os.makedirs(args.dest, exist_ok=True)
+        if not ensure_writable_directory(args.dest):
+            raise ValueError(f"Destination path is not writable: {args.dest}")
 
     return args
 
@@ -144,8 +168,13 @@ def packet_worker(queue, args, shared_state, stop_event):
     dest = shared_state.get_config("dest")
     enable_l7 = bool(shared_state.get_config("enable_gui"))
 
-    get_shared_learner(shared_state)
-    deceiver_engine = build_deceiver(args, nic, host_ip, scan_mode)
+    try:
+        get_shared_learner(shared_state)
+        deceiver_engine = build_deceiver(args, nic, host_ip, scan_mode)
+    except Exception as exc:
+        logging.exception("❌ Worker initialization failed for mode=%s: %s", scan_mode, exc)
+        stop_event.set()
+        return
 
     while not stop_event.is_set():
         try:
@@ -244,7 +273,6 @@ def run_sniffing_engine(args, host_ip):
         try:
             packet_queue.put_nowait(payload)
         except Full:
-            # 高流量時優先保留新鮮資料並丟棄舊隊列項目，避免執行緒卡死
             try:
                 packet_queue.get_nowait()
                 packet_queue.put_nowait(payload)
@@ -267,29 +295,47 @@ def run_sniffing_engine(args, host_ip):
 
     try:
         if not args.no_gui:
-            sniff_thread = threading.Thread(
-                target=sniff,
-                kwargs=sniff_kwargs,
-                daemon=True,
-            )
-            sniff_thread.start()
+            if not supports_gui():
+                logging.warning("⚠️ No GUI display detected; disabling dashboard and continuing in CLI mode")
+                args.no_gui = True
 
-            l7_tracker_ui = L7Tracker(shared_state)
-            l7_tracker_ui.launch_plot()
-        else:
-            sniff(**sniff_kwargs)
+            if not args.no_gui:
+                sniff_thread = threading.Thread(
+                    target=sniff,
+                    kwargs=sniff_kwargs,
+                    daemon=True,
+                )
+                sniff_thread.start()
+
+                try:
+                    l7_tracker_ui = L7Tracker(shared_state)
+                    l7_tracker_ui.launch_plot()
+                except Exception as exc:
+                    logging.warning("⚠️ GUI dashboard startup failed, falling back to CLI mode: %s", exc)
+                    args.no_gui = True
+                    stop_event.set()
+                    return finalise_runtime(shared_state, args)
+
+                return finalise_runtime(shared_state, args)
+
+        sniff(**sniff_kwargs)
     except Exception as exc:
         logging.error("❌ Sniffer runtime error: %s", exc)
         stop_event.set()
     finally:
-        stop_event.set()
+        if not stop_event.is_set():
+            stop_event.set()
         for _ in range(num_workers):
             packet_queue.put(None)
-
         packet_queue.join()
         for worker in workers:
             worker.join(timeout=3)
 
+    return finalise_runtime(shared_state, args)
+
+
+def finalise_runtime(shared_state, args):
+    """Centralize shutdown and export logic for all runtime modes."""
     logging.info(
         "📊 Processing complete. Stats: packets=%s errors=%s",
         shared_state.packet_count.value,
@@ -300,7 +346,11 @@ def run_sniffing_engine(args, host_ip):
         save_templates(args.dest, shared_state)
 
     export_ja3_log(args.dest, args.nic, shared_state)
-    export_l7_data(shared_state)
+    try:
+        export_l7_data(shared_state)
+    except Exception as exc:
+        logging.warning("⚠️ Final export cleanup failed: %s", exc)
+    return 0
 
 
 def save_templates(dest_path, shared_state):
@@ -416,21 +466,25 @@ def main():
     args.nic = args.nic or settings.NIC_PROBE
     args.host = args.host or get_host_ip(args.nic)
     args.dest = args.dest or settings.OS_RECORD_PATH
-    os.makedirs(args.dest, exist_ok=True)
+    if not ensure_writable_directory(args.dest):
+        raise ValueError(f"Destination path is not writable: {args.dest}")
 
     if not validate_nic(args.nic):
         raise ValueError(f"Network interface '{args.nic}' is unavailable or invalid")
 
+    if args.scan == "pd" and not args.status:
+        logging.warning("⚠️ pd mode started without --status; using default empty port map")
+
     set_nic_config(args.nic)
-    run_sniffing_engine(args, args.host)
+    return run_sniffing_engine(args, args.host)
 
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(main())
     except KeyboardInterrupt:
         logging.info("\n🛑 操作員終止程式。啟動安全結束序列。")
-        sys.exit(0)
+        raise SystemExit(0)
     except ValueError as exc:
         logging.error("❌ 參數驗證失敗：%s", exc)
-        sys.exit(2)
+        raise SystemExit(2)
