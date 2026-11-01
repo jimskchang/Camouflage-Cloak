@@ -1,14 +1,17 @@
 import argparse
+import ipaddress
 import json
 import logging
 import os
+import signal
 import socket
 import subprocess
 import sys
 import threading
 from multiprocessing import JoinableQueue, Process, cpu_count
+from queue import Empty, Full
 
-from scapy.all import IP, sniff
+from scapy.all import IP, get_if_list, sniff
 
 # =======================
 # 1. 系統路徑與環境初始化
@@ -48,6 +51,77 @@ except ImportError as e:
 # =======================
 # 2. 核心工作進程 (Packet Worker)
 # =======================
+def is_valid_ipv4(value):
+    if not value:
+        return False
+    try:
+        ipaddress.IPv4Address(value)
+        return True
+    except ipaddress.AddressValueError:
+        return False
+
+
+def validate_nic(nic):
+    if not nic:
+        return False
+    try:
+        return nic in get_if_list()
+    except Exception:
+        return False
+
+
+def validate_runtime_args(args):
+    """先驗證輸入參數，避免在高負載中處理無效 NIC/host/dest。"""
+    if args.nic and not validate_nic(args.nic):
+        raise ValueError(f"Invalid NIC: {args.nic}")
+
+    if args.host and not is_valid_ipv4(args.host):
+        raise ValueError(f"Invalid host IP: {args.host}")
+
+    if args.te is not None and args.te <= 0:
+        raise ValueError("--te must be greater than 0 minutes")
+
+    if args.status:
+        try:
+            json.loads(args.status)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"Invalid JSON for --status: {exc}") from exc
+
+    if args.dest:
+        args.dest = os.path.abspath(args.dest)
+        if not os.path.isdir(args.dest):
+            os.makedirs(args.dest, exist_ok=True)
+
+    return args
+
+
+def safe_packet_payload(pkt_data):
+    """Reject malformed or suspicious packet payloads before parsing."""
+    if pkt_data is None:
+        return None
+    if not isinstance(pkt_data, (bytes, bytearray)):
+        return None
+
+    packet = bytes(pkt_data)
+    if len(packet) < 14:
+        return None
+    return packet
+
+
+def install_signal_handlers(stop_event):
+    """統一處理 Ctrl+C / SIGTERM，讓多進程與 sniffer 能安全停止。"""
+
+    def handle_signal(signum, _frame):
+        logging.warning("⚠️ 收到中斷信號 %s，開始安全關閉...", signum)
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            signal.signal(sig, handle_signal)
+        except (ValueError, OSError):
+            pass
+
+
 def build_deceiver(args, nic, host_ip, scan_mode):
     """按掃描模式建立對應的欺騙引擎。"""
     if scan_mode == "od":
@@ -62,7 +136,7 @@ def build_deceiver(args, nic, host_ip, scan_mode):
     return None
 
 
-def packet_worker(queue, args, shared_state):
+def packet_worker(queue, args, shared_state, stop_event):
     """在獨立工作進程中處理封包，並統一管理欺騙引擎與共享狀態。"""
     host_ip = shared_state.get_config("host")
     scan_mode = shared_state.get_config("scan_mode")
@@ -73,29 +147,38 @@ def packet_worker(queue, args, shared_state):
     get_shared_learner(shared_state)
     deceiver_engine = build_deceiver(args, nic, host_ip, scan_mode)
 
-    while True:
-        pkt_data = queue.get()
+    while not stop_event.is_set():
+        try:
+            pkt_data = queue.get(timeout=0.5)
+        except Empty:
+            continue
+
         if pkt_data is None:
             queue.task_done()
             break
+
+        packet = safe_packet_payload(pkt_data)
+        if packet is None:
+            queue.task_done()
+            continue
 
         try:
             shared_state.increment_packet_count()
 
             if scan_mode == "od" and deceiver_engine:
-                pkt_obj = Packet(pkt_data)
+                pkt_obj = Packet(packet)
                 pkt_obj.interface = nic
                 pkt_obj.unpack()
                 proto = pkt_obj.l4 if pkt_obj.l4 else pkt_obj.l3
                 if proto:
-                    key, _ = gen_key(proto, pkt_data)
+                    key, _ = gen_key(proto, packet)
                     deceiver_engine.process_single_packet(pkt_obj, proto, key)
 
             elif scan_mode == "pd" and deceiver_engine:
-                deceiver_engine._handle_packet(pkt_data)
+                deceiver_engine._handle_packet(packet)
 
             elif scan_mode == "ts":
-                packet_obj = Packet(pkt_data)
+                packet_obj = Packet(packet)
                 packet_obj.interface = nic
                 packet_obj.unpack()
                 proto = packet_obj.l4 if packet_obj.l4 else packet_obj.l3
@@ -121,6 +204,9 @@ def packet_worker(queue, args, shared_state):
 # =======================
 def run_sniffing_engine(args, host_ip):
     """啟動工作程序與 sniffer，並在退出前導出結果。"""
+    stop_event = threading.Event()
+    install_signal_handlers(stop_event)
+
     packet_queue = JoinableQueue(maxsize=10000)
     shared_state = SharedStateFactory.create()
 
@@ -140,7 +226,7 @@ def run_sniffing_engine(args, host_ip):
     for i in range(num_workers):
         process = Process(
             target=packet_worker,
-            args=(packet_queue, args, shared_state),
+            args=(packet_queue, args, shared_state, stop_event),
             name=f"Worker-{i}",
         )
         process.daemon = True
@@ -148,47 +234,61 @@ def run_sniffing_engine(args, host_ip):
         workers.append(process)
 
     def producer(pkt):
-        if not pkt.haslayer(IP):
+        if stop_event.is_set() or not pkt or not pkt.haslayer(IP):
             return
+
+        payload = bytes(pkt)
+        if len(payload) < 14:
+            return
+
         try:
-            packet_queue.put_nowait(bytes(pkt))
+            packet_queue.put_nowait(payload)
+        except Full:
+            # 高流量時優先保留新鮮資料並丟棄舊隊列項目，避免執行緒卡死
+            try:
+                packet_queue.get_nowait()
+                packet_queue.put_nowait(payload)
+            except Exception:
+                pass
         except Exception:
             pass
 
     logging.info("🚀 並行欺騙架構已啟動，監聽網卡：%s", args.nic)
 
     sniffer_timeout = args.te * 60 if args.te else 300
-    if not args.no_gui:
-        sniff_thread = threading.Thread(
-            target=sniff,
-            kwargs={
-                "iface": args.nic,
-                "filter": "ip",
-                "prn": producer,
-                "store": False,
-                "timeout": sniffer_timeout,
-            },
-            daemon=True,
-        )
-        sniff_thread.start()
+    sniff_kwargs = {
+        "iface": args.nic,
+        "filter": "ip",
+        "prn": producer,
+        "store": False,
+        "timeout": sniffer_timeout,
+        "stop_filter": lambda pkt: stop_event.is_set(),
+    }
 
-        l7_tracker_ui = L7Tracker(shared_state)
-        l7_tracker_ui.launch_plot()
-    else:
-        sniff(
-            iface=args.nic,
-            filter="ip",
-            prn=producer,
-            store=False,
-            timeout=sniffer_timeout,
-        )
+    try:
+        if not args.no_gui:
+            sniff_thread = threading.Thread(
+                target=sniff,
+                kwargs=sniff_kwargs,
+                daemon=True,
+            )
+            sniff_thread.start()
 
-    for _ in range(num_workers):
-        packet_queue.put(None)
+            l7_tracker_ui = L7Tracker(shared_state)
+            l7_tracker_ui.launch_plot()
+        else:
+            sniff(**sniff_kwargs)
+    except Exception as exc:
+        logging.error("❌ Sniffer runtime error: %s", exc)
+        stop_event.set()
+    finally:
+        stop_event.set()
+        for _ in range(num_workers):
+            packet_queue.put(None)
 
-    packet_queue.join()
-    for worker in workers:
-        worker.join(timeout=3)
+        packet_queue.join()
+        for worker in workers:
+            worker.join(timeout=3)
 
     logging.info(
         "📊 Processing complete. Stats: packets=%s errors=%s",
@@ -308,10 +408,18 @@ def main():
     parser = build_parser()
     args = parser.parse_args()
 
+    try:
+        args = validate_runtime_args(args)
+    except ValueError as exc:
+        parser.error(str(exc))
+
     args.nic = args.nic or settings.NIC_PROBE
     args.host = args.host or get_host_ip(args.nic)
     args.dest = args.dest or settings.OS_RECORD_PATH
     os.makedirs(args.dest, exist_ok=True)
+
+    if not validate_nic(args.nic):
+        raise ValueError(f"Network interface '{args.nic}' is unavailable or invalid")
 
     set_nic_config(args.nic)
     run_sniffing_engine(args, args.host)
@@ -323,3 +431,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logging.info("\n🛑 操作員終止程式。啟動安全結束序列。")
         sys.exit(0)
+    except ValueError as exc:
+        logging.error("❌ 參數驗證失敗：%s", exc)
+        sys.exit(2)
