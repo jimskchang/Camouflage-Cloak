@@ -23,11 +23,12 @@ if SRC_DIR not in sys.path:
 
 
 def configure_logging():
-    """統一日誌格式，方便追蹤各 worker / main process。"""
+    """统一日志格式，便于在生产环境中排查 worker、network 和 shutdown 问题。"""
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] [%(processName)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
     )
 
 
@@ -44,12 +45,12 @@ try:
     from src.response import get_shared_learner
     from src.shared_state import SharedStateFactory
 except ImportError as e:
-    logging.error("❌ 致命初始化錯誤：缺少核心架構組件：%s", e)
-    sys.exit(1)
+    logging.exception("❌ 致命初始化錯誤：缺少核心架構組件：%s", e)
+    raise SystemExit(1)
 
 
 # =======================
-# 2. 核心工作進程 (Packet Worker)
+# 2. 运行时验证与安全约束
 # =======================
 def is_valid_ipv4(value):
     if not value:
@@ -85,15 +86,45 @@ def ensure_writable_directory(path):
 
 
 def supports_gui():
-    if os.environ.get("DISPLAY"):
-        return True
+    return bool(os.environ.get("DISPLAY") or os.name == "nt")
+
+
+def require_root_for_capture():
     if os.name == "nt":
         return True
-    return False
+    try:
+        return os.geteuid() == 0
+    except AttributeError:
+        return True
+
+
+def validate_interface_and_routing(nic, host_ip):
+    """Validate device existence and route reachability before starting sniffing."""
+    if not validate_nic(nic):
+        raise ValueError(f"Network interface '{nic}' is unavailable or invalid")
+
+    if host_ip and not is_valid_ipv4(host_ip):
+        raise ValueError(f"Invalid host IP: {host_ip}")
+
+    if host_ip and host_ip != "127.0.0.1":
+        route_cmd = ["ip", "route", "get", host_ip]
+        try:
+            proc = subprocess.run(route_cmd, capture_output=True, text=True, check=False)
+            if proc.returncode != 0:
+                logging.warning(
+                    "⚠️ No route to host %s via interface %s; capture may still start but traffic may be unreachable",
+                    host_ip,
+                    nic,
+                )
+            else:
+                route_output = proc.stdout.strip()
+                logging.info("📡 Route validation for %s: %s", host_ip, route_output)
+        except FileNotFoundError:
+            logging.warning("⚠️ 'ip' command not available; skipping route validation")
 
 
 def validate_runtime_args(args):
-    """先驗證輸入參數，避免在高負載中處理無效 NIC/host/dest。"""
+    """先验证输入参数，避免在高负载中处理无效 NIC/host/dest。"""
     if args.nic and not validate_nic(args.nic):
         raise ValueError(f"Invalid NIC: {args.nic}")
 
@@ -119,6 +150,21 @@ def validate_runtime_args(args):
     return args
 
 
+def log_runtime_context(args):
+    logging.info(
+        "🧭 Runtime context: scan=%s nic=%s host=%s dest=%s gui=%s timeout_min=%s",
+        args.scan,
+        args.nic,
+        args.host,
+        args.dest,
+        not args.no_gui,
+        args.te,
+    )
+
+
+# =======================
+# 3. Packet safety and shutdown handling
+# =======================
 def safe_packet_payload(pkt_data):
     """Reject malformed or suspicious packet payloads before parsing."""
     if pkt_data is None:
@@ -133,10 +179,10 @@ def safe_packet_payload(pkt_data):
 
 
 def install_signal_handlers(stop_event):
-    """統一處理 Ctrl+C / SIGTERM，讓多進程與 sniffer 能安全停止。"""
+    """统一处理 Ctrl+C / SIGTERM，允许 worker 与 sniffer 安全退出。"""
 
     def handle_signal(signum, _frame):
-        logging.warning("⚠️ 收到中斷信號 %s，開始安全關閉...", signum)
+        logging.warning("⚠️ 收到中断信号 %s，开始安全关机...", signum)
         stop_event.set()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
@@ -146,8 +192,31 @@ def install_signal_handlers(stop_event):
             pass
 
 
+def shutdown_workers(workers, packet_queue, timeout=5.0):
+    """Graceful worker shutdown with bounded wait."""
+    for _ in workers:
+        try:
+            packet_queue.put_nowait(None)
+        except Exception:
+            pass
+
+    packet_queue.join()
+
+    for worker in workers:
+        if worker.is_alive():
+            worker.terminate()
+            worker.join(timeout=timeout)
+
+    alive = [w for w in workers if w.is_alive()]
+    if alive:
+        logging.warning("⚠️ %s worker(s) did not terminate cleanly", len(alive))
+
+
+# =======================
+# 4. Deceiver creation and packet processing
+# =======================
 def build_deceiver(args, nic, host_ip, scan_mode):
-    """按掃描模式建立對應的欺騙引擎。"""
+    """按扫描模式创建对应的欺骗引擎。"""
     if scan_mode == "od":
         return OsDeceiver(target_host=args.host, target_os=args.os, nic=nic)
     if scan_mode == "pd":
@@ -161,7 +230,7 @@ def build_deceiver(args, nic, host_ip, scan_mode):
 
 
 def packet_worker(queue, args, shared_state, stop_event):
-    """在獨立工作進程中處理封包，並統一管理欺騙引擎與共享狀態。"""
+    """在独立工作进程中处理包，并统一管理共享状态与欺骗引擎。"""
     host_ip = shared_state.get_config("host")
     scan_mode = shared_state.get_config("scan_mode")
     nic = shared_state.get_config("nic")
@@ -222,23 +291,30 @@ def packet_worker(queue, args, shared_state, stop_event):
                     )
 
         except Exception as exc:
-            logging.debug("⚠️ 工作進程處理封包時發生錯誤：%s", exc)
+            logging.debug("⚠️ 工作进程处理封包时发生错误：%s", exc)
             shared_state.increment_error_count()
         finally:
             queue.task_done()
 
 
 # =======================
-# 3. 攔截引擎與並行調度
+# 5. Sniffer and runtime lifecycle
 # =======================
 def run_sniffing_engine(args, host_ip):
-    """啟動工作程序與 sniffer，並在退出前導出結果。"""
+    """启动 worker 与 sniffer，并在退出前导出结果。"""
     stop_event = threading.Event()
     install_signal_handlers(stop_event)
 
+    if not require_root_for_capture():
+        raise PermissionError(
+            "Root privileges are required to enable promiscuous mode and capture packets on a network interface."
+        )
+
+    validate_interface_and_routing(args.nic, host_ip)
+    log_runtime_context(args)
+
     packet_queue = JoinableQueue(maxsize=10000)
     shared_state = SharedStateFactory.create()
-
     shared_state.update_config(
         scan_mode=args.scan,
         nic=args.nic,
@@ -281,7 +357,7 @@ def run_sniffing_engine(args, host_ip):
         except Exception:
             pass
 
-    logging.info("🚀 並行欺騙架構已啟動，監聽網卡：%s", args.nic)
+    logging.info("🚀 并行欺骗架构已启动，监听网卡：%s", args.nic)
 
     sniffer_timeout = args.te * 60 if args.te else 300
     sniff_kwargs = {
@@ -296,7 +372,7 @@ def run_sniffing_engine(args, host_ip):
     try:
         if not args.no_gui:
             if not supports_gui():
-                logging.warning("⚠️ No GUI display detected; disabling dashboard and continuing in CLI mode")
+                logging.warning("⚠️ 未检测到 GUI 显示环境，自动回退到 CLI 模式")
                 args.no_gui = True
 
             if not args.no_gui:
@@ -320,16 +396,12 @@ def run_sniffing_engine(args, host_ip):
 
         sniff(**sniff_kwargs)
     except Exception as exc:
-        logging.error("❌ Sniffer runtime error: %s", exc)
+        logging.exception("❌ Sniffer runtime error: %s", exc)
         stop_event.set()
     finally:
         if not stop_event.is_set():
             stop_event.set()
-        for _ in range(num_workers):
-            packet_queue.put(None)
-        packet_queue.join()
-        for worker in workers:
-            worker.join(timeout=3)
+        shutdown_workers(workers, packet_queue)
 
     return finalise_runtime(shared_state, args)
 
@@ -342,19 +414,30 @@ def finalise_runtime(shared_state, args):
         shared_state.error_count.value,
     )
 
-    if args.scan == "ts":
-        save_templates(args.dest, shared_state)
+    try:
+        if args.scan == "ts":
+            save_templates(args.dest, shared_state)
+    except Exception as exc:
+        logging.exception("❌ Failed to export templates: %s", exc)
 
-    export_ja3_log(args.dest, args.nic, shared_state)
+    try:
+        export_ja3_log(args.dest, args.nic, shared_state)
+    except Exception as exc:
+        logging.exception("❌ Failed to export JA3 log: %s", exc)
+
     try:
         export_l7_data(shared_state)
     except Exception as exc:
-        logging.warning("⚠️ Final export cleanup failed: %s", exc)
+        logging.exception("❌ Failed to export L7 data: %s", exc)
+
     return 0
 
 
+# =======================
+# 6. Export helpers
+# =======================
 def save_templates(dest_path, shared_state):
-    """持久化合成的指紋模板。"""
+    """持久化合成的指纹模板。"""
     os.makedirs(dest_path, exist_ok=True)
     try:
         with shared_state.template_lock:
@@ -372,13 +455,13 @@ def save_templates(dest_path, shared_state):
                 out_file = os.path.join(dest_path, f"{str(proto).lower()}_record.txt")
                 with open(out_file, "w", encoding="utf-8") as f:
                     json.dump(outdata, f, indent=2)
-        logging.info("📦 合成指紋數據已儲存至：%s", dest_path)
+        logging.info("📦 合成指纹数据已存储至：%s", dest_path)
     except Exception as e:
-        logging.error("❌ 儲存指紋模板失敗：%s", e)
+        logging.error("❌ 保存指纹模板失败：%s", e)
 
 
 def export_ja3_log(dest_path, nic, shared_state):
-    """匯出多進程安全 JA3 記錄。"""
+    """Export multiprocess-safe JA3 log from shared_state."""
     try:
         with shared_state.ja3_lock:
             if not shared_state.ja3_log:
@@ -400,7 +483,7 @@ def export_ja3_log(dest_path, nic, shared_state):
 
 
 def export_l7_data(shared_state):
-    """在關閉前匯出 L7 tracker 資料。"""
+    """在关闭前导出 L7 tracker 数据。"""
     try:
         tracker = L7Tracker(shared_state)
         tracker.export()
@@ -410,25 +493,25 @@ def export_l7_data(shared_state):
 
 
 # =======================
-# 4. 系統輔助功能
+# 7. System helpers
 # =======================
 def set_nic_config(nic):
-    """啟用網卡混雜模式，若未支援或權限不足則只記錄警告。"""
+    """启用网卡混杂模式；若权限不足则仅记录警告。"""
     if not nic:
-        logging.warning("⚠️ 未指定 NIC，跳過混雜模式設定")
+        logging.warning("⚠️ 未指定 NIC，跳过混杂模式设置")
         return
 
     try:
         subprocess.run(["ip", "link", "set", nic, "promisc", "on"], check=True, capture_output=True, text=True)
-        logging.info("🔁 網卡 %s 已進入混雜模式 (Promiscuous Mode)。", nic)
+        logging.info("🔁 网卡 %s 已进入混杂模式 (Promiscuous Mode)。", nic)
     except FileNotFoundError:
-        logging.warning("⚠️ 'ip' 指令不可用，無法自動啟用混雜模式")
+        logging.warning("⚠️ 'ip' 命令不可用，无法自动启用混杂模式")
     except subprocess.CalledProcessError as e:
-        logging.warning("⚠️ 無法自動設置混雜模式：%s", e)
+        logging.warning("⚠️ 无法自动设置混杂模式：%s", e)
 
 
 def get_host_ip(nic):
-    """嘗試從指定網卡獲取有效路由的本機 IP。"""
+    """尝试从指定网卡获取一个可用的本机 IP。"""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
             s.settimeout(2)
@@ -439,18 +522,18 @@ def get_host_ip(nic):
 
 
 # =======================
-# 5. 主程式入口
+# 8. CLI entrypoint
 # =======================
 def build_parser():
-    parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak: 高效能狀態欺騙引擎")
-    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="模式：ts (學習), od (OS 欺騙), pd (埠號欺騙)")
-    parser.add_argument("--host", help="目標主機 IP (預設為本機 IP)")
-    parser.add_argument("--nic", help="監聽網卡 (預設使用 settings.py 配置)")
-    parser.add_argument("--dest", help="儲存/讀取指紋的路徑")
-    parser.add_argument("--os", help="要模擬的作業系統 (win10, linux 等)")
-    parser.add_argument("--status", help="埠號配置 (JSON 字串)")
-    parser.add_argument("--te", type=int, default=5, help="運行時長 (分鐘)")
-    parser.add_argument("--no-gui", action="store_true", help="關閉視覺化儀表板")
+    parser = argparse.ArgumentParser(description="🛡️ Camouflage Cloak: 高性能状态欺骗引擎")
+    parser.add_argument("--scan", choices=["ts", "od", "pd"], required=True, help="模式：ts (学习), od (OS 欺骗), pd (端口欺骗)")
+    parser.add_argument("--host", help="目标主机 IP (默认使用本机 IP)")
+    parser.add_argument("--nic", help="监听网卡 (默认使用 settings.py 配置)")
+    parser.add_argument("--dest", help="存储/读取指纹的路径")
+    parser.add_argument("--os", help="要模拟的操作系统 (win10, linux 等)")
+    parser.add_argument("--status", help="端口配置 (JSON 字符串)")
+    parser.add_argument("--te", type=int, default=5, help="运行时长 (分钟)")
+    parser.add_argument("--no-gui", action="store_true", help="关闭可视化仪表板")
     return parser
 
 
@@ -466,11 +549,19 @@ def main():
     args.nic = args.nic or settings.NIC_PROBE
     args.host = args.host or get_host_ip(args.nic)
     args.dest = args.dest or settings.OS_RECORD_PATH
+
     if not ensure_writable_directory(args.dest):
         raise ValueError(f"Destination path is not writable: {args.dest}")
 
     if not validate_nic(args.nic):
         raise ValueError(f"Network interface '{args.nic}' is unavailable or invalid")
+
+    if not require_root_for_capture():
+        raise PermissionError(
+            "Root privileges are required to enable promiscuous mode and capture packets on a network interface."
+        )
+
+    validate_interface_and_routing(args.nic, args.host)
 
     if args.scan == "pd" and not args.status:
         logging.warning("⚠️ pd mode started without --status; using default empty port map")
@@ -483,8 +574,14 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except KeyboardInterrupt:
-        logging.info("\n🛑 操作員終止程式。啟動安全結束序列。")
+        logging.info("\n🛑 操作员终止程序。启动安全结束序列。")
         raise SystemExit(0)
-    except ValueError as exc:
-        logging.error("❌ 參數驗證失敗：%s", exc)
+    except PermissionError as exc:
+        logging.error("❌ 权限不足：%s", exc)
         raise SystemExit(2)
+    except ValueError as exc:
+        logging.error("❌ 参数验证失败：%s", exc)
+        raise SystemExit(2)
+    except Exception as exc:
+        logging.exception("❌ 未捕获的运行时错误：%s", exc)
+        raise SystemExit(1)
