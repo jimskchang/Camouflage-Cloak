@@ -1,28 +1,27 @@
-import os
 import json
 import logging
+import os
 import threading
-import multiprocessing
 from collections import defaultdict
 from datetime import datetime
 from typing import Optional
 
-import matplotlib.pyplot as plt
 import matplotlib.animation as animation
+import matplotlib.pyplot as plt
 
 # === Export Path ===
 L7_TRACKER_LOG = os.path.join(os.path.dirname(__file__), "..", "os_record", "l7_http_log.json")
 
 # === Thread/Process Synchronization Lock ===
-# NOTE: If using multiprocessing, this MUST be replaced with multiprocessing.Lock()
-# by the coordinator that initializes the Manager proxies.
-data_lock: Optional[threading.Lock] = threading.Lock()
+# Use a re-entrant lock so nested snapshots and exports do not deadlock.
+data_lock: Optional[threading.RLock] = threading.RLock()
 
 # === Shared Stats Store ===
-# Will be replaced with multiprocessing.Manager().dict() proxies in multiprocessing mode
-l7_data = defaultdict(lambda: defaultdict(int))   
-ja3_map = defaultdict(set)                        
-ua_map = defaultdict(set)                         
+# These are process-local by default; a parent coordinator can replace them with Manager proxy objects
+# before workers start if multiprocessing sharing is required.
+l7_data = defaultdict(lambda: defaultdict(int))
+ja3_map = defaultdict(set)
+ua_map = defaultdict(set)
 
 _ani_anchor = None
 
@@ -46,6 +45,30 @@ def _ensure_set(store, key):
     return store[key]
 
 
+def _snapshot():
+    """Return a consistent snapshot of the current L7 state."""
+    with data_lock:
+        return {
+            "updated": datetime.utcnow().isoformat(),
+            "banner_hits": {k: dict(v) for k, v in l7_data.items()},
+            "ja3_map": {k: sorted(v) for k, v in ja3_map.items()},
+            "user_agents": {k: sorted(v) for k, v in ua_map.items()},
+        }
+
+
+def export_snapshot(snapshot=None):
+    """Write a serialized snapshot to disk without holding the lock during I/O."""
+    if snapshot is None:
+        snapshot = _snapshot()
+
+    log_dir = os.path.dirname(L7_TRACKER_LOG)
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
+
+    with open(L7_TRACKER_LOG, "w", encoding="utf-8") as fh:
+        json.dump(snapshot, fh, indent=2)
+
+
 def log_http_banner(src_ip: str, ja3: str, banner_type: str, user_agent: str = None):
     """
     Log per-IP HTTP/JA3/User-Agent correlations securely using mutex synchronization.
@@ -53,21 +76,19 @@ def log_http_banner(src_ip: str, ja3: str, banner_type: str, user_agent: str = N
     try:
         with data_lock:
             l7_data[src_ip][banner_type] += 1
-            
+
             if ja3:
-                target = _ensure_set(ja3_map, src_ip)
-                target.add(ja3)
-            
+                _ensure_set(ja3_map, src_ip).add(ja3)
+
             if user_agent:
-                target = _ensure_set(ua_map, src_ip)
-                target.add(user_agent)
-        
-        logging.info(f"📥 L7 Traffic Profiled: {src_ip} | Banner: {banner_type} | JA3={ja3}")
-        
-        # Call export() OUTSIDE the lock to avoid nested locking
-        export()
-    except Exception as e:
-        logging.warning(f"⚠️ log_http_banner state update error: {e}")
+                _ensure_set(ua_map, src_ip).add(user_agent)
+
+            snapshot = _snapshot()
+
+        export_snapshot(snapshot)
+        logging.info("📥 L7 Traffic Profiled: %s | Banner: %s | JA3=%s", src_ip, banner_type, ja3)
+    except Exception as exc:
+        logging.warning("⚠️ log_http_banner state update error: %s", exc)
 
 
 def export():
@@ -75,23 +96,9 @@ def export():
     Export full L7 banner hit map with JA3 and User-Agent metadata to JSON safely.
     """
     try:
-        with data_lock:
-            # Snapshot the data while locked
-            export_data = {
-                "updated": datetime.utcnow().isoformat(),
-                "banner_hits": {k: dict(v) for k, v in l7_data.items()},
-                "ja3_map": {k: sorted(v) for k, v in ja3_map.items()},
-                "user_agents": {k: sorted(v) for k, v in ua_map.items()}
-            }
-        
-        # File I/O happens OUTSIDE the lock
-        log_dir = os.path.dirname(L7_TRACKER_LOG)
-        if log_dir:
-            os.makedirs(log_dir, exist_ok=True)
-        with open(L7_TRACKER_LOG, "w") as f:
-            json.dump(export_data, f, indent=2)
-    except Exception as e:
-        logging.warning(f"⚠️ L7 background JSON export failed: {e}")
+        export_snapshot(_snapshot())
+    except Exception as exc:
+        logging.warning("⚠️ L7 background JSON export failed: %s", exc)
 
 
 def _update_plot(frame, ax):
@@ -99,13 +106,11 @@ def _update_plot(frame, ax):
     Internal: Safely extracts a point-in-time snapshot to update the UI components.
     """
     try:
-        with data_lock:
-            current_hits = {k: dict(v) for k, v in l7_data.items()}
-        
-        # All matplotlib operations happen OUTSIDE the lock
+        current_hits = _snapshot()["banner_hits"]
+
         ax.clear()
         summary = defaultdict(int)
-        for ip, banners in current_hits.items():
+        for _, banners in current_hits.items():
             for banner, count in banners.items():
                 summary[banner] += count
 
@@ -121,15 +126,15 @@ def _update_plot(frame, ax):
 
         ax.bar(x_positions, values, color="#2c3e50", edgecolor="#34495e")
         ax.set_xticks(x_positions)
-        ax.set_xticklabels(labels, rotation=25, ha='right', fontsize=9)
-        ax.set_title("📊 Live Deception Engine HTTP Banner Hits", fontsize=12, fontweight='bold', pad=12)
+        ax.set_xticklabels(labels, rotation=25, ha="right", fontsize=9)
+        ax.set_title("📊 Live Deception Engine HTTP Banner Hits", fontsize=12, fontweight="bold", pad=12)
         ax.set_ylabel("Total Captured Hits", fontsize=10)
         ax.set_xlabel("Target Server Emulation Profile", fontsize=10)
         ax.set_ylim(0, max(values) + max(1, int(max(values) * 0.15)))
-        ax.grid(axis='y', linestyle='--', alpha=0.5)
-        
-    except Exception as e:
-        logging.error(f"⚠️ Error occurred inside frame rendering loop: {e}")
+        ax.grid(axis="y", linestyle="--", alpha=0.5)
+
+    except Exception as exc:
+        logging.error("⚠️ Error occurred inside frame rendering loop: %s", exc)
 
 
 def launch_plot():
@@ -141,15 +146,15 @@ def launch_plot():
     try:
         logging.info("🎨 Constructing interactive metric dashboard elements...")
         fig, ax = plt.subplots(figsize=(8, 5))
-        
+
         _ani_anchor = animation.FuncAnimation(
             fig, _update_plot, fargs=(ax,), interval=1000, cache_frame_data=False
         )
-        
+
         plt.tight_layout()
         plt.show()
-    except Exception as e:
-        logging.error(f"❌ Failed to attach interactive UI environment loop: {e}")
+    except Exception as exc:
+        logging.error("❌ Failed to attach interactive UI environment loop: %s", exc)
 
 
 def get_l7_data() -> dict:
@@ -160,5 +165,35 @@ def get_l7_data() -> dict:
         return {
             "banner_hits": {k: dict(v) for k, v in l7_data.items()},
             "ja3_map": {k: sorted(v) for k, v in ja3_map.items()},
-            "user_agents": {k: sorted(v) for k, v in ua_map.items()}
+            "user_agents": {k: sorted(v) for k, v in ua_map.items()},
         }
+
+
+class L7Tracker:
+    """Thin compatibility wrapper used by the main runtime."""
+
+    def __init__(self, shared_state=None):
+        self.shared_state = shared_state
+
+    def log_http_banner(self, src_ip: str, ja3: str, banner_type: str, user_agent: str = None):
+        return log_http_banner(src_ip, ja3, banner_type, user_agent)
+
+    def export(self):
+        return export()
+
+    def launch_plot(self):
+        return launch_plot()
+
+    def get_l7_data(self):
+        return get_l7_data()
+
+
+__all__ = [
+    "L7Tracker",
+    "log_http_banner",
+    "export",
+    "launch_plot",
+    "get_l7_data",
+    "_set_multiprocessing_lock",
+]
+

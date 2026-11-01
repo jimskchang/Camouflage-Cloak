@@ -38,7 +38,7 @@ try:
     import src.settings as settings
     from src.Packet import Packet
     from src.fingerprint_utils import gen_key
-    from src.l7_tracker_refactored import L7Tracker
+    from src.l7_tracker import L7Tracker
     from src.os_deceiver import OsDeceiver
     from src.os_recorder import templateSynthesis
     from src.port_deceiver import PortDeceiver
@@ -585,3 +585,4 @@ if __name__ == "__main__":
     except Exception as exc:
         logging.exception("❌ 未捕获的运行时错误：%s", exc)
         raise SystemExit(1)
+
